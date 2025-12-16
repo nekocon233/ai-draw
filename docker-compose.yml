@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # AI-Draw 后端服务
+  # ============================================
+  ai-draw-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-draw-backend
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    volumes:
+      # 开发模式：挂载源代码实现热重载
+      # 生产模式：注释掉以下挂载，使用容器内代码
+      - ./server:/app/server
+      - ./comfyui:/app/comfyui
+      - ./utils:/app/utils
+      - ./configs:/app/configs
+      # 环境配置文件
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
+    env_file:
+      - .env
+    networks:
+      - ai-draw-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/service/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - postgres
+    command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ============================================
+  # PostgreSQL 数据库
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-draw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-ai_draw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ai_draw_password}
+      POSTGRES_DB: ${DB_NAME:-ai_draw}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai-draw-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ai_draw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+  # ============================================
+  # Nginx 反向代理
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: ai-draw-nginx
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_HTTP_PORT:-80}:80"
+      - "${FRONTEND_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    networks:
+      - ai-draw-network
+    depends_on:
+      - ai-draw-backend
+
+# ============================================
+# 网络配置
+# ============================================
+networks:
+  ai-draw-network:
+    driver: bridge
+
+# ============================================
+# 数据卷
+# ============================================
+volumes:
+  postgres_data:
+    driver: local

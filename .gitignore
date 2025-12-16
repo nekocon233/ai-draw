@@ -1,0 +1,78 @@
+# Python常规忽略文件
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+.eggs/
+*.log
+*.sqlite3
+*.db
+*.pot
+*.mo
+*.cache
+*.coverage
+.coverage.*
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# 单元测试
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Environment Variables
+.env
+
+# Logs
+comfyui_log.txt
+
+# React / Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# User settings
+settings/ai_draw_ui_state.json
+# 其他
+*.bak
+*.swp
+*.tmp
+
+# 覆盖本地配置
+local_settings.py
+.env
+.env.*
+
+*.zip
+
+# 设置文件夹
+settings/

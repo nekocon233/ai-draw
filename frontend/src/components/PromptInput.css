@@ -1,0 +1,100 @@
+/* PromptInput.css - 提示词输入样式 */
+
+.prompt-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s ease;
+}
+
+.prompt-container:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.prompt-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.prompt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prompt-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.prompt-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.prompt-textarea {
+  resize: none;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.prompt-textarea:focus {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 中文描述输入框样式 */
+.description-input-wrapper {
+  position: relative;
+}
+
+.description-input {
+  width: 100%;
+}
+
+/* AI 生成按钮特效 */
+.ai-generate-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-generate-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+}
+
+.ai-generate-btn:active::before {
+  width: 300px;
+  height: 300px;
+}

@@ -1,0 +1,75 @@
+# AI-Draw 应用配置文件
+
+app:
+  name: "ai-draw"
+  debug: true
+  version: "1.0.0"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true  # 开发模式下自动重载
+  cors_origins:
+    - "http://localhost:5173"  # Vite 开发服务器
+    - "http://127.0.0.1:5173"
+
+comfyui:
+  local:
+    enabled: true
+    host: "192.168.100.195"
+    port: 8188
+    # 留空则不自动启动 ComfyUI（需手动启动）
+    path: ""
+    python_executable: ""
+    # 服务启动等待超时（秒）
+    timeout: 30
+    # 服务状态检查间隔（毫秒）
+    check_interval: 5000
+  
+  cloud:
+    enabled: false
+    api_url: ""
+
+ai_prompt:
+  # 支持 "openai" 或 "local"
+  provider: "openai"
+  # API 密钥从环境变量读取
+  api_key: "${AI_PROMPT_API_KEY}"
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  model: "deepseek-v3"
+  # Prompt 模板
+  template: "你是一个Stable Diffusion提示词专家，请将以下自然语言描述转换为SD提示词（英文标签，用逗号分隔）：\n描述：{desc}\n只输出提示词，不要解释："
+
+paths:
+  # 工作流配置目录
+  workflows: "configs/workflows"
+
+# 工作流默认配置
+workflow_defaults:
+  current_workflow_type: "参考"
+  col_count: 4
+  workflows:
+    参考:
+      description: "一个女孩"
+      prompt: "1girl"
+      lora_prompt: "<lora:Ameniwa:0.6>"
+      strength: 0.8
+      count: 1
+    上色:
+      description: "一个女孩"
+      prompt: "1girl"
+      lora_prompt: "<lora:Ameniwa:0.6>"
+      strength: 0.8
+      count: 1
+    图生图:
+      description: "一个女孩"
+      prompt: "1girl"
+      lora_prompt: "<lora:Ameniwa:0.6>"
+      strength: 0.8
+      count: 1
+    线稿:
+      description: ""
+      prompt: ""
+      lora_prompt: ""
+      strength: 0.8
+      count: 1

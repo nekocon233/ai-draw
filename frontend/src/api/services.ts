@@ -1,0 +1,106 @@
+/**
+ * API 服务方法
+ */
+import client from './client';
+import type {
+  ServiceStatus,
+  GeneratePromptRequest,
+  GeneratePromptResponse,
+  GenerateImageRequest,
+  GenerateImageResponse,
+  UploadImageResponse,
+  WorkflowsResponse,
+} from '../types/api';
+
+import type { AuthResponse, UserConfig } from '../types/models';
+
+export const apiService = {
+  // 用户认证
+  register: (data: { username: string; password: string; email?: string }): Promise<AuthResponse> =>
+    client.post('/auth/register', data),
+  
+  login: (data: { username: string; password: string }): Promise<AuthResponse> =>
+    client.post('/auth/login', data),
+  
+  // 用户配置
+  getUserConfig: (): Promise<UserConfig> =>
+    client.get('/config/user'),
+  
+  updateUserConfig: (data: Partial<UserConfig>): Promise<{ message: string }> =>
+    client.post('/config/user', data),
+  
+  resetUserConfig: (): Promise<{ message: string }> =>
+    client.delete('/config/user'),
+  
+  // 聊天历史
+  getChatHistory: (limit?: number): Promise<{ messages: any[] }> =>
+    client.get('/chat/history', { params: { limit } }),
+  
+  saveChatMessage: (data: {
+    message_id: string;
+    type: 'user' | 'assistant';
+    content: string;
+    workflow?: string;
+    strength?: number;
+    count?: number;
+    lora_prompt?: string;
+    images?: string[];
+  }): Promise<{ message: string }> =>
+    client.post('/chat/save', data),
+  
+  clearChatHistory: (): Promise<{ message: string }> =>
+    client.delete('/chat/history'),
+  
+  // 参考图
+  saveReferenceImage: (data: { image: string; filename?: string }): Promise<{ message: string }> =>
+    client.post('/reference-image', data),
+  
+  getReferenceImage: (): Promise<{ image: string | null }> =>
+    client.get('/reference-image'),
+  
+  clearReferenceImage: (): Promise<{ message: string }> =>
+    client.delete('/reference-image'),
+  
+  // 服务状态
+  getServiceStatus: (): Promise<ServiceStatus> => 
+    client.get('/service/status'),
+  
+  startService: (): Promise<{ message: string }> => 
+    client.post('/service/start'),
+  
+  stopService: (): Promise<{ message: string }> =>
+    client.post('/service/stop'),
+  
+  // Prompt 生成
+  generatePrompt: (data: GeneratePromptRequest): Promise<GeneratePromptResponse> =>
+    client.post('/prompt/generate', data),
+  
+  // 图像生成
+  generateImage: (data: GenerateImageRequest): Promise<GenerateImageResponse> =>
+    client.post('/image/generate', data, {
+      timeout: 600000 // 10 分钟，因为生成多张图片耗时较长
+    }),
+  
+  // 图片上传
+  uploadImage: (file: File): Promise<UploadImageResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return client.post('/image/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  
+  // 工作流
+  getWorkflows: (): Promise<WorkflowsResponse> =>
+    client.get('/workflows'),
+  
+  switchWorkflow: (workflow_type: string): Promise<{ message: string }> =>
+    client.post('/workflow/switch', null, { params: { workflow_type } }),
+  
+  // 预览
+  getPreviews: (): Promise<{ previews: any[] }> =>
+    client.get('/previews'),
+  
+  clearPreviews: (): Promise<{ message: string }> =>
+    client.delete('/previews'),
+};

@@ -1,0 +1,50 @@
+/* GenerateButton.css - 生成按钮样式 */
+
+.generate-button-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.generate-button-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.generate-main-button {
+  height: 56px !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  border-radius: 12px !important;
+  background: var(--accent-gradient) !important;
+  border: none !important;
+  box-shadow: 0 0 0 1px rgba(130, 80, 223, 0.3), 0 4px 16px rgba(130, 80, 223, 0.4) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.generate-main-button:hover:not(:disabled) {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 0 0 1px rgba(130, 80, 223, 0.5), 0 8px 24px rgba(130, 80, 223, 0.6), 0 0 40px rgba(130, 80, 223, 0.3) !important;
+}
+
+.generate-main-button:active:not(:disabled) {
+  transform: translateY(-1px) !important;
+}
+
+.generate-main-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.generate-status {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}

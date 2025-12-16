@@ -1,0 +1,132 @@
+# AI-Draw 生产环境 Docker Compose 配置
+
+version: '3.8'
+
+services:
+  # ============================================
+  # AI-Draw 后端服务 (生产模式)
+  # ============================================
+  ai-draw-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-draw-backend-prod
+    restart: always
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    volumes:
+      # 仅挂载必要的配置文件
+      - ./.env:/app/.env:ro
+      - ./configs:/app/configs:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
+    env_file:
+      - .env
+    networks:
+      - ai-draw-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/service/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 生产环境使用多 worker 和优化配置
+    command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers 4 --proxy-headers --forwarded-allow-ips='*'
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================
+  # PostgreSQL 数据库
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-draw-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-ai_draw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ai_draw_password}
+      POSTGRES_DB: ${DB_NAME:-ai_draw}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - ai-draw-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ai_draw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================
+  # Redis 缓存（可选 - 用于会话管理和缓存）
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: ai-draw-redis-prod
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai-draw-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Nginx 反向代理
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: ai-draw-nginx-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    networks:
+      - ai-draw-network
+    depends_on:
+      - ai-draw-backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ============================================
+# 网络配置
+# ============================================
+networks:
+  ai-draw-network:
+    driver: bridge
+
+# ============================================
+# 数据卷
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
