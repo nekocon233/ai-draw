@@ -11,6 +11,7 @@ from server.database import get_db
 from server.models import User, UserConfig, ChatMessage, GeneratedImage, ReferenceImage
 from server.auth import (
     get_current_user,
+    get_current_user_optional,
     hash_password,
     create_access_token,
     authenticate_user
@@ -281,10 +282,14 @@ def clear_reference_image(
 @router.post("/chat/save")
 def save_chat_message(
     message: dict,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """保存单条聊天消息"""
+    """保存单条聊天消息（游客模式下不保存）"""
+    # 游客模式下直接返回成功，不保存到数据库
+    if not current_user:
+        return {"success": True, "message": "游客模式，消息未保存"}
+    
     # 兼容两种字段名：id 或 message_id
     msg_id = message.get("message_id") or message.get("id")
     

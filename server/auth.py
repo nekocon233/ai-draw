@@ -10,14 +10,16 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from server.database import get_db
 from server.models import User
+from utils.config_loader import get_auth_config
 
 # 密码加密上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT 配置
-SECRET_KEY = "ai-draw-secret-key-change-in-production-use-env-var-2024"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 天
+# 从配置加载 JWT 设置
+auth_config = get_auth_config()
+SECRET_KEY = auth_config.jwt_secret_key
+ALGORITHM = auth_config.jwt_algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = auth_config.jwt_access_token_expire_minutes
 
 # HTTP Bearer Token 验证
 security = HTTPBearer()
@@ -64,6 +66,29 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     
+    return user
+
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """
+    获取当前用户（可选）
+    游客模式下返回 None，而不是抛出异常
+    """
+    if not credentials:
+        return None
+    
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+    except JWTError:
+        return None
+    
+    user = db.query(User).filter(User.username == username, User.is_active == True).first()
     return user
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:

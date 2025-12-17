@@ -7,6 +7,7 @@ from comfy_api_simplified import ComfyWorkflowWrapper
 from comfyui.structures.comfyui_request_state import ComfyUIRequestState
 from utils.image_processor import ImageProcessor
 from utils.thread_runner import ThreadRunner
+from utils.config_loader import get_config
 
 
 class ComfyUIService:
@@ -22,19 +23,18 @@ class ComfyUIService:
         self.workflow = None
         self.temp_workflow_file = None  # 存储临时工作流文件路径
 
-        # 工作流配置文件映射
-        self.workflow_configs = {
-            "参考": "reference_workflow_api.json",
-            "上色": "color_workflow_api.json",
-            "图生图": "img2img_workflow_api.json",
-            "线稿": "lineart_workflow_api.json",
-        }
+        # 从配置加载工作流配置
+        config = get_config()
+        workflow_defaults = config.workflow_defaults
+        
+        # 工作流配置文件映射 - 直接从配置读取
+        self.workflow_configs = workflow_defaults.workflow_files
 
-        # 当前工作流类型
-        self.current_workflow_type = "参考"
+        # 当前工作流类型 - 从配置读取
+        self.current_workflow_type = workflow_defaults.current_workflow_type
 
-        # 获取配置文件路径
-        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'configs', 'workflows')
+        # 获取配置文件路径 - 从配置读取
+        self.config_dir = config.paths.workflows
 
         # 初始化默认工作流
         self.load_workflow(self.current_workflow_type)
@@ -44,19 +44,17 @@ class ComfyUIService:
         加载指定类型的工作流配置
 
         参数:
-            workflow_type (str): 工作流类型（"参考", "上色", "图生图", "线稿"）
+            workflow_type (str): 工作流类型
         """
         if workflow_type not in self.workflow_configs:
-            print(f"[ComfyUIService] 未知的工作流类型: {workflow_type}，使用默认工作流")
-            workflow_type = "参考"
+            raise ValueError(f"[ComfyUIService] 未知的工作流类型: {workflow_type}，可用类型: {list(self.workflow_configs.keys())}")
 
         config_file = self.workflow_configs[workflow_type]
         workflow_path = os.path.join(self.config_dir, config_file)
 
         # 检查配置文件是否存在
         if not os.path.exists(workflow_path):
-            print(f"[ComfyUIService] 工作流配置文件不存在: {workflow_path}，使用默认配置")
-            workflow_path = os.path.join(self.config_dir, self.workflow_configs["参考"])
+            raise FileNotFoundError(f"[ComfyUIService] 工作流配置文件不存在: {workflow_path}")
 
         try:
             # 清理之前的临时文件
@@ -110,9 +108,7 @@ class ComfyUIService:
 
         except Exception as e:
             print(f"[ComfyUIService] 加载工作流失败: {e}")
-            # 如果加载失败，尝试加载默认工作流
-            if workflow_type != "参考":
-                self.load_workflow("参考")
+            raise
 
     def _cleanup_temp_file(self):
         """

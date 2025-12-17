@@ -24,10 +24,11 @@ async def generate_image(service: AIDrawService = Depends(get_service)):
 ```
 
 **配置系统** - 使用 Pydantic Settings + YAML:
-- `configs/app_config.yaml`: 主配置 (服务器、ComfyUI、AI Prompt)
+- `configs/app_config.yaml`: 主配置 (服务器、ComfyUI、AI Prompt、**工作流列表**)
 - `.env`: 敏感信息 (`AI_PROMPT_API_KEY`, `COMFYUI_PATH`, `COMFYUI_PYTHON`)
 - `utils/config_loader.py`: 使用 `get_config()` 获取配置单例
 - 环境变量覆盖 YAML 配置，使用 `Field(validation_alias="ENV_VAR")`
+- **工作流配置化**: 所有工作流类型从 `app_config.yaml` 的 `workflow_files` 读取，前端通过 `/api/service/workflows` 动态获取，无硬编码
 
 **WebSocket 架构** (`server/websocket/__init__.py`):
 - 全局 `ConnectionManager` 管理所有活跃连接
@@ -71,7 +72,7 @@ npm run dev  # 启动在 http://localhost:5173
 ### 工作流配置
 
 所有工作流定义在 `configs/workflows/*.json`，使用 ComfyUI API 格式:
-- `reference_workflow_api.json`: 参考图生成
+- `common_workflow_api.json`: 通用图生成
 - `color_workflow_api.json`: 线稿上色
 - `img2img_workflow_api.json`: 图生图
 - `lineart_workflow_api.json`: 提取线稿

@@ -26,14 +26,17 @@ function AppContent() {
 
     mediaQuery.addEventListener('change', handleThemeChange);
 
-    // 如果已登录，加载用户配置和聊天历史
-    if (isLoggedIn()) {
-      const loadData = async () => {
+    // 加载用户配置和聊天历史（登录用户从后端加载，游客从 localStorage 加载）
+    const loadData = async () => {
+      // 加载可用工作流列表（必须先加载）
+      await useAppStore.getState().loadAvailableWorkflows();
+      
+      if (isLoggedIn()) {
         await loadUserConfig();
-        await useAppStore.getState().loadChatHistory();
-      };
-      loadData();
-    }
+      }
+      await useAppStore.getState().loadChatHistory();
+    };
+    loadData();
 
     // 连接 WebSocket
     wsManager.connect();
@@ -41,20 +44,26 @@ function AppContent() {
     // 订阅 WebSocket 消息
     const unsubscribe = wsManager.subscribe((message) => {
       if (message.type === WS_MESSAGE_TYPES.STATE_CHANGE) {
-        // 监听生成状态变化
+        // 监听生成状态变化（仅当前设备有生成任务时才更新）
         if (message.field === STATE_FIELDS.IS_GENERATING) {
-          const wasGenerating = useAppStore.getState().isGenerating;
-          useAppStore.setState({ isGenerating: message.value });
+          const { currentGeneratingMessageId, isGenerating: wasGenerating } = useAppStore.getState();
           
-          // 生成完成时（从 true 变为 false），保存助手消息到数据库
-          if (wasGenerating && !message.value) {
-            const currentHistory = useAppStore.getState().chatHistory;
-            const lastAssistantMsg = [...currentHistory].reverse().find(msg => msg.type === 'assistant');
-            if (lastAssistantMsg && lastAssistantMsg.images) {
-              useAppStore.getState().updateChatImages(
-                lastAssistantMsg.id, 
-                lastAssistantMsg.images.filter(img => typeof img === 'string') as string[]
-              );
+          // 只有当前设备正在生成时才更新状态
+          if (currentGeneratingMessageId) {
+            useAppStore.setState({ isGenerating: message.value });
+            
+            // 生成完成时（从 true 变为 false），保存助手消息到数据库
+            if (wasGenerating && !message.value) {
+              const currentHistory = useAppStore.getState().chatHistory;
+              const msg = currentHistory.find(m => m.id === currentGeneratingMessageId);
+              if (msg && msg.images) {
+                useAppStore.getState().updateChatImages(
+                  currentGeneratingMessageId, 
+                  msg.images.filter(img => typeof img === 'string') as string[]
+                );
+              }
+              // 清除当前生成任务ID
+              useAppStore.setState({ currentGeneratingMessageId: null });
             }
           }
         }
@@ -62,11 +71,10 @@ function AppContent() {
         // 监听单张图片生成完成
         if (message.field === STATE_FIELDS.IMAGE_GENERATED && message.value) {
           const { image, index } = message.value;
-          // 获取当前最新的 AI 消息 ID（最后一条 assistant 类型的消息）
-          const currentHistory = useAppStore.getState().chatHistory;
-          const lastAssistantMsg = [...currentHistory].reverse().find(msg => msg.type === 'assistant');
-          if (lastAssistantMsg) {
-            useAppStore.getState().appendChatImage(lastAssistantMsg.id, image, index);
+          // 只处理当前设备正在生成的消息
+          const { currentGeneratingMessageId } = useAppStore.getState();
+          if (currentGeneratingMessageId) {
+            useAppStore.getState().appendChatImage(currentGeneratingMessageId, image, index);
           }
         }
       }

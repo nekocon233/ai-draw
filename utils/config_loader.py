@@ -1,110 +1,160 @@
 """
 配置加载器模块
 
-使用 pydantic-settings 和 YAML 加载应用配置
-支持从环境变量覆盖配置项
+从环境变量读取配置
+工作流配置从 app_config.yaml 读取
+使用 pydantic-settings 进行类型验证和默认值管理
 """
 import os
-from typing import List, Optional
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
 import yaml
+from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ComfyUILocalConfig(BaseSettings):
     """ComfyUI 本地配置"""
-    enabled: bool = True
-    host: str = "127.0.0.1"
-    port: int = 8188
-    path: str = Field(default="", validation_alias="COMFYUI_PATH")
-    python_executable: str = Field(default="", validation_alias="COMFYUI_PYTHON")
-    timeout: int = 30
-    check_interval: int = 5000
+    enabled: bool = Field(validation_alias="COMFYUI_ENABLED")
+    host: str = Field(validation_alias="COMFYUI_HOST")
+    port: int = Field(validation_alias="COMFYUI_PORT")
+    path: str = Field(validation_alias="COMFYUI_PATH")
+    python_executable: str = Field(validation_alias="COMFYUI_PYTHON")
+    timeout: int = Field(validation_alias="COMFYUI_TIMEOUT")
+    check_interval: int = Field(validation_alias="COMFYUI_CHECK_INTERVAL")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class ComfyUICloudConfig(BaseSettings):
     """ComfyUI 云端配置"""
-    enabled: bool = False
-    api_url: str = ""
+    enabled: bool = Field(validation_alias="COMFYUI_CLOUD_ENABLED")
+    api_url: str = Field(validation_alias="COMFYUI_CLOUD_API_URL")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class ComfyUIConfig(BaseSettings):
     """ComfyUI 配置"""
-    local: ComfyUILocalConfig
-    cloud: ComfyUICloudConfig
+    local: ComfyUILocalConfig = Field(default_factory=ComfyUILocalConfig)
+    cloud: ComfyUICloudConfig = Field(default_factory=ComfyUICloudConfig)
 
 
 class AIPromptConfig(BaseSettings):
     """AI Prompt 生成配置"""
-    provider: str = "openai"
+    provider: str = Field(validation_alias="AI_PROMPT_PROVIDER")
     api_key: str = Field(validation_alias="AI_PROMPT_API_KEY")
-    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    model: str = "deepseek-v3"
-    template: str
+    base_url: str = Field(validation_alias="AI_PROMPT_BASE_URL")
+    model: str = Field(validation_alias="AI_PROMPT_MODEL")
+    template: str = Field(validation_alias="AI_PROMPT_TEMPLATE")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class ServerConfig(BaseSettings):
     """服务器配置"""
-    host: str = "0.0.0.0"
-    port: int = 8000
-    reload: bool = True
-    cors_origins: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
-
-
-class PathsConfig(BaseSettings):
-    """路径配置"""
-    workflows: str = "configs/workflows"
-
-
-class WorkflowConfig(BaseSettings):
-    """单个工作流配置"""
-    description: str = ""
-    prompt: str = ""
-    lora_prompt: str = ""
-    strength: float = 0.8
-    count: int = 1
-
-
-class WorkflowDefaultsConfig(BaseSettings):
-    """工作流默认配置"""
-    current_workflow_type: str = "参考"
-    col_count: int = 4
-    workflows: dict = {}
-
-
-class AppConfig(BaseSettings):
-    """应用配置"""
-    name: str = "ai-draw"
-    debug: bool = True
-    version: str = "1.0.0"
-
-
-class Config(BaseSettings):
-    """全局配置类"""
-    app: AppConfig
-    server: ServerConfig
-    comfyui: ComfyUIConfig
-    ai_prompt: AIPromptConfig
-    paths: PathsConfig
-    workflow_defaults: WorkflowDefaultsConfig
+    host: str = Field(validation_alias="SERVER_HOST")
+    port: int = Field(validation_alias="SERVER_PORT")
+    reload: bool = Field(validation_alias="SERVER_RELOAD")
+    cors_origins: List[str] = Field(validation_alias="CORS_ORIGINS")
+    
+    @field_validator('cors_origins', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """解析 CORS origins，支持 JSON 字符串或列表"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # 如果不是 JSON，尝试按逗号分隔
+                return [origin.strip() for origin in v.split(',') if origin.strip()]
+        return v
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
-# 全局配置实例
+class PathsConfig(BaseSettings):
+    """路径配置"""
+    workflows: str = Field(validation_alias="WORKFLOWS_PATH")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class DatabaseConfig(BaseSettings):
+    """数据库配置"""
+    host: str = Field(validation_alias="DB_HOST")
+    port: int = Field(validation_alias="DB_PORT")
+    name: str = Field(validation_alias="DB_NAME")
+    user: str = Field(validation_alias="DB_USER")
+    password: str = Field(validation_alias="DB_PASSWORD")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class AuthConfig(BaseSettings):
+    """认证配置"""
+    jwt_secret_key: str = Field(validation_alias="JWT_SECRET_KEY")
+    jwt_algorithm: str = Field(validation_alias="JWT_ALGORITHM")
+    jwt_access_token_expire_minutes: int = Field(validation_alias="JWT_EXPIRE_MINUTES")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class RedisConfig(BaseSettings):
+    """Redis 配置"""
+    host: str = Field(validation_alias="REDIS_HOST")
+    port: int = Field(validation_alias="REDIS_PORT")
+    password: str = Field(validation_alias="REDIS_PASSWORD")
+    db: int = Field(validation_alias="REDIS_DB")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class WorkflowDefaultsConfig(BaseModel):
+    """工作流默认配置 - 从 YAML 读取，不从环境变量读取"""
+    current_workflow_type: str
+    col_count: int
+    workflow_files: dict
+    workflows: dict
+
+
+class AppConfig(BaseSettings):
+    """应用配置"""
+    name: str = Field(validation_alias="APP_NAME")
+    debug: bool = Field(validation_alias="APP_DEBUG")
+    version: str = Field(validation_alias="APP_VERSION")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class Config(BaseSettings):
+    """全局配置类 - 直接从环境变量加载"""
+    app: AppConfig = Field(default_factory=AppConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
+    ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
+    paths: PathsConfig = Field(default_factory=PathsConfig)
+    # workflow_defaults 从 YAML 读取，在 load_config 中赋值
+    workflow_defaults: Optional[WorkflowDefaultsConfig] = None
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+# 全局配置实例（单例模式）
 _config: Optional[Config] = None
 
 
 def load_config(config_path: str = "configs/app_config.yaml") -> Config:
     """
-    加载配置文件
+    加载配置
+    - 环境变量：所有配置值
+    - app_config.yaml：工作流配置（workflow_defaults）
     
     Args:
-        config_path: 配置文件路径
+        config_path: 配置文件路径，仅用于读取工作流配置
         
     Returns:
         Config: 配置对象
@@ -114,32 +164,27 @@ def load_config(config_path: str = "configs/app_config.yaml") -> Config:
     if _config is not None:
         return _config
     
-    # 读取 YAML 配置文件
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"配置文件不存在: {config_path}")
-    
-    with open(config_path, 'r', encoding='utf-8') as f:
-        yaml_content = f.read()
-        
-    # 替换环境变量占位符
-    import re
     from dotenv import load_dotenv
     
     # 加载 .env 文件
     load_dotenv()
     
-    # 替换 ${VAR} 格式的环境变量
-    def replace_env_var(match):
-        var_name = match.group(1)
-        return os.getenv(var_name, match.group(0))
+    # 从环境变量创建配置对象
+    _config = Config()
     
-    yaml_content = re.sub(r'\$\{([^}]+)\}', replace_env_var, yaml_content)
-    
-    # 解析 YAML
-    config_dict = yaml.safe_load(yaml_content)
-    
-    # 创建配置对象
-    _config = Config(**config_dict)
+    # 从 YAML 读取工作流配置（如果文件存在）
+    if config_path and os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+                
+            # 仅覆盖工作流配置
+            if yaml_data and 'workflow_defaults' in yaml_data:
+                workflow_data = yaml_data['workflow_defaults']
+                _config.workflow_defaults = WorkflowDefaultsConfig(**workflow_data)
+        except Exception as e:
+            print(f"警告: 无法从 {config_path} 读取工作流配置: {e}")
+            print("将使用默认工作流配置")
     
     return _config
 
@@ -173,9 +218,26 @@ def get_server_config() -> ServerConfig:
     return get_config().server
 
 
+def get_database_config() -> DatabaseConfig:
+    """获取数据库配置"""
+    return get_config().database
+
+
+def get_auth_config() -> AuthConfig:
+    """获取认证配置"""
+    return get_config().auth
+
+
+def get_redis_config() -> RedisConfig:
+    """获取 Redis 配置"""
+    return get_config().redis
+
+
 if __name__ == "__main__":
     # 测试配置加载
     config = load_config()
     print(f"应用名称: {config.app.name}")
+    print(f"服务器地址: {config.server.host}:{config.server.port}")
     print(f"ComfyUI 地址: {config.comfyui.local.host}:{config.comfyui.local.port}")
     print(f"AI Prompt 模型: {config.ai_prompt.model}")
+    print(f"数据库: {config.database.host}:{config.database.port}/{config.database.name}")

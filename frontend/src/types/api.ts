@@ -44,6 +44,7 @@ export interface UploadImageResponse {
 // 工作流列表
 export interface WorkflowsResponse {
   workflows: string[];
+  default_workflow: string;
 }
 
 // WebSocket 消息类型

@@ -18,18 +18,26 @@ class ConnectionManager:
     
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
+        # 存储每个连接的会话ID（可以是用户ID或临时会话ID）
+        self.connection_sessions: dict[WebSocket, str] = {}
     
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, session_id: str = None):
         await websocket.accept()
         self.active_connections.add(websocket)
-        print(f"[WebSocket] 客户端已连接，当前连接数: {len(self.active_connections)}")
+        if session_id:
+            self.connection_sessions[websocket] = session_id
+        print(f"[WebSocket] 客户端已连接，会话ID: {session_id}，当前连接数: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
+        self.connection_sessions.pop(websocket, None)
         print(f"[WebSocket] 客户端已断开，当前连接数: {len(self.active_connections)}")
     
-    async def broadcast(self, message: dict):
-        """广播消息到所有连接的客户端"""
+    async def broadcast(self, message: dict, session_id: str = None):
+        """
+        广播消息到客户端
+        如果指定 session_id，只发送给该会话；否则广播给所有客户端
+        """
         if not self.active_connections:
             return
         
@@ -37,6 +45,10 @@ class ConnectionManager:
         disconnected = set()
         
         for connection in self.active_connections:
+            # 如果指定了会话ID，只发送给匹配的连接
+            if session_id and self.connection_sessions.get(connection) != session_id:
+                continue
+                
             try:
                 await connection.send_text(message_str)
             except Exception as e:
@@ -46,6 +58,7 @@ class ConnectionManager:
         # 移除断开的连接
         for conn in disconnected:
             self.active_connections.discard(conn)
+            self.connection_sessions.pop(conn, None)
 
 
 # 全局连接管理器
@@ -81,10 +94,22 @@ async def websocket_endpoint(websocket: WebSocket):
         setup_service_callbacks()
         _callbacks_initialized = True
     
-    await manager.connect(websocket)
+    session_id = None
     service = get_ai_draw_service()
     
     try:
+        await manager.connect(websocket)
+        
+        # 等待客户端发送会话ID
+        data = await websocket.receive_text()
+        message = json.loads(data)
+        
+        if message.get("type") == "init":
+            session_id = message.get("session_id")
+            if session_id:
+                manager.connection_sessions[websocket] = session_id
+                print(f"[WebSocket] 会话ID已设置: {session_id}")
+        
         # 发送初始状态
         initial_state = {
             "type": "initial_state",

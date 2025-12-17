@@ -31,7 +31,6 @@ env/
 
 # IDE
 .idea/
-.vscode/
 *.sublime-workspace
 *.sublime-project
 
@@ -50,6 +49,8 @@ Desktop.ini
 
 # Environment Variables
 .env
+.env.local
+.env.*.local
 
 # Logs
 comfyui_log.txt
@@ -69,8 +70,6 @@ settings/ai_draw_ui_state.json
 
 # 覆盖本地配置
 local_settings.py
-.env
-.env.*
 
 *.zip
 

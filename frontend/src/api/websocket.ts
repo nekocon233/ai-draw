@@ -11,6 +11,17 @@ class WebSocketManager {
   private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private sessionId: string;
+
+  constructor() {
+    // 从 localStorage 获取或生成会话ID
+    let sessionId = localStorage.getItem('ws_session_id');
+    if (!sessionId) {
+      sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('ws_session_id', sessionId);
+    }
+    this.sessionId = sessionId;
+  }
 
   connect() {
     if (this.ws?.readyState === WebSocket.OPEN) {
@@ -19,14 +30,16 @@ class WebSocketManager {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log('WebSocket 连接成功');
+        console.log('WebSocket 连接成功，会话ID:', this.sessionId);
         this.reconnectAttempts = 0;
+        // 发送会话ID到服务器
+        this.send({ type: 'init', session_id: this.sessionId });
       };
 
       this.ws.onmessage = (event) => {

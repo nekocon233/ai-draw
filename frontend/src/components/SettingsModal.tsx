@@ -14,6 +14,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     loraPrompt,
     currentWorkflow,
     imagesPerRow,
+    availableWorkflows,
     setStrength,
     setCount,
     setLoraPrompt,
@@ -76,10 +77,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       >
         <Form.Item label="工作流类型" name="workflow">
           <Radio.Group buttonStyle="solid" style={{ width: '100%', display: 'flex' }}>
-            <Radio.Button value="参考" style={{ flex: 1, textAlign: 'center' }}>参考</Radio.Button>
-            <Radio.Button value="上色" style={{ flex: 1, textAlign: 'center' }}>上色</Radio.Button>
-            <Radio.Button value="图生图" style={{ flex: 1, textAlign: 'center' }}>图生图</Radio.Button>
-            <Radio.Button value="线稿" style={{ flex: 1, textAlign: 'center' }}>线稿</Radio.Button>
+            {availableWorkflows.length > 0 ? (
+              availableWorkflows.map((workflow) => (
+                <Radio.Button key={workflow} value={workflow} style={{ flex: 1, textAlign: 'center' }}>
+                  {workflow}
+                </Radio.Button>
+              ))
+            ) : (
+              <div style={{ padding: '8px', textAlign: 'center', color: '#999' }}>
+                加载中...
+              </div>
+            )}
           </Radio.Group>
         </Form.Item>
 

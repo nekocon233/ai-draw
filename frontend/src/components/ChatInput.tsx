@@ -11,7 +11,6 @@ import {
 import type { MenuProps } from 'antd';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
-import { WORKFLOW_TYPES } from '../utils/constants';
 import SettingsModal from './SettingsModal';
 import AIPromptModal from './AIPromptModal';
 import './ChatInput.css';
@@ -27,14 +26,13 @@ export default function ChatInput() {
     currentWorkflow,
     referenceImage,
     isGenerating,
+    availableWorkflows,
     setPrompt,
     setCurrentWorkflow,
     setReferenceImage,
     setError,
     clearError,
   } = useAppStore();
-
-  const [workflows] = useState<string[]>([...WORKFLOW_TYPES]);
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
@@ -56,7 +54,7 @@ export default function ChatInput() {
 
   // 工作流下拉菜单
   const workflowMenu: MenuProps = {
-    items: workflows.map(workflow => ({
+    items: availableWorkflows.map(workflow => ({
       key: workflow,
       label: workflow,
       onClick: () => handleWorkflowChange(workflow),
@@ -282,8 +280,8 @@ export default function ChatInput() {
 
             {/* 工作流选择 */}
             <Dropdown menu={workflowMenu} trigger={['click']} placement="topLeft">
-              <button className="chat-input-icon-button" title={`当前工作流: ${currentWorkflow}`}>
-                {currentWorkflow[0]}
+              <button className="chat-input-icon-button" title={`当前工作流: ${currentWorkflow || '通用'}`}>
+                {(currentWorkflow || '通用')[0]}
               </button>
             </Dropdown>
 

@@ -61,7 +61,7 @@ async def upload_reference_image(file: UploadFile = File(...)) -> dict:
 
 
 @router.get("/stop")
-async def stop_generation(service: AIDrawService = Depends(get_service)) -> dict:
+async def stop_generation(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """停止生成"""
     service.stop_generation()
     return {"success": True, "message": "已停止生成"}

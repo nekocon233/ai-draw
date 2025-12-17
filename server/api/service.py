@@ -19,22 +19,23 @@ async def get_service_status(service: AIDrawService = Depends(get_ai_draw_servic
 
 
 @router.post("/start")
-async def start_service(service: AIDrawService = Depends(get_service)) -> dict:
+async def start_service(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """启动服务"""
     await service.start_service()
     return {"success": True, "message": "服务已启动"}
 
 
 @router.post("/stop")
-async def stop_service(service: AIDrawService = Depends(get_service)) -> dict:
+async def stop_service(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """停止服务"""
     await service.stop_service()
     return {"success": True, "message": "服务已停止"}
 
 
 @router.get("/workflows")
-async def get_available_workflows(service: AIDrawService = Depends(get_service)) -> dict:
-    """获取可用的工作流列表"""
+async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
+    """获取可用的工作流列表和默认工作流"""
     return {
-        "workflows": service.get_available_workflows()
+        "workflows": service.get_available_workflows(),
+        "default_workflow": service.get_current_workflow()
     }

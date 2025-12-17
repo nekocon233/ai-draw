@@ -11,7 +11,7 @@ services:
     container_name: ai-draw-backend
     restart: unless-stopped
     ports:
-      - "${SERVER_PORT:-8000}:8000"
+      - "${SERVER_PORT:-14600}:${SERVER_PORT:-14600}"
     volumes:
       # 开发模式：挂载源代码实现热重载
       # 生产模式：注释掉以下挂载，使用容器内代码
@@ -21,22 +21,65 @@ services:
       - ./configs:/app/configs
       # 环境配置文件
       - ./.env:/app/.env:ro
+      # 前端构建产物共享给 Nginx
+      - frontend-dist:/app/frontend/dist
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Shanghai
+      # 应用配置
+      - APP_NAME=ai-draw
+      - APP_DEBUG=true
+      - APP_VERSION=1.0.0
+      # 服务器配置
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=14600
+      - SERVER_RELOAD=true
+      - CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173","http://localhost:14601","${PRODUCTION_DOMAIN}"]
+      # 前端端口
+      - FRONTEND_HTTP_PORT=14601
+      - FRONTEND_HTTPS_PORT=14602
+      # ComfyUI 配置
+      - COMFYUI_ENABLED=true
+      - COMFYUI_HOST=comfyui
+      - COMFYUI_PORT=8188
+      - COMFYUI_PATH=
+      - COMFYUI_PYTHON=
+      - COMFYUI_TIMEOUT=30
+      - COMFYUI_CHECK_INTERVAL=5000
+      - COMFYUI_CLOUD_ENABLED=false
+      - COMFYUI_CLOUD_API_URL=
+      # AI Prompt 配置
+      - AI_PROMPT_PROVIDER=openai
+      - AI_PROMPT_BASE_URL=http://copilot-api-copilot-api-1:4141/v1
+      - AI_PROMPT_MODEL=gpt-4o
+      - AI_PROMPT_TEMPLATE=你是一个Stable Diffusion提示词专家，请将以下自然语言描述转换为SD提示词（英文标签，用逗号分隔，不要增加额外的描述）：\n描述：{desc}\n只输出提示词，不要解释：
+      # 认证配置
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRE_MINUTES=10080
+      # 数据库配置
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=ai_draw
+      - DB_USER=ai_draw
+      # Redis 配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      # 路径配置
+      - WORKFLOWS_PATH=configs/workflows
     env_file:
       - .env
     networks:
       - ai-draw-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/service/status"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${SERVER_PORT:-14600}/api/service/status || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     depends_on:
       - postgres
-    command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
+    command: python run.py
 
   # ============================================
   # PostgreSQL 数据库
@@ -47,7 +90,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-ai_draw}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-ai_draw_password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-ai_draw}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -69,11 +112,16 @@ services:
     container_name: ai-draw-nginx
     restart: unless-stopped
     ports:
-      - "${FRONTEND_HTTP_PORT:-80}:80"
-      - "${FRONTEND_HTTPS_PORT:-443}:443"
+      - "${FRONTEND_HTTP_PORT:-14601}:80"
+      - "${FRONTEND_HTTPS_PORT:-14602}:443"
+    environment:
+      - BACKEND_PORT=${SERVER_PORT:-14600}
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      # 从后端容器复制前端构建产物
+      - frontend-dist:/usr/share/nginx/html:ro
+    entrypoint: ["/docker-entrypoint.sh"]
     networks:
       - ai-draw-network
     depends_on:
@@ -91,4 +139,6 @@ networks:
 # ============================================
 volumes:
   postgres_data:
+    driver: local
+  frontend-dist:
     driver: local

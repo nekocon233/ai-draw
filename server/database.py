@@ -1,24 +1,15 @@
 """
 数据库连接和会话管理
 """
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from contextlib import contextmanager
-from dotenv import load_dotenv
+from utils.config_loader import get_database_config
 
-# 加载环境变量
-load_dotenv()
+# 从配置加载数据库连接信息
+db_config = get_database_config()
 
-# PostgreSQL 连接配置
-# 从环境变量读取数据库连接信息
-DB_HOST = os.getenv("DATABASE_HOST", "192.168.100.195")
-DB_PORT = os.getenv("DATABASE_PORT", "5432")
-DB_NAME = os.getenv("DATABASE_NAME", "mydb")
-DB_USER = os.getenv("DATABASE_USER", "root")
-DB_PASSWORD = os.getenv("DATABASE_PASSWORD", "bilibili")
-
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"postgresql://{db_config.user}:{db_config.password}@{db_config.host}:{db_config.port}/{db_config.name}"
 
 # 创建数据库引擎
 engine = create_engine(

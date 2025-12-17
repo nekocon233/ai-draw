@@ -19,8 +19,8 @@ AI-Draw 是一个现代化的 AI 辅助绘画 Web 应用，为插画师、设计
 
 ## 主要特性
 
-- 🎨 **多种工作流**：支持"参考"、"上色"、"图生图"、"线稿"四种专业工作流
-- 🤖 **智能 Prompt 生成**：接入 DeepSeek AI，根据中文描述自动生成英文提示词
+- 🎨 **多种工作流**：支持"通用"、"上色"、"图生图"、"线稿"四种专业工作流
+- 🤖 **智能 Prompt 生成**：接入 OpenAI，根据中文描述自动生成英文提示词
 - ⚡ **实时通信**：基于 WebSocket 的实时状态推送和进度更新
 - 🖼️ **图片上传**：支持拖拽、粘贴、文件选择多种图片上传方式
 - 🎛️ **精准控制**：重绘强度、生成数量、LoRA 提示词等参数可调
@@ -108,29 +108,29 @@ cp .env.example .env
 # 编辑 .env 文件，填入数据库密码、API密钥等
 
 # 2. 启动所有服务（开发模式 - 支持热重载）
-docker-compose up -d
+docker compose up -d
 
 # 3. 查看运行状态
-docker-compose ps
+docker compose ps
 
 # 4. 查看日志
-docker-compose logs -f ai-draw-backend
+docker compose logs -f ai-draw-backend
 
 # 5. 停止服务
-docker-compose down
+docker compose down
 ```
 
 **生产环境部署**
 
 ```bash
 # 使用生产配置（多worker、资源限制、Redis缓存）
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # 数据库迁移
 docker exec ai-draw-backend alembic upgrade head
 
 # 查看服务健康状态
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 ```
 
 **Docker 优势**：
@@ -160,20 +160,138 @@ AI-Draw 需要 ComfyUI 作为图像生成后端。有两种方式：
 
 ## 配置文件说明
 
-### configs/app_config.yaml
+### 配置系统架构
+
+AI-Draw 采用**单一数据源**原则管理配置，避免配置冲突和重复定义。
+
+### 📁 configs/app_config.yaml
+
+**用途**: 非敏感的功能配置
 
 主配置文件，包含：
-- 服务器端口、CORS 设置
+- 服务器基础设置（host、CORS）
 - ComfyUI 连接配置
 - AI Prompt 生成配置
 - 路径配置
 
-### .env
+**注意**:
+- ❌ 不要在此文件中硬编码端口
+- ✅ 端口使用 `${SERVER_PORT}` 环境变量引用
+- ✅ 敏感信息使用 `${VAR}` 引用 .env 文件
 
-敏感信息和本地配置：
-- `AI_PROMPT_API_KEY` - DeepSeek/OpenAI API 密钥
-- `COMFYUI_PATH` - ComfyUI 安装路径（可选）
-- `COMFYUI_PYTHON` - ComfyUI Python 解释器路径（可选）
+### 🔐 .env
+
+**用途**: 敏感信息和密钥（唯一来源）
+
+```env
+# AI API 密钥
+AI_PROMPT_API_KEY=sk-your-api-key
+
+# JWT 密钥
+JWT_SECRET_KEY=your-jwt-secret
+
+# 数据库密码
+DB_PASSWORD=your-password
+
+# ComfyUI 本地路径（可选）
+COMFYUI_PATH=path/to/comfyui
+COMFYUI_PYTHON=path/to/python
+```
+
+**注意**:
+- ❌ 不要在 .env 中定义端口
+- ✅ 仅用于密钥和密码
+- ⚠️ 不要提交到 Git
+
+### 🐳 docker-compose.yml / docker-compose.prod.yml
+
+**用途**: 端口配置（唯一来源）
+
+```yaml
+services:
+  ai-draw-backend:
+    environment:
+      - SERVER_PORT=14600          # 后端端口
+      - FRONTEND_HTTP_PORT=14601   # 前端HTTP端口
+      - FRONTEND_HTTPS_PORT=14602  # 前端HTTPS端口
+    ports:
+      - "${SERVER_PORT:-14600}:${SERVER_PORT:-14600}"
+```
+
+**修改端口流程**:
+1. 编辑 `docker-compose.yml` 的 `environment` 部分
+2. 同步修改 `docker-compose.prod.yml`
+3. 重启服务：`docker compose restart`
+
+**注意**:
+- ✅ 端口在此统一定义
+- ✅ 使用 `${VAR:-default}` 语法支持环境变量覆盖
+- ✅ `ports` 映射使用变量引用，保持一致性
+
+### 📋 配置清单
+
+| 配置类型 | 唯一来源 | 读取方式 | 示例 |
+|---------|---------|---------|------|
+| **端口** | `docker-compose.yml` environment | `${VAR}` | `SERVER_PORT=14600` |
+| **密钥/密码** | `.env` | `${VAR}` | `AI_PROMPT_API_KEY=sk-xxx` |
+| **功能开关** | `app_config.yaml` | 直接定义 | `debug: true` |
+| **URL/域名** | `app_config.yaml` | 直接定义 | `cors_origins: [...]` |
+
+### ⚠️ 配置禁止行为
+
+1. ❌ 在 `.env` 中定义端口
+2. ❌ 在 `app_config.yaml` 中硬编码端口
+3. ❌ 在多个地方定义相同的配置项
+4. ❌ 在 Dockerfile 中硬编码配置（EXPOSE 除外，仅作声明）
+
+### 🔧 配置修改指南
+
+**修改端口**:
+```yaml
+# docker-compose.yml
+environment:
+  - SERVER_PORT=15000  # 改成你要的端口
+ports:
+  - "${SERVER_PORT:-15000}:${SERVER_PORT:-15000}"
+```
+
+**修改密钥**:
+```env
+# .env
+AI_PROMPT_API_KEY=your-new-api-key
+```
+
+**修改功能配置**:
+```yaml
+# configs/app_config.yaml
+app:
+  debug: false
+  version: "1.1.0"
+```
+
+### ✅ 配置检查清单
+
+部署前检查：
+- [ ] 端口仅在 docker-compose.yml 定义
+- [ ] .env 不包含端口配置
+- [ ] app_config.yaml 端口配置无默认值
+- [ ] ports 映射与 environment 一致
+- [ ] .env 文件存在且包含所有密钥
+- [ ] .env 未提交到 Git（在 .gitignore 中）
+
+### 📖 配置规则详解
+
+所有配置遵循**单一数据源**原则，确保配置清晰、可维护、不冲突：
+
+- **端口**: 只在 docker-compose 的 environment 中定义，其他地方使用变量引用
+- **敏感信息**: 只在 .env 中定义，通过环境变量注入
+- **功能配置**: 只在 app_config.yaml 中定义，避免重复
+
+**已优化**：
+- ✅ Dockerfile 不再包含 `EXPOSE` 端口声明
+- ✅ nginx 启动脚本不再有端口默认值
+- ✅ 端口完全由 docker-compose 的 environment 控制
+- ✅ 无任何硬编码的端口默认值
 
 ## API 文档
 
@@ -393,7 +511,7 @@ ai-draw/
 ├── configs/             # 配置文件
 │   ├── app_config.yaml         # 应用主配置
 │   └── workflows/              # ComfyUI工作流JSON
-│       ├── reference_workflow_api.json
+│       ├── common_workflow_api.json
 │       ├── color_workflow_api.json
 │       ├── img2img_workflow_api.json
 │       └── lineart_workflow_api.json
@@ -731,32 +849,32 @@ React: 组件错误 → ErrorBoundary → 降级UI → 用户操作
 
 ```bash
 # 启动所有服务（开发模式 - 支持热重载）
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 
 # 停止服务
-docker-compose down
+docker compose down
 
 # 重新构建镜像
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 #### 生产环境
 
 ```bash
 # 启动生产环境
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # 查看运行状态
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # 查看日志
-docker-compose -f docker-compose.prod.yml logs -f ai-draw-backend
+docker compose -f docker-compose.prod.yml logs -f ai-draw-backend
 
 # 停止服务
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 ```
 
 ### 环境变量配置

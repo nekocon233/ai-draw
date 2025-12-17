@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand';
 import { apiService } from '../api/services';
-import { isLoggedIn, loadGuestConfig, saveGuestConfig } from '../utils/helpers';
+import { isLoggedIn, loadGuestConfig, saveGuestConfig, loadGuestChatHistory, saveGuestChatHistory } from '../utils/helpers';
 import { DEFAULT_CONFIG } from '../utils/constants';
 
 interface ChatMessage {
@@ -27,9 +27,11 @@ interface AppState {
   isServiceAvailable: boolean;
   isGenerating: boolean;
   isGeneratingPrompt: boolean;
+  currentGeneratingMessageId: string | null; // 当前正在生成的消息ID
   
   // 当前工作流
   currentWorkflow: string;
+  availableWorkflows: string[]; // 可用工作流列表（动态从后端获取）
   
   // Prompt
   prompt: string;
@@ -65,6 +67,7 @@ interface AppState {
   clearError: () => void;
   reset: () => void;
   stopGeneration: () => void;
+  loadAvailableWorkflows: () => Promise<void>;
   loadUserConfig: () => Promise<void>;
   saveUserConfig: () => Promise<void>;
   loadChatHistory: () => Promise<void>;
@@ -82,14 +85,21 @@ const defaultConfig = {
   imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
   referenceImage: null,
 };
-const initialConfig = guestConfig || defaultConfig;
+// 确保 currentWorkflow 始终有有效值
+const initialConfig = guestConfig ? {
+  ...defaultConfig,
+  ...guestConfig,
+  currentWorkflow: guestConfig.currentWorkflow || defaultConfig.currentWorkflow,
+} : defaultConfig;
 
 export const useAppStore = create<AppState>((set) => ({
   // 初始状态
   isServiceAvailable: false,
   isGenerating: false,
   isGeneratingPrompt: false,
+  currentGeneratingMessageId: null,
   currentWorkflow: initialConfig.currentWorkflow,
+  availableWorkflows: [], // 初始为空，从后端动态获取
   prompt: initialConfig.prompt,
   loraPrompt: initialConfig.loraPrompt,
   strength: initialConfig.strength,
@@ -264,65 +274,89 @@ export const useAppStore = create<AppState>((set) => ({
       timestamp: Date.now(),
       params: { workflow, strength, count, loraPrompt } // 存储总数用于判断
     };
-    set((state) => ({
-      chatHistory: [...state.chatHistory, userMessage, assistantMessage]
-    }));
+    set((state) => {
+      const newHistory = [...state.chatHistory, userMessage, assistantMessage];
+      // 游客模式：保存到 localStorage
+      if (!isLoggedIn()) {
+        saveGuestChatHistory(newHistory);
+      }
+      return { 
+        chatHistory: newHistory,
+        currentGeneratingMessageId: `${messageId}-reply` // 设置当前生成任务ID
+      };
+    });
     
-    // 异步保存用户消息
-    apiService.saveChatMessage({
-      message_id: messageId,
-      type: 'user',
-      content: prompt,
-      workflow,
-      strength,
-      count,
-      lora_prompt: loraPrompt,
-    }).catch(err => console.error('保存用户消息失败:', err));
+    // 登录用户：异步保存用户消息
+    if (isLoggedIn()) {
+      apiService.saveChatMessage({
+        message_id: messageId,
+        type: 'user',
+        content: prompt,
+        workflow,
+        strength,
+        count,
+        lora_prompt: loraPrompt,
+      }).catch(err => console.error('保存用户消息失败:', err));
+    }
     
     return `${messageId}-reply`;
   },
   updateChatImages: (messageId, images) => {
-    set((state) => ({
-      chatHistory: state.chatHistory.map((msg) =>
+    set((state) => {
+      const newHistory = state.chatHistory.map((msg) =>
         msg.id === messageId
           ? { ...msg, images }
           : msg
-      )
-    }));
+      );
+      // 游客模式：保存到 localStorage
+      if (!isLoggedIn()) {
+        saveGuestChatHistory(newHistory);
+      }
+      return { chatHistory: newHistory };
+    });
     
-    // 异步保存 AI 消息（生成完成后）
-    const state = useAppStore.getState();
-    const message = state.chatHistory.find(msg => msg.id === messageId);
-    if (message && message.type === 'assistant') {
-      apiService.saveChatMessage({
-        message_id: messageId,
-        type: 'assistant',
-        content: '',
-        images: images.filter(img => typeof img === 'string') as string[],
-      }).catch(err => console.error('保存 AI 消息失败:', err));
+    // 登录用户：异步保存 AI 消息
+    if (isLoggedIn()) {
+      const state = useAppStore.getState();
+      const message = state.chatHistory.find(msg => msg.id === messageId);
+      if (message && message.type === 'assistant') {
+        apiService.saveChatMessage({
+          message_id: messageId,
+          type: 'assistant',
+          content: '',
+          images: images.filter(img => typeof img === 'string') as string[],
+        }).catch(err => console.error('保存 AI 消息失败:', err));
+      }
     }
   },
-  appendChatImage: (messageId: string, image: string, index: number) => set((state) => ({
-    chatHistory: state.chatHistory.map((msg) => {
-      if (msg.id === messageId && msg.images) {
-        const totalCount = msg.params?.count || 0;
-        const newImages = [...msg.images];
-        
-        // 确保数组长度足够（预留位置）
-        while (newImages.length < totalCount) {
-          newImages.push({ loading: true as const });
+  appendChatImage: (messageId: string, image: string, index: number) => {
+    set((state) => {
+      const newHistory = state.chatHistory.map((msg) => {
+        if (msg.id === messageId && msg.images) {
+          const totalCount = msg.params?.count || 0;
+          const newImages = [...msg.images];
+          
+          // 确保数组长度足够（预留位置）
+          while (newImages.length < totalCount) {
+            newImages.push({ loading: true as const });
+          }
+          
+          // 直接根据 index 替换对应位置的图片
+          if (index >= 0 && index < totalCount) {
+            newImages[index] = image;
+          }
+          
+          return { ...msg, images: newImages };
         }
-        
-        // 直接根据 index 替换对应位置的图片
-        if (index >= 0 && index < totalCount) {
-          newImages[index] = image;
-        }
-        
-        return { ...msg, images: newImages };
+        return msg;
+      });
+      // 游客模式：保存到 localStorage
+      if (!isLoggedIn()) {
+        saveGuestChatHistory(newHistory);
       }
-      return msg;
-    })
-  })),
+      return { chatHistory: newHistory };
+    });
+  },
   clearChatHistory: () => set({ chatHistory: [] }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
@@ -383,8 +417,34 @@ export const useAppStore = create<AppState>((set) => ({
     }
   },
   
+  // 加载可用工作流列表
+  loadAvailableWorkflows: async () => {
+    try {
+      const response = await apiService.getWorkflows();
+      const workflows = response.workflows || [];
+      const defaultWorkflow = response.default_workflow;
+      
+      set({ availableWorkflows: workflows });
+      
+      // 如果当前工作流不在可用列表中，设置为后端配置的默认工作流
+      const state = useAppStore.getState();
+      if (workflows.length > 0 && !workflows.includes(state.currentWorkflow)) {
+        state.setCurrentWorkflow(defaultWorkflow || workflows[0]);
+      }
+    } catch (error) {
+      console.error('加载工作流列表失败:', error);
+    }
+  },
+  
   // 加载聊天历史
   loadChatHistory: async () => {
+    if (!isLoggedIn()) {
+      // 游客模式：从 localStorage 加载
+      const chatHistory = loadGuestChatHistory();
+      set({ chatHistory });
+      return;
+    }
+    
     try {
       const response: any = await apiService.getChatHistory(50);
       const messages = response.messages || [];

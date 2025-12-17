@@ -92,7 +92,8 @@ export interface ReferenceImage {
 /**
  * 工作流类型
  */
-export type WorkflowType = '参考' | '上色' | '图生图' | '线稿';
+// 工作流类型 - 从后端动态获取
+export type WorkflowType = string;
 
 /**
  * 工作流配置

@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   ACCESS_TOKEN: 'access_token',
   USERNAME: 'username',
   GUEST_CONFIG: 'ai-draw-guest-config',
+  GUEST_CHAT_HISTORY: 'ai-draw-guest-chat',
 } as const;
 
 // ============ API 端点 ============
@@ -49,7 +50,7 @@ export const WS_CONFIG = {
 
 // ============ 默认配置 ============
 export const DEFAULT_CONFIG = {
-  WORKFLOW: '参考',
+  WORKFLOW: '通用', // 后备默认工作流，实际从后端 API 获取
   PROMPT: '1girl',
   LORA_PROMPT: '<lora:Ameniwa:0.6>',
   STRENGTH: 0.8,
@@ -58,14 +59,8 @@ export const DEFAULT_CONFIG = {
 } as const;
 
 // ============ 工作流类型 ============
-export const WORKFLOW_TYPES = [
-  '参考',
-  '上色',
-  '图生图',
-  '线稿',
-] as const;
-
-export type WorkflowType = typeof WORKFLOW_TYPES[number];
+// 工作流类型现在从后端动态获取，不再硬编码
+// 请使用 useAppStore 中的 availableWorkflows 获取可用工作流列表
 
 // ============ 消息类型 ============
 export const MESSAGE_TYPES = {

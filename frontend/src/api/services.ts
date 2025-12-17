@@ -92,7 +92,7 @@ export const apiService = {
   
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>
-    client.get('/workflows'),
+    client.get('/service/workflows'),
   
   switchWorkflow: (workflow_type: string): Promise<{ message: string }> =>
     client.post('/workflow/switch', null, { params: { workflow_type } }),

@@ -74,6 +74,30 @@ export function saveGuestConfig(config: any): void {
   }
 }
 
+/**
+ * 加载游客聊天记录
+ */
+export function loadGuestChatHistory(): any[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.GUEST_CHAT_HISTORY);
+    return saved ? JSON.parse(saved) : [];
+  } catch (error) {
+    console.error('加载游客聊天记录失败:', error);
+    return [];
+  }
+}
+
+/**
+ * 保存游客聊天记录
+ */
+export function saveGuestChatHistory(messages: any[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.GUEST_CHAT_HISTORY, JSON.stringify(messages));
+  } catch (error) {
+    console.error('保存游客聊天记录失败:', error);
+  }
+}
+
 // ============ 格式化 ============
 
 /**

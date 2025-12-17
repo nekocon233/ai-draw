@@ -12,7 +12,7 @@ router = APIRouter(prefix="/prompt", tags=["Prompt生成"])
 @router.post("/generate", response_model=GeneratePromptResponse)
 async def generate_prompt(
     request: GeneratePromptRequest,
-    service: AIDrawService = Depends(get_service)
+    service: AIDrawService = Depends(get_ai_draw_service)
 ) -> GeneratePromptResponse:
     """根据中文描述生成英文 Prompt"""
     try:

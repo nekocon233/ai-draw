@@ -227,6 +227,14 @@ class AIDrawService:
         self.comfyui.switch_workflow(workflow_type)
         self._notify_state_change('workflow_type', workflow_type)
     
+    def get_available_workflows(self) -> list[str]:
+        """获取可用的工作流列表"""
+        return list(self.comfyui.workflow_configs.keys())
+    
+    def get_current_workflow(self) -> str:
+        """获取当前工作流类型"""
+        return self.comfyui.get_current_workflow_type()
+    
     def _notify_state_change(self, field: str, value: Any):
         """通知状态变化"""
         if self.on_state_change:
