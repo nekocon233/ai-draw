@@ -4,7 +4,7 @@
     {
       "label": "启动所有服务",
       "type": "shell",
-      "command": "docker compose up -d --build",
+      "command": "docker compose up -d",
       "problemMatcher": [],
       "presentation": {
         "echo": true,
@@ -32,12 +32,40 @@
     {
       "label": "重启所有服务",
       "type": "shell",
-      "command": "docker compose down && docker compose up -d --build",
+      "command": "docker compose restart",
       "problemMatcher": [],
       "presentation": {
         "echo": true,
         "reveal": "always",
         "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      }
+    },
+    {
+      "label": "重新构建前端（无缓存，保留数据库）",
+      "type": "shell",
+      "command": "docker compose down && docker volume rm ai-draw_frontend-dist 2>/dev/null || true && docker compose build --no-cache ai-draw-backend && docker compose up -d",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      }
+    },
+    {
+      "label": "重新构建并启动（无缓存，清空所有数据）",
+      "type": "shell",
+      "command": "docker compose down -v && docker compose build --no-cache ai-draw-backend && docker compose up -d",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
         "panel": "shared",
         "showReuseMessage": false,
         "clear": false

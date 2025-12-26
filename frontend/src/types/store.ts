@@ -58,8 +58,6 @@ export interface AppState {
   
   saveUserConfig: () => Promise<void>;
   
-  loadChatHistory: () => Promise<void>;
-  
   saveChatMessage: (message: ChatMessage) => Promise<void>;
   
   // ============ Actions - UI 状态 ============

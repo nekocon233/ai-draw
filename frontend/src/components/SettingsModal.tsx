@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Modal, Form, Slider, InputNumber, Input, Row, Col, Radio } from 'antd';
+import { Modal, Form, Slider, InputNumber, Input, Row, Col } from 'antd';
 import { useAppStore } from '../stores/appStore';
 
 interface SettingsModalProps {
@@ -12,13 +12,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     strength,
     count,
     loraPrompt,
-    currentWorkflow,
     imagesPerRow,
-    availableWorkflows,
     setStrength,
     setCount,
     setLoraPrompt,
-    setCurrentWorkflow,
     setImagesPerRow,
   } = useAppStore();
 
@@ -28,21 +25,19 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (open) {
       form.setFieldsValue({
-        workflow: currentWorkflow,
         strength: strength,
         count: count,
         loraPrompt: loraPrompt,
         imagesPerRow: imagesPerRow,
       });
     }
-  }, [open, form, currentWorkflow, strength, count, loraPrompt, imagesPerRow]);
+  }, [open, form, strength, count, loraPrompt, imagesPerRow]);
 
   const handleOk = () => {
     form.validateFields().then((values) => {
       setStrength(values.strength);
       setCount(values.count);
       setLoraPrompt(values.loraPrompt || '');
-      setCurrentWorkflow(values.workflow);
       setImagesPerRow(values.imagesPerRow);
       onClose();
     });
@@ -68,29 +63,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         form={form}
         layout="vertical"
         initialValues={{
-          workflow: currentWorkflow,
           strength: strength,
           count: count,
           loraPrompt: loraPrompt,
           imagesPerRow: imagesPerRow,
         }}
       >
-        <Form.Item label="工作流类型" name="workflow">
-          <Radio.Group buttonStyle="solid" style={{ width: '100%', display: 'flex' }}>
-            {availableWorkflows.length > 0 ? (
-              availableWorkflows.map((workflow) => (
-                <Radio.Button key={workflow} value={workflow} style={{ flex: 1, textAlign: 'center' }}>
-                  {workflow}
-                </Radio.Button>
-              ))
-            ) : (
-              <div style={{ padding: '8px', textAlign: 'center', color: '#999' }}>
-                加载中...
-              </div>
-            )}
-          </Radio.Group>
-        </Form.Item>
-
         <Form.Item label="生成强度">
           <Row gutter={12} align="middle">
             <Col flex="auto">

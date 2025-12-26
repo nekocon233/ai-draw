@@ -24,10 +24,15 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    async def generate_with_image_and_mask(self, workflow, image_b64, mask_b64, prompt_text, denoise_value,
-                                           lora_prompt, seed) -> ComfyUIRequestResult:
+    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed) -> ComfyUIRequestResult:
         """
-        执行推理请求，由子类实现
+        文生图（Text-to-Image）推理请求，由子类实现
+        """
+
+    @abstractmethod
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed) -> ComfyUIRequestResult:
+        """
+        图生图（Image-to-Image）推理请求，由子类实现
         """
 
     @abstractmethod

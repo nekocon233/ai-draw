@@ -21,14 +21,13 @@ export default function ImageUploader() {
         return false;
       }
 
-      const isLt10M = file.size / 1024 / 1024 < 10;
-      if (!isLt10M) {
-        message.error('图片大小不能超过 10MB!');
-        return false;
-      }
-
       try {
-        const res = await apiService.uploadImage(file);
+        // 压缩图片（降低分辨率和质量，避免 413 错误）
+        const { compressImage } = await import('../utils/helpers');
+        const compressed = await compressImage(file, 1024, 1024, 0.8);
+        const compressedFile = new File([compressed], file.name, { type: 'image/jpeg' });
+        
+        const res = await apiService.uploadImage(compressedFile);
         setReferenceImage(res.image);
         message.success('上传成功!');
       } catch (err: any) {
@@ -49,7 +48,11 @@ export default function ImageUploader() {
             danger
             size="small"
             icon={<DeleteOutlined />}
-            onClick={() => setReferenceImage(null)}
+            onClick={() => {
+              setReferenceImage(null);
+              // 保存配置状态
+              setTimeout(() => useAppStore.getState().saveSessionConfig(), 0);
+            }}
           >
             删除
           </Button>

@@ -25,7 +25,6 @@ export interface GenerateImageRequest {
   strength: number;
   lora_prompt?: string;
   count: number;
-  workflow_type: string;
   reference_image?: string;
 }
 

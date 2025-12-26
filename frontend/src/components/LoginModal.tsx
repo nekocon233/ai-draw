@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import { Modal, Form, Input, Tabs, message } from 'antd';
-import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { setAccessToken, setUsername } from '../utils/helpers';
 import { VALIDATION } from '../utils/constants';
@@ -36,7 +36,7 @@ export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps
     }
   };
 
-  const handleRegister = async (values: { username: string; password: string; email?: string }) => {
+  const handleRegister = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
       const response = await apiService.register(values);
@@ -117,20 +117,6 @@ export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps
         <Input
           prefix={<UserOutlined />}
           placeholder="用户名"
-          size="large"
-        />
-      </Form.Item>
-
-      <Form.Item
-        name="email"
-        label="邮箱"
-        rules={[
-          { pattern: VALIDATION.EMAIL.PATTERN, message: '请输入有效的邮箱地址' }
-        ]}
-      >
-        <Input
-          prefix={<MailOutlined />}
-          placeholder="邮箱（可选）"
           size="large"
         />
       </Form.Item>

@@ -55,6 +55,9 @@ Desktop.ini
 # Logs
 comfyui_log.txt
 
+# Uploads (user-generated content, auto-created by application)
+uploads/
+
 # React / Node
 frontend/node_modules/
 frontend/dist/

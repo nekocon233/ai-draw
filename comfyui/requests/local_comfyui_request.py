@@ -113,28 +113,61 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         #     self.log_thread.join(timeout=1)
         #     self.log_thread = None
 
-    async def generate_with_image_and_mask(self, workflow, image_b64, mask_b64, prompt_text, denoise_value, lora_prompt,
-                                           seed):
+    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed):
         """
-        异步发送图像和mask生成请求，返回ComfyRequestResult对象
+        异步发送T2I生成请求，返回ComfyRequestResult对象
         """
-        # 先在系统tmp目录下根据image_b64和mask_b64创建临时图片
+        # 设置workflow参数
+        try:
+            workflow.set_node_param("positive_prompt", "positive", prompt_text)
+            print("[LocalComfyUIRequest] positive_prompt参数设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置positive_prompt参数失败: {str(e)}")
+
+        try:
+            workflow.set_node_param("lora_prompt", "positive", lora_prompt)
+            print(f"[LocalComfyUIRequest] lora_prompt参数设置成功: {lora_prompt}")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置lora_prompt参数失败: {str(e)}")
+
+        try:
+            workflow.set_node_param("seed", "value", seed)
+            print("[LocalComfyUIRequest] seed参数设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
+
+        print("[LocalComfyUIRequest] T2I workflow参数设置完成")
+
+        # 执行工作流
+        prompt_id = await self.api.queue_prompt_and_wait(workflow)
+        image_node_id = workflow.get_node_id("保存图像")
+        history = self.api.get_history(prompt_id)
+        results = history[prompt_id]["outputs"][image_node_id]["images"]
+
+        if results:
+            first_result = results[0]
+            base64_content = self.api.get_image(first_result["filename"], first_result["subfolder"],
+                                                first_result["type"])
+            return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
+        return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
+
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed):
+        """
+        异步发送I2I生成请求，返回ComfyRequestResult对象
+        """
+        # 先在系统tmp目录下根据image_b64创建临时图片
         input_filename = os.path.join(tempfile.gettempdir(), "input_image.png")
-        mask_filename = os.path.join(tempfile.gettempdir(), "input_mask.png")
         try:
             async with aiofiles.open(input_filename, "wb") as f:
                 await f.write(base64.b64decode(image_b64))
-            async with aiofiles.open(mask_filename, "wb") as f:
-                await f.write(base64.b64decode(mask_b64))
         except Exception as e:
-            return ComfyUIRequestResult(success=False, data=None, error=f"写入临时图片或mask失败: {str(e)}")
+            return ComfyUIRequestResult(success=False, data=None, error=f"写入临时图片失败: {str(e)}")
 
-        # 上传图片和mask到ComfyUI
+        # 上传图片到ComfyUI
         try:
             image_metadata = self.api.upload_image(input_filename)
-            mask_metadata = self.api.upload_image(mask_filename)
         except Exception as e:
-            return ComfyUIRequestResult(success=False, data=None, error=f"上传图片或mask失败: {str(e)}")
+            return ComfyUIRequestResult(success=False, data=None, error=f"上传图片失败: {str(e)}")
 
         # 设置workflow参数
         try:
@@ -142,12 +175,6 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print("[LocalComfyUIRequest] main_image参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置main_image参数失败: {str(e)}")
-
-        try:
-            workflow.set_node_param("mask", "image", f"{mask_metadata['subfolder']}/{mask_metadata['name']}")
-            print("[LocalComfyUIRequest] mask参数设置成功")
-        except Exception as e:
-            print(f"[LocalComfyUIRequest] 设置mask参数失败: {str(e)}")
 
         try:
             workflow.set_node_param("positive_prompt", "positive", prompt_text)
@@ -168,12 +195,12 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print(f"[LocalComfyUIRequest] 设置lora_prompt参数失败: {str(e)}")
 
         try:
-            workflow.set_node_param("K采样器", "seed", seed)
-            print("[LocalComfyUIRequest] K采样器参数设置成功")
+            workflow.set_node_param("seed", "value", seed)
+            print("[LocalComfyUIRequest] seed参数设置成功")
         except Exception as e:
-            print(f"[LocalComfyUIRequest] 设置K采样器参数失败: {str(e)}")
+            print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
 
-        print("[LocalComfyUIRequest] workflow参数设置完成")
+        print("[LocalComfyUIRequest] I2I workflow参数设置完成")
 
         # 执行工作流
         prompt_id = await self.api.queue_prompt_and_wait(workflow)

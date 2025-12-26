@@ -26,5 +26,5 @@ if __name__ == "__main__":
         host=server_config.host,
         port=server_config.port,
         reload=server_config.reload,
-        log_level="info"
+        log_level="info",
     )

@@ -49,6 +49,12 @@
   background: var(--bg-primary);
 }
 
+.app-content {
+  display: flex;
+  height: calc(100vh - 60px);
+  overflow: hidden;
+}
+
 .app-header {
   background: transparent !important;
   border-bottom: none;
@@ -83,9 +89,10 @@
 
 /* ========== Gemini 风格聊天容器 ========== */
 .chat-container {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 49px); /* 减去顶部状态栏高度 */
+  height: 100%;
   background: var(--bg-primary);
   overflow: hidden;
 }

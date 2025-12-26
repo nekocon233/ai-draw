@@ -5,13 +5,30 @@ import { useAppStore } from '../stores/appStore';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow } = useAppStore();
+  const { chatHistory, imagesPerRow, currentSessionId } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevSessionId = useRef<string | null>(null);
+  const prevHistoryLength = useRef<number>(0);
 
-  // 当聊天历史更新时，自动滚动到底部
+  // 统一的滚动逻辑
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatHistory]);
+    const sessionChanged = currentSessionId && currentSessionId !== prevSessionId.current;
+    const historyChanged = chatHistory.length !== prevHistoryLength.current;
+    
+    if (sessionChanged) {
+      // 会话切换：记录新会话ID，不更新 historyLength
+      prevSessionId.current = currentSessionId;
+      // 等待新会话的历史加载完成后，由 historyChanged 触发滚动
+    }
+    
+    if (historyChanged && chatHistory.length > 0) {
+      // 历史更新：平滑滚动（包括会话切换后的首次加载）
+      prevHistoryLength.current = chatHistory.length;
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    }
+  }, [chatHistory, currentSessionId]);
 
   const downloadImage = (imageUrl: string, index: number) => {
     const link = document.createElement('a');

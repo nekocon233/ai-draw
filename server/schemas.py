@@ -25,7 +25,6 @@ class GenerateImageRequest(BaseModel):
     strength: float = 0.5
     lora_prompt: str = ""
     count: int = 1
-    workflow_type: str = "参考"
     reference_image: Optional[str] = None
 
 

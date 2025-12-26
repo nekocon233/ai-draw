@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, Dropdown, message } from 'antd';
+import { Input, Button, message } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -8,7 +8,6 @@ import {
   CloseOutlined,
   StopOutlined
 } from '@ant-design/icons';
-import type { MenuProps } from 'antd';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
 import SettingsModal from './SettingsModal';
@@ -23,12 +22,9 @@ export default function ChatInput() {
     strength,
     count,
     loraPrompt,
-    currentWorkflow,
     referenceImage,
     isGenerating,
-    availableWorkflows,
     setPrompt,
-    setCurrentWorkflow,
     setReferenceImage,
     setError,
     clearError,
@@ -51,27 +47,6 @@ export default function ChatInput() {
       textarea.setSelectionRange(length, length);
     }
   }, []);
-
-  // 工作流下拉菜单
-  const workflowMenu: MenuProps = {
-    items: availableWorkflows.map(workflow => ({
-      key: workflow,
-      label: workflow,
-      onClick: () => handleWorkflowChange(workflow),
-    })),
-  };
-
-  // 参数设置下拉菜单
-  const handleWorkflowChange = async (workflow: string) => {
-    try {
-      await apiService.switchWorkflow(workflow);
-      setCurrentWorkflow(workflow);
-      message.success(`已切换到 ${workflow} 工作流`);
-    } catch (err: any) {
-      setError(err.message);
-      message.error('切换工作流失败');
-    }
-  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -117,14 +92,15 @@ export default function ChatInput() {
     clearError();
 
     // 添加聊天消息（用户输入 + 加载占位符）
-    const messageId = useAppStore.getState().addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
+    // 根据是否有参考图选择工作流
+    const workflow = referenceImage ? 'i2i_workflow_api' : 't2i_workflow_api';
+    const messageId = await useAppStore.getState().addChatMessage(prompt, workflow, strength, count, loraPrompt);
 
     try {
       const res = await apiService.generateImage({
         prompt,
         strength,
         count,
-        workflow_type: currentWorkflow,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
       });
@@ -277,13 +253,6 @@ export default function ChatInput() {
             >
               <PictureOutlined />
             </button>
-
-            {/* 工作流选择 */}
-            <Dropdown menu={workflowMenu} trigger={['click']} placement="topLeft">
-              <button className="chat-input-icon-button" title={`当前工作流: ${currentWorkflow || '通用'}`}>
-                {(currentWorkflow || '通用')[0]}
-              </button>
-            </Dropdown>
 
             {/* 参数设置 */}
             <button 

@@ -169,11 +169,9 @@ class ComfyUIService:
         """
         self._cleanup_temp_file()
 
-    async def generate_with_image_and_mask(self, finish_callback, image_base64, mask_base64, prompt_text, denoise_value,
-                                           lora_prompt, seed=None):
+    async def generate_t2i(self, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None):
         """
-        image_base64: 原始图片base64
-        mask_base64: mask图片base64
+        文生图（Text-to-Image）
         prompt_text: 文本提示
         denoise_value: 去噪强度
         lora_prompt: lora提示词
@@ -181,24 +179,42 @@ class ComfyUIService:
         finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
         """
         if seed is None:
-            seed = random.randrange(0, 0xffffffffffffffff)
+            # 限制为有符号 64 位整数范围，避免 ComfyUI 返回 400 错误
+            seed = random.randrange(0, 2**63)
+
+        # 请求ComfyUI服务生成图像（异步）
+        result = await self.request.generate_t2i(self.workflow, prompt_text, denoise_value, lora_prompt, seed)
+        if result.is_success:
+            print(f"[ComfyUIService] T2I生成成功")
+            finish_callback(result.data)
+        else:
+            print(f"[ComfyUIService] T2I生成失败: {result.error}")
+
+    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None):
+        """
+        图生图（Image-to-Image）
+        image_base64: 原始图片base64
+        prompt_text: 文本提示
+        denoise_value: 去噪强度
+        lora_prompt: lora提示词
+        seed: 随机种子
+        finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
+        """
+        if seed is None:
+            # 限制为有符号 64 位整数范围，避免 ComfyUI 返回 400 错误
+            seed = random.randrange(0, 2**63)
 
         img, orig_size = self.image_processor.convert_to_base64(image_base64)
         image_b64, valid_region = self.image_processor.prepare_image_base64(img)
 
-        # 新增mask处理
-        mask_img, _ = self.image_processor.convert_to_base64(mask_base64)
-        mask_b64, _ = self.image_processor.prepare_image_base64(mask_img)
-
-        # 请求ComfyUI服务生成图像（异步），传递mask_b64和lora_prompt
-        result = await self.request.generate_with_image_and_mask(self.workflow, image_b64, mask_b64, prompt_text,
-                                                                 denoise_value, lora_prompt, seed)
+        # 请求ComfyUI服务生成图像（异步）
+        result = await self.request.generate_i2i(self.workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed)
         if result.is_success:
-            print(f"[ComfyUIService] 生成成功")
+            print(f"[ComfyUIService] I2I生成成功")
             base64_content = self.image_processor.resize(result.data, target_size=orig_size, crop_box=valid_region)
             finish_callback(base64_content)
         else:
-            print(f"[ComfyUIService] 生成失败: {result.error}")
+            print(f"[ComfyUIService] I2I生成失败: {result.error}")
 
     async def get_state(self) -> ComfyUIRequestState:
         """

@@ -6,9 +6,11 @@ FastAPI 主入口文件
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from utils.config_loader import get_config
+from utils.file_storage import get_file_storage
 from server.api import router as api_router
 from server.websocket import router as ws_router
 from server.ai_draw_service import get_ai_draw_service
@@ -21,6 +23,10 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     print("[FastAPI] 正在初始化数据库...")
     init_db()
+    
+    print("[FastAPI] 正在初始化文件存储...")
+    file_storage = get_file_storage()
+    print(f"[FastAPI] 文件存储目录: {file_storage.upload_dir}")
     
     print("[FastAPI] 正在初始化 AI Draw 服务...")
     service = get_ai_draw_service()
@@ -70,7 +76,16 @@ register_exception_handlers(app)
 app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
 
-# 静态文件服务（生产环境）
+# 挂载静态文件服务（上传的图片）
+import os
+upload_dir = config.paths.upload_dir
+if os.path.exists(upload_dir):
+    app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+    print(f"[FastAPI] 静态文件服务已挂载: /uploads -> {upload_dir}")
+else:
+    print(f"[FastAPI] 警告: 上传目录不存在: {upload_dir}")
+
+# 静态文件服务（生产环境 - 前端）
 # app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
 
 

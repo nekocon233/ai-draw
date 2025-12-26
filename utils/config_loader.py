@@ -76,6 +76,7 @@ class ServerConfig(BaseSettings):
 class PathsConfig(BaseSettings):
     """路径配置"""
     workflows: str = Field(validation_alias="WORKFLOWS_PATH")
+    upload_dir: str = Field(validation_alias="UPLOAD_DIR")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -7,40 +7,26 @@
 # 工作流配置
 workflow_defaults:
   # 默认工作流类型
-  current_workflow_type: "通用"
+  current_workflow_type: "t2i"
   # 列数
   col_count: 4
   
   # 工作流文件名映射
   workflow_files:
-    通用: "common_workflow_api.json"
-    上色: "color_workflow_api.json"
-    图生图: "img2img_workflow_api.json"
-    线稿: "lineart_workflow_api.json"
+    t2i: "t2i_workflow_api.json"
+    i2i: "i2i_workflow_api.json"
   
   # 各工作流的默认参数
   workflows:
-    通用:
+    t2i:
       description: "一个女孩"
       prompt: "1girl"
-      lora_prompt: "<lora:Ameniwa:0.6>"
+      lora_prompt: "<lora:AmeniwaZ:0.8>"
       strength: 0.8
       count: 1
-    上色:
+    i2i:
       description: "一个女孩"
       prompt: "1girl"
-      lora_prompt: "<lora:Ameniwa:0.6>"
-      strength: 0.8
-      count: 1
-    图生图:
-      description: "一个女孩"
-      prompt: "1girl"
-      lora_prompt: "<lora:Ameniwa:0.6>"
-      strength: 0.8
-      count: 1
-    线稿:
-      description: ""
-      prompt: ""
-      lora_prompt: ""
+      lora_prompt: "<lora:AmeniwaZ:0.8>"
       strength: 0.8
       count: 1

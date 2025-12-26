@@ -108,25 +108,30 @@ class AIDrawService:
         strength: float = 0.5,
         lora_prompt: str = "",
         count: int = 1,
-        workflow_type: str = "参考",
         reference_image: Optional[str] = None
     ) -> list:
-        """生成图像"""
+        """生成图像 - 自动根据是否有参考图选择 T2I 或 I2I 工作流"""
         try:
             self.is_generating = True
             self._notify_state_change('is_generating', True)
             self._notify_state_change('generation_progress', '正在生成图像...')
             
+            # 根据是否有参考图自动选择工作流
+            if reference_image:
+                # 有图片 - 使用 I2I 工作流
+                workflow_type = "i2i"
+                print(f"[AIDrawService] 检测到参考图，使用 I2I 工作流")
+            else:
+                # 无图片 - 使用 T2I 工作流
+                workflow_type = "t2i"
+                print(f"[AIDrawService] 无参考图，使用 T2I 工作流")
+            
             # 切换工作流
             if workflow_type != self.comfyui.get_current_workflow_type():
                 self.comfyui.switch_workflow(workflow_type)
             
-            # 准备图片和mask
-            import base64
-            from PIL import Image
-            import io
-            
-            # 使用参考图或创建默认图
+            # 处理参考图（如果有）
+            image_base64 = None
             if reference_image:
                 # 去除 data URL 前缀（如果有）
                 if reference_image.startswith('data:image'):
@@ -134,29 +139,11 @@ class AIDrawService:
                     image_base64 = reference_image.split(',', 1)[1]
                 else:
                     image_base64 = reference_image
-                
-                # 获取图片尺寸以创建等大的mask
-                img_data = base64.b64decode(image_base64)
-                img = Image.open(io.BytesIO(img_data))
-                width, height = img.size
-            else:
-                # 如果没有参考图，创建一个512x512的空白图
-                width, height = 512, 512
-                empty_img = Image.new('RGB', (width, height), (255, 255, 255))
-                img_buffer = io.BytesIO()
-                empty_img.save(img_buffer, format='PNG')
-                image_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
-            
-            # 创建与图片等大的白色mask
-            mask_img = Image.new('RGB', (width, height), (255, 255, 255))
-            mask_buffer = io.BytesIO()
-            mask_img.save(mask_buffer, format='PNG')
-            mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode('utf-8')
             
             # 生成多张图片
             images = []
             for i in range(count):
-                seed = None  # 让 generate_with_image_and_mask 自动生成
+                seed = None  # 让方法自动生成
                 
                 # 存储结果
                 result_images = []
@@ -175,22 +162,32 @@ class AIDrawService:
                         'total': count
                     })
                 
-                # 调用 generate_with_image_and_mask
-                await self.comfyui.generate_with_image_and_mask(
-                    finish_callback=finish_callback,
-                    image_base64=image_base64,
-                    mask_base64=mask_base64,
-                    prompt_text=prompt,
-                    denoise_value=strength,
-                    lora_prompt=lora_prompt or "",
-                    seed=seed
-                )
+                # 根据工作流类型调用不同的方法
+                if workflow_type == "i2i":
+                    await self.comfyui.generate_i2i(
+                        finish_callback=finish_callback,
+                        image_base64=image_base64,
+                        prompt_text=prompt,
+                        denoise_value=strength,
+                        lora_prompt=lora_prompt or "",
+                        seed=seed
+                    )
+                else:  # t2i
+                    await self.comfyui.generate_t2i(
+                        finish_callback=finish_callback,
+                        prompt_text=prompt,
+                        denoise_value=strength,
+                        lora_prompt=lora_prompt or "",
+                        seed=seed
+                    )
                 
-                if result_images:
+                if result_images and result_images[0] is not None:
                     images.extend(result_images)
                     print(f"[AIDrawService] 第 {i+1}/{count} 张生成成功")
                 else:
-                    print(f"[AIDrawService] 第 {i+1}/{count} 张生成失败")
+                    error_msg = f"第 {i+1}/{count} 张生成失败：未收到有效图像数据"
+                    print(f"[AIDrawService] {error_msg}")
+                    raise Exception(error_msg)
             
             # 添加到预览列表
             if images:

@@ -10,7 +10,6 @@
 export interface User {
   id: number;
   username: string;
-  email?: string;
   created_at: string;
 }
 
@@ -24,6 +23,46 @@ export interface UserConfig {
   strength: number;
   count: number;
   images_per_row: number;
+  current_session_id?: string;  // 当前选中的会话ID
+  updated_at: string;
+}
+
+// ============ 聊天会话相关 ============
+
+/**
+ * 聊天会话配置（每个会话独立的设置）
+ */
+export interface SessionConfig {
+  workflow: string;
+  prompt: string;
+  loraPrompt: string;
+  strength: number;
+  count: number;
+  imagesPerRow: number;
+  referenceImage: string | null;
+}
+
+/**
+ * 聊天会话（前端格式）
+ */
+export interface ChatSession {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+  config?: SessionConfig; // 会话配置（游客模式使用）
+}
+
+/**
+ * 聊天会话（数据库格式）
+ */
+export interface DBChatSession {
+  id: number;
+  session_id: string;
+  user_id: number;
+  title: string;
+  created_at: string;
   updated_at: string;
 }
 
@@ -34,6 +73,7 @@ export interface UserConfig {
  */
 export interface ChatMessage {
   id: string;
+  session_id: string; // 关联会话ID
   type: 'user' | 'assistant';
   content: string;
   images?: (string | { loading: true })[];
@@ -51,6 +91,7 @@ export interface ChatMessage {
  */
 export interface DBChatMessage {
   id: number;
+  session_id: string; // 关联会话ID
   user_id: number;
   message_id: string;
   type: 'user' | 'assistant';

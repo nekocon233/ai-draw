@@ -10,7 +10,6 @@ export default function GenerateButton() {
     strength,
     count,
     loraPrompt,
-    currentWorkflow,
     referenceImage,
     isGenerating,
     setError,
@@ -27,14 +26,15 @@ export default function GenerateButton() {
     clearError();
 
     // 添加用户消息到聊天历史（包含加载占位符）
-    addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
+    // 根据是否有参考图选择工作流
+    const workflow = referenceImage ? 'i2i_workflow_api' : 't2i_workflow_api';
+    await addChatMessage(prompt, workflow, strength, count, loraPrompt);
 
     try {
       const res = await apiService.generateImage({
         prompt,
         strength,
         count,
-        workflow_type: currentWorkflow,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
       });

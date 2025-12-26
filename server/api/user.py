@@ -4,11 +4,11 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 
 from server.database import get_db
-from server.models import User, UserConfig, ChatMessage, GeneratedImage, ReferenceImage
+from server.models import User, UserConfig, ChatMessage, ChatSession, GeneratedImage, ReferenceImage
 from server.auth import (
     get_current_user,
     get_current_user_optional,
@@ -16,6 +16,7 @@ from server.auth import (
     create_access_token,
     authenticate_user
 )
+from utils.file_storage import get_file_storage
 
 router = APIRouter()
 
@@ -24,7 +25,6 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     username: str
     password: str
-    email: Optional[EmailStr] = None
 
 class LoginRequest(BaseModel):
     username: str
@@ -41,6 +41,7 @@ class UserConfigResponse(BaseModel):
     strength: float
     count: int
     images_per_row: int
+    current_session_id: Optional[str] = None
 
 class UpdateConfigRequest(BaseModel):
     current_workflow: Optional[str] = None
@@ -49,6 +50,7 @@ class UpdateConfigRequest(BaseModel):
     strength: Optional[float] = None
     count: Optional[int] = None
     images_per_row: Optional[int] = None
+    current_session_id: Optional[str] = None
 
 # ============ 用户认证 API ============
 
@@ -66,14 +68,25 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     # 创建用户
     user = User(
         username=request.username,
-        password_hash=hash_password(request.password),
-        email=request.email
+        password_hash=hash_password(request.password)
     )
     db.add(user)
     db.flush()  # 获取 user.id
     
-    # 创建默认配置
-    config = UserConfig(user_id=user.id)
+    # 创建默认配置（从 app_config.yaml 读取）
+    from utils.config_loader import get_config
+    cfg = get_config()
+    t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
+    
+    config = UserConfig(
+        user_id=user.id,
+        current_workflow="t2i",
+        prompt=t2i_defaults.get('prompt'),
+        lora_prompt=t2i_defaults.get('lora_prompt'),
+        strength=t2i_defaults.get('strength'),
+        count=t2i_defaults.get('count'),
+        images_per_row=cfg.workflow_defaults.col_count
+    )
     db.add(config)
     db.commit()
     db.refresh(user)
@@ -115,8 +128,20 @@ def get_user_config(
     """获取用户配置"""
     config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
     if not config:
-        # 创建默认配置
-        config = UserConfig(user_id=current_user.id)
+        # 创建默认配置（从 app_config.yaml 读取）
+        from utils.config_loader import get_config
+        cfg = get_config()
+        t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
+        
+        config = UserConfig(
+            user_id=current_user.id,
+            current_workflow="t2i",
+            prompt=t2i_defaults.get('prompt'),
+            lora_prompt=t2i_defaults.get('lora_prompt'),
+            strength=t2i_defaults.get('strength'),
+            count=t2i_defaults.get('count'),
+            images_per_row=cfg.workflow_defaults.col_count
+        )
         db.add(config)
         db.commit()
         db.refresh(config)
@@ -127,7 +152,8 @@ def get_user_config(
         lora_prompt=config.lora_prompt,
         strength=config.strength,
         count=config.count,
-        images_per_row=config.images_per_row
+        images_per_row=config.images_per_row,
+        current_session_id=config.current_session_id
     )
 
 @router.post("/config/user")
@@ -160,12 +186,17 @@ def reset_user_config(
     """重置用户配置为默认值"""
     config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
     if config:
-        config.current_workflow = "参考"
-        config.prompt = "1girl"
-        config.lora_prompt = "<lora:Ameniwa:0.6>"
-        config.strength = 0.8
-        config.count = 1
-        config.images_per_row = 4
+        # 从 app_config.yaml 读取默认值
+        from utils.config_loader import get_config
+        cfg = get_config()
+        t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
+        
+        config.current_workflow = "t2i"
+        config.prompt = t2i_defaults.get('prompt')
+        config.lora_prompt = t2i_defaults.get('lora_prompt')
+        config.strength = t2i_defaults.get('strength')
+        config.count = t2i_defaults.get('count')
+        config.images_per_row = cfg.workflow_defaults.col_count
         config.updated_at = datetime.utcnow()
         db.commit()
     
@@ -176,15 +207,18 @@ def reset_user_config(
 @router.get("/chat/history")
 def get_chat_history(
     limit: int = 50,
+    session_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取聊天历史"""
-    messages = db.query(ChatMessage)\
-        .filter(ChatMessage.user_id == current_user.id)\
-        .order_by(ChatMessage.created_at.desc())\
-        .limit(limit)\
-        .all()
+    """获取聊天历史（支持按会话过滤）"""
+    query = db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id)
+    
+    # 如果指定了会话ID，只返回该会话的消息
+    if session_id:
+        query = query.filter(ChatMessage.session_id == session_id)
+    
+    messages = query.order_by(ChatMessage.created_at.desc()).limit(limit).all()
     
     result = []
     for msg in reversed(messages):
@@ -208,8 +242,14 @@ def get_chat_history(
                 .filter(GeneratedImage.message_id == msg.message_id)\
                 .order_by(GeneratedImage.image_index)\
                 .all()
-            # 返回 base64 图片数据
-            msg_dict["images"] = [img.file_path for img in images]
+            # 转换为 URL（如果是文件路径）或直接返回 base64
+            file_storage = get_file_storage()
+            msg_dict["images"] = [
+                file_storage.get_file_url(img.file_path) 
+                if not img.file_path.startswith('data:image') 
+                else img.file_path 
+                for img in images
+            ]
         
         result.append(msg_dict)
     
@@ -240,11 +280,24 @@ def save_reference_image(
         ReferenceImage.is_current == True
     ).update({"is_current": False})
     
-    # 保存新的参考图
+    # 保存新的参考图到文件系统
+    file_storage = get_file_storage()
+    try:
+        relative_path = file_storage.save_reference_image(
+            base64_data=data["image"],
+            user_id=current_user.id,
+            filename=data.get("filename", "reference.png")
+        )
+        file_path = relative_path
+    except Exception as e:
+        print(f"[保存参考图] 失败: {e}")
+        # 失败时依然使用 base64
+        file_path = data["image"]
+    
     ref_img = ReferenceImage(
         user_id=current_user.id,
         filename=data.get("filename", "reference.png"),
-        file_path=data["image"],  # base64 数据
+        file_path=file_path,
         is_current=True
     )
     db.add(ref_img)
@@ -263,7 +316,14 @@ def get_reference_image(
     ).first()
     
     if ref_img:
-        return {"image": ref_img.file_path}
+        # 转换为 URL（如果是文件路径）
+        file_storage = get_file_storage()
+        image_url = (
+            file_storage.get_file_url(ref_img.file_path)
+            if not ref_img.file_path.startswith('data:image')
+            else ref_img.file_path
+        )
+        return {"image": image_url}
     return {"image": None}
 
 @router.delete("/reference-image")
@@ -292,6 +352,13 @@ def save_chat_message(
     
     # 兼容两种字段名：id 或 message_id
     msg_id = message.get("message_id") or message.get("id")
+    session_id = message.get("session_id")
+    
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少会话ID"
+        )
     
     # 检查消息是否已存在
     existing = db.query(ChatMessage).filter(
@@ -303,6 +370,7 @@ def save_chat_message(
         return {"success": True, "message": "消息已存在"}
     
     chat_msg = ChatMessage(
+        session_id=session_id,
         user_id=current_user.id,
         message_id=msg_id,
         type=message["type"],
@@ -316,14 +384,32 @@ def save_chat_message(
     
     # 如果是 assistant 消息，保存图片
     if message["type"] == "assistant" and "images" in message:
+        file_storage = get_file_storage()
         for idx, img_data in enumerate(message["images"]):
             if isinstance(img_data, str):  # base64 图片数据
-                gen_img = GeneratedImage(
-                    message_id=msg_id,
-                    image_index=idx,
-                    file_path=img_data  # 直接存储 base64
-                )
-                db.add(gen_img)
+                try:
+                    # 保存到文件系统
+                    relative_path = file_storage.save_generated_image(
+                        base64_data=img_data,
+                        user_id=current_user.id,
+                        message_id=msg_id,
+                        index=idx
+                    )
+                    gen_img = GeneratedImage(
+                        message_id=msg_id,
+                        image_index=idx,
+                        file_path=relative_path  # 存储相对路径
+                    )
+                    db.add(gen_img)
+                except Exception as e:
+                    print(f"[保存图片] 保存失败: {e}")
+                    # 失败时依然保存 base64 作为备选
+                    gen_img = GeneratedImage(
+                        message_id=msg_id,
+                        image_index=idx,
+                        file_path=img_data
+                    )
+                    db.add(gen_img)
     
     db.commit()
     return {"success": True}

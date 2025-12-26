@@ -7,6 +7,7 @@ from fastapi import APIRouter
 # 导入各个模块的路由
 from server.api import image, prompt, service
 from server.api.user import router as user_router
+from server.api.session import router as session_router
 
 # 创建主路由
 router = APIRouter()
@@ -16,6 +17,7 @@ router.include_router(image.router)
 router.include_router(prompt.router)
 router.include_router(service.router)
 router.include_router(user_router)
+router.include_router(session_router)
 
 __all__ = ['router']
 
@@ -44,7 +46,7 @@ class GenerateImageRequest(BaseModel):
     strength: float = 0.5
     lora_prompt: str = ""
     count: int = 1
-    workflow_type: str = "参考"
+    workflow_type: str = "通用"
     reference_image: Optional[str] = None
 
 
@@ -151,7 +153,7 @@ async def get_previews(service: AIDrawService = Depends(get_ai_draw_service)):
 @router.get("/workflows")
 async def get_workflows():
     """获取可用工作流列表"""
-    return {"workflows": ["参考", "上色", "图生图", "线稿"]}
+    return {"workflows": ["通用", "上色", "图生图", "线稿"], "default_workflow": "通用"}
 
 
 @router.get("/workflow/defaults")

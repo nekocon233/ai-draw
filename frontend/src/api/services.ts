@@ -16,7 +16,7 @@ import type { AuthResponse, UserConfig } from '../types/models';
 
 export const apiService = {
   // 用户认证
-  register: (data: { username: string; password: string; email?: string }): Promise<AuthResponse> =>
+  register: (data: { username: string; password: string }): Promise<AuthResponse> =>
     client.post('/auth/register', data),
   
   login: (data: { username: string; password: string }): Promise<AuthResponse> =>
@@ -32,11 +32,48 @@ export const apiService = {
   resetUserConfig: (): Promise<{ message: string }> =>
     client.delete('/config/user'),
   
+  // 会话管理
+  getSessions: (): Promise<any[]> =>
+    client.get('/chat/sessions'),
+  
+  createSession: (title?: string): Promise<{ session_id: string; title: string; created_at: number; updated_at: number }> =>
+    client.post('/chat/sessions', { session_id: `session-${Date.now()}`, title: title || '新对话' }),
+  
+  deleteSession: (sessionId: string): Promise<{ message: string }> =>
+    client.delete(`/chat/sessions/${sessionId}`),
+  
+  updateSessionTitle: (sessionId: string, title: string): Promise<{ message: string }> =>
+    client.put(`/chat/sessions/${sessionId}`, { title }),
+  
+  // 会话配置
+  getSessionConfig: (sessionId: string): Promise<{
+    workflow: string;
+    prompt: string;
+    lora_prompt: string;
+    strength: number;
+    count: number;
+    images_per_row: number;
+    reference_image: string | null;
+  }> =>
+    client.get(`/chat/sessions/${sessionId}/config`),
+  
+  updateSessionConfig: (sessionId: string, config: {
+    workflow?: string;
+    prompt?: string;
+    lora_prompt?: string;
+    strength?: number;
+    count?: number;
+    images_per_row?: number;
+    reference_image?: string | null;
+  }): Promise<{ message: string }> =>
+    client.put(`/chat/sessions/${sessionId}/config`, config),
+  
   // 聊天历史
-  getChatHistory: (limit?: number): Promise<{ messages: any[] }> =>
-    client.get('/chat/history', { params: { limit } }),
+  getChatHistory: (limit?: number, sessionId?: string): Promise<{ messages: any[] }> =>
+    client.get('/chat/history', { params: { limit, session_id: sessionId } }),
   
   saveChatMessage: (data: {
+    session_id: string;
     message_id: string;
     type: 'user' | 'assistant';
     content: string;
@@ -93,6 +130,9 @@ export const apiService = {
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),
+
+  getWorkflowDefaults: (): Promise<{ success: boolean; defaults: any }> =>
+    client.get('/workflow/defaults'),
   
   switchWorkflow: (workflow_type: string): Promise<{ message: string }> =>
     client.post('/workflow/switch', null, { params: { workflow_type } }),

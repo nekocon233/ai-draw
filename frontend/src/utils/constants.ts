@@ -50,9 +50,9 @@ export const WS_CONFIG = {
 
 // ============ 默认配置 ============
 export const DEFAULT_CONFIG = {
-  WORKFLOW: '通用', // 后备默认工作流，实际从后端 API 获取
+  WORKFLOW: 't2i', // 后备默认工作流
   PROMPT: '1girl',
-  LORA_PROMPT: '<lora:Ameniwa:0.6>',
+  LORA_PROMPT: '',  // 从后端 API 加载
   STRENGTH: 0.8,
   COUNT: 1,
   IMAGES_PER_ROW: 4,
@@ -88,6 +88,14 @@ export const UI_CONFIG = {
   CHAT_HISTORY_LIMIT: 50, // 聊天历史最大条数
   IMAGE_MAX_SIZE: 10 * 1024 * 1024, // 图片最大尺寸 10MB
   DEBOUNCE_DELAY: 300, // 防抖延迟（ms）
+} as const;
+
+// ============ 存储配置 ============
+export const STORAGE_CONFIG = {
+  MAX_HISTORY_MESSAGES: 100, // 游客模式最大历史消息数（约 50 轮对话）
+  MIN_HISTORY_MESSAGES: 20,  // 配额不足时的最小保留消息数
+  MAX_DATA_SIZE: 4 * 1024 * 1024, // 单个会话最大数据大小 (4MB)
+  WARN_USAGE_PERCENTAGE: 80, // 存储使用率警告阈值 (80%)
 } as const;
 
 // ============ 表单验证 ============

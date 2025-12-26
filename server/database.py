@@ -1,10 +1,11 @@
 """
 数据库连接和会话管理
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from contextlib import contextmanager
 from utils.config_loader import get_database_config
+import time
 
 # 从配置加载数据库连接信息
 db_config = get_database_config()
@@ -18,6 +19,7 @@ engine = create_engine(
     max_overflow=20,  # 最大溢出连接数
     pool_pre_ping=True,  # 连接前测试
     echo=False,  # 生产环境设为 False
+    connect_args={"connect_timeout": 10}  # 连接超时
 )
 
 # 会话工厂
@@ -27,9 +29,28 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def init_db():
-    """初始化数据库（创建所有表）"""
-    Base.metadata.create_all(bind=engine)
-    print("[Database] 数据库表初始化完成")
+    """初始化数据库（创建所有表），支持重试"""
+    max_retries = 5
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            # 测试连接
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            
+            # 创建表
+            Base.metadata.create_all(bind=engine)
+            print("[Database] 数据库表初始化完成")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[Database] 连接失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                print(f"[Database] {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[Database] 数据库初始化失败: {e}")
+                raise
 
 def get_db():
     """

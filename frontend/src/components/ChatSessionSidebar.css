@@ -1,0 +1,217 @@
+.chat-session-sidebar {
+  width: 280px;
+  height: calc(100vh - 60px);
+  background: var(--sidebar-bg, #1a1d24);
+  border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  transition: width 0.3s ease;
+}
+
+.chat-session-sidebar.collapsed {
+  width: 60px;
+}
+
+.collapse-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  transition: all 0.2s;
+  border-radius: 6px;
+}
+
+.collapse-btn:hover {
+  color: var(--primary-color, #8250df);
+  background: var(--hover-bg, rgba(255, 255, 255, 0.1)) !important;
+}
+
+.sidebar-header {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  transition: all 0.3s ease;
+  gap: 12px;
+}
+
+.collapsed .sidebar-header {
+  padding: 12px;
+  justify-content: center;
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  transition: all 0.3s ease;
+}
+
+.collapsed .session-list {
+  opacity: 0;
+  pointer-events: none;
+  padding: 0;
+}
+
+.session-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.session-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.session-item {
+  padding: 12px !important;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--session-bg, rgba(255, 255, 255, 0.05));
+  border: 1px solid transparent;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.session-item:hover {
+  background: var(--session-hover-bg, rgba(255, 255, 255, 0.08));
+  border-color: var(--primary-color, #8250df);
+}
+
+.session-item.active {
+  background: var(--session-active-bg, rgba(130, 80, 223, 0.15));
+  border-color: var(--primary-color, #8250df);
+}
+
+.session-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.session-icon {
+  color: var(--icon-color, rgba(255, 255, 255, 0.6));
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.session-title {
+  color: var(--text-primary, #ffffff);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-title-edit {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.session-title-edit .ant-input {
+  flex: 1;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.session-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+  padding-left: 22px;
+}
+
+.session-time {
+  white-space: nowrap;
+}
+
+.session-count {
+  white-space: nowrap;
+}
+
+.session-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  margin-left: 8px;
+}
+
+.session-item:hover .session-actions {
+  opacity: 1;
+}
+
+.session-actions button {
+  padding: 4px;
+  min-width: 24px;
+  height: 24px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .chat-session-sidebar {
+    width: 240px;
+  }
+  
+  .sidebar-header h3 {
+    font-size: 14px;
+  }
+}
+
+/* 明亮模式 */
+.light-mode .chat-session-sidebar {
+  --sidebar-bg: #f6f8fa;
+  --border-color: rgba(0, 0, 0, 0.1);
+  --text-primary: #1f2328;
+  --text-secondary: rgba(0, 0, 0, 0.5);
+  --icon-color: rgba(0, 0, 0, 0.5);
+  --session-bg: #ffffff;
+  --session-hover-bg: rgba(0, 0, 0, 0.03);
+  --session-active-bg: rgba(130, 80, 223, 0.1);
+}
+
+/* 暗黑模式 */
+.dark-mode .chat-session-sidebar {
+  --sidebar-bg: #1a1d24;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.5);
+  --icon-color: rgba(255, 255, 255, 0.6);
+  --session-bg: rgba(255, 255, 255, 0.05);
+  --session-hover-bg: rgba(255, 255, 255, 0.08);
+  --session-active-bg: rgba(130, 80, 223, 0.15);
+  --primary-color: #8250df;
+}
