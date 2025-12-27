@@ -78,10 +78,8 @@ COPY utils/ ./utils/
 COPY configs/ ./configs/
 COPY run.py .
 
-# 创建非 root 用户运行应用（安全性最佳实践）
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-USER appuser
+# 创建 uploads 目录
+RUN mkdir -p /app/uploads
 
 # 启动命令 - 使用 run.py 从配置读取端口
 CMD ["python", "run.py"]

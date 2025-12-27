@@ -23,6 +23,8 @@ services:
       - ./.env:/app/.env:ro
       # 前端构建产物共享给 Nginx
       - frontend-dist:/app/frontend/dist
+      # 用户上传文件和生成图片持久化存储
+      - uploads-data:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Shanghai
@@ -121,6 +123,8 @@ services:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       # 从后端容器复制前端构建产物
       - frontend-dist:/usr/share/nginx/html:ro
+      # 共享上传文件给 Nginx 静态文件服务
+      - uploads-data:/usr/share/nginx/uploads:ro
     entrypoint: ["/docker-entrypoint.sh"]
     networks:
       - ai-draw-network
@@ -139,6 +143,8 @@ networks:
 # ============================================
 volumes:
   postgres_data:
+    driver: local
+  uploads-data:
     driver: local
   frontend-dist:
     driver: local

@@ -15,7 +15,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     email = Column(String(100))
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     last_login = Column(DateTime)
     
     # 关系
@@ -40,7 +40,7 @@ class UserConfig(Base):
     images_per_row = Column(Integer, default=4)
     current_session_id = Column(String(100), nullable=True)  # 当前选中的会话ID
     
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # 关系
     user = relationship("User", back_populates="config")
@@ -53,7 +53,7 @@ class ReferenceImage(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String(255))
     file_path = Column(Text, nullable=False)  # 存储相对文件路径（登录用户）或 base64（游客模式）
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=datetime.now)
     is_current = Column(Boolean, default=False)  # 是否为当前参考图
     
     # 关系
@@ -67,8 +67,8 @@ class ChatSession(Base):
     session_id = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), default="新对话")
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     
     # 会话配置（独立于用户全局配置，默认值在创建时从配置读取）
     config_workflow = Column(String(20), nullable=True)
@@ -100,7 +100,7 @@ class ChatMessage(Base):
     count = Column(Integer)
     lora_prompt = Column(String(255))
     
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
     
     # 关系
     session = relationship("ChatSession", back_populates="messages")
@@ -115,7 +115,7 @@ class GeneratedImage(Base):
     message_id = Column(String(50), ForeignKey("chat_messages.message_id", ondelete="CASCADE"), nullable=False)
     image_index = Column(Integer)  # 图片在消息中的索引
     file_path = Column(Text, nullable=False)  # 存储相对文件路径（登录用户）或 base64（游客模式）
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     # 关系
     message = relationship("ChatMessage", back_populates="images")

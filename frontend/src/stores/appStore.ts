@@ -199,12 +199,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           const newSession: ChatSession = {
             id: sessionId,
             title: response.title,
-            created_at: response.created_at * 1000, // 转换为毫秒
-            updated_at: response.updated_at * 1000,
+            created_at: response.created_at,
+            updated_at: response.updated_at,
             message_count: 0,
           };
           set({ 
-            sessions: [...state.sessions, newSession],
+            sessions: [newSession, ...state.sessions], // 新会话放在最前面
             currentSessionId: sessionId 
           });
         } catch (err) {
@@ -223,7 +223,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           message_count: 0,
         };
         set({ 
-          sessions: [...state.sessions, newSession],
+          sessions: [newSession, ...state.sessions], // 新会话放在最前面
           currentSessionId: newSessionId 
         });
         sessionId = newSessionId;
@@ -635,11 +635,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         const response = await apiService.createSession(newTitle);
         const realSessionId = response.session_id;
         
-        // 更新为后端返回的真实 session_id
+        // 更新为后端返回的真实 session_id（后端已经返回毫秒级时间戳，无需再乘以1000）
         set((state) => ({
           sessions: state.sessions.map(s => 
             s.id === sessionId 
-              ? { ...s, id: realSessionId, created_at: response.created_at * 1000, updated_at: response.updated_at * 1000 }
+              ? { ...s, id: realSessionId, created_at: response.created_at, updated_at: response.updated_at }
               : s
           ),
           currentSessionId: realSessionId

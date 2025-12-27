@@ -163,7 +163,7 @@ def update_session_title(
     
     # 更新标题
     session.title = request.title
-    session.updated_at = datetime.utcnow()
+    session.updated_at = datetime.now()
     db.commit()
     
     print(f"[Session] 用户 {current_user.username} 更新会话标题: {session_id} -> {request.title}")
@@ -207,7 +207,7 @@ def update_session_config(
     if 'reference_image' in update_data:
         session.config_reference_image = update_data['reference_image']
     
-    session.updated_at = datetime.utcnow()
+    session.updated_at = datetime.now()
     db.commit()
     
     print(f"[Session] 用户 {current_user.username} 更新会话配置: {session_id}")

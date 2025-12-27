@@ -109,7 +109,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         )
     
     # 更新最后登录时间
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now()
     db.commit()
     
     print(f"[Auth] 用户登录: {user.username}")
@@ -173,7 +173,7 @@ def update_user_config(
     for key, value in update_data.items():
         setattr(config, key, value)
     
-    config.updated_at = datetime.utcnow()
+    config.updated_at = datetime.now()
     db.commit()
     
     return {"success": True, "message": "配置更新成功"}
@@ -197,7 +197,7 @@ def reset_user_config(
         config.strength = t2i_defaults.get('strength')
         config.count = t2i_defaults.get('count')
         config.images_per_row = cfg.workflow_defaults.col_count
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now()
         db.commit()
     
     return {"success": True, "message": "配置已重置"}
