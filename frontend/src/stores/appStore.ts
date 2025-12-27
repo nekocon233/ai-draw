@@ -142,7 +142,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatHistory: [],
   loading: false,
   error: null,
-  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
+  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true' || (!isLoggedIn() && localStorage.getItem('sidebarCollapsed') === null),
   
   // Actions
   setServiceStatus: (status) => set({
@@ -512,46 +512,44 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 游客模式：从 localStorage 加载
       let sessions = loadGuestSessions();
       
-      // 如果没有会话，创建默认会话
-      if (sessions.length === 0) {
-        const defaultSession: ChatSession = {
-          id: 'guest-session',
-          title: '新对话',
-          created_at: Date.now(),
-          updated_at: Date.now(),
-          message_count: 0,
-        };
-        sessions = [defaultSession];
-        saveGuestSessions(sessions);
+     
+      
+      // 如果有会话，恢复上次选中的会话
+      if (sessions.length > 0) {
+        const savedSessionId = localStorage.getItem('currentSessionId');
+        const currentSessionId = (savedSessionId && sessions.some(s => s.id === savedSessionId)) 
+          ? savedSessionId 
+          : sessions[0].id;
+        
+        // 加载会话历史（带占位符）
+        const chatHistoryWithoutImages = loadGuestSessionHistory(currentSessionId);
+        
+        set({ 
+          sessions,
+          currentSessionId,
+          chatHistory: chatHistoryWithoutImages
+        });
+        
+        // 异步恢复图片数据
+        import('../utils/helpers').then(async ({ restoreSessionImages }) => {
+          try {
+            const chatHistory = await restoreSessionImages(currentSessionId, chatHistoryWithoutImages);
+            set({ chatHistory });
+          } catch (error) {
+            console.error('恢复图片数据失败:', error);
+          }
+        });
+        
+        // 加载当前会话的配置
+        await get().loadSessionConfig(currentSessionId);
+      } else {
+        // 没有会话时，仅设置空会话列表，不预创建
+        set({ 
+          sessions: [],
+          currentSessionId: null,
+          chatHistory: []
+        });
       }
-      
-      // 恢复上次选中的会话
-      const savedSessionId = localStorage.getItem('currentSessionId');
-      const currentSessionId = (savedSessionId && sessions.some(s => s.id === savedSessionId)) 
-        ? savedSessionId 
-        : sessions[0].id;
-      
-      // 加载会话历史（带占位符）
-      const chatHistoryWithoutImages = loadGuestSessionHistory(currentSessionId);
-      
-      set({ 
-        sessions,
-        currentSessionId,
-        chatHistory: chatHistoryWithoutImages
-      });
-      
-      // 异步恢复图片数据
-      import('../utils/helpers').then(async ({ restoreSessionImages }) => {
-        try {
-          const chatHistory = await restoreSessionImages(currentSessionId, chatHistoryWithoutImages);
-          set({ chatHistory });
-        } catch (error) {
-          console.error('恢复图片数据失败:', error);
-        }
-      });
-      
-      // 加载当前会话的配置
-      await get().loadSessionConfig(currentSessionId);
       return;
     }
     
