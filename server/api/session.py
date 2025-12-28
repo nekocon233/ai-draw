@@ -111,8 +111,8 @@ def create_session(
     return {
         "session_id": session.session_id,
         "title": session.title,
-        "created_at": int(session.created_at.timestamp()),
-        "updated_at": int(session.updated_at.timestamp())
+        "created_at": int(session.created_at.timestamp() * 1000),
+        "updated_at": int(session.updated_at.timestamp() * 1000)
     }
 
 @router.delete("/sessions/{session_id}")
