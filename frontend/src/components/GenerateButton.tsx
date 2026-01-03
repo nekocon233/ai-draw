@@ -7,6 +7,7 @@ import './GenerateButton.css';
 export default function GenerateButton() {
   const {
     prompt,
+    currentWorkflow,
     strength,
     count,
     loraPrompt,
@@ -26,13 +27,13 @@ export default function GenerateButton() {
     clearError();
 
     // 添加用户消息到聊天历史（包含加载占位符）
-    // 根据是否有参考图选择工作流
-    const workflow = referenceImage ? 'i2i_workflow_api' : 't2i_workflow_api';
-    await addChatMessage(prompt, workflow, strength, count, loraPrompt);
+    // 使用用户选择的工作流
+    await addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
 
     try {
       const res = await apiService.generateImage({
         prompt,
+        workflow: currentWorkflow,
         strength,
         count,
         lora_prompt: loraPrompt || undefined,

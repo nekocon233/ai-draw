@@ -87,20 +87,19 @@ def create_session(
             detail="会话ID已存在"
         )
     
-    # 创建会话（从 app_config.yaml 读取默认配置）
+    # 创建会话（从 workflow_metadata 读取默认配置）
     from utils.config_loader import get_config
     cfg = get_config()
-    t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
     
     session = ChatSession(
         session_id=request.session_id,
         user_id=current_user.id,
         title=request.title or "新对话",
         config_workflow="t2i",
-        config_prompt=t2i_defaults.get('prompt'),
-        config_lora_prompt=t2i_defaults.get('lora_prompt'),
-        config_strength=t2i_defaults.get('strength'),
-        config_count=t2i_defaults.get('count'),
+        config_prompt=None,
+        config_lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
+        config_strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
+        config_count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
         config_images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(session)

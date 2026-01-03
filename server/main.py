@@ -101,5 +101,7 @@ if __name__ == "__main__":
         "server.main:app",
         host=server_config.host,
         port=server_config.port,
-        reload=server_config.reload
+        reload=server_config.reload,
+        timeout_keep_alive=300,  # 保持连接 5 分钟
+        timeout_graceful_shutdown=30,  # 优雅关闭超时 30 秒
     )

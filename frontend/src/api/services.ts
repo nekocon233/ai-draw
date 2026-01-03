@@ -115,7 +115,7 @@ export const apiService = {
   // 图像生成
   generateImage: (data: GenerateImageRequest): Promise<GenerateImageResponse> =>
     client.post('/image/generate', data, {
-      timeout: 600000 // 10 分钟，因为生成多张图片耗时较长
+      timeout: 300000 // 5 分钟，因为生成多张图片耗时较长
     }),
   
   // 图片上传

@@ -73,18 +73,17 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.flush()  # 获取 user.id
     
-    # 创建默认配置（从 app_config.yaml 读取）
+    # 创建默认配置（从 workflow_metadata 读取）
     from utils.config_loader import get_config
     cfg = get_config()
-    t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
     
     config = UserConfig(
         user_id=user.id,
         current_workflow="t2i",
-        prompt=t2i_defaults.get('prompt'),
-        lora_prompt=t2i_defaults.get('lora_prompt'),
-        strength=t2i_defaults.get('strength'),
-        count=t2i_defaults.get('count'),
+        prompt=None,
+        lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
+        strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
+        count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
         images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(config)
@@ -128,18 +127,17 @@ def get_user_config(
     """获取用户配置"""
     config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
     if not config:
-        # 创建默认配置（从 app_config.yaml 读取）
+        # 创建默认配置（从 workflow_metadata 读取）
         from utils.config_loader import get_config
         cfg = get_config()
-        t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
         
         config = UserConfig(
             user_id=current_user.id,
             current_workflow="t2i",
-            prompt=t2i_defaults.get('prompt'),
-            lora_prompt=t2i_defaults.get('lora_prompt'),
-            strength=t2i_defaults.get('strength'),
-            count=t2i_defaults.get('count'),
+            prompt=None,
+            lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
+            strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
+            count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
             images_per_row=cfg.workflow_defaults.col_count
         )
         db.add(config)
@@ -186,16 +184,15 @@ def reset_user_config(
     """重置用户配置为默认值"""
     config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
     if config:
-        # 从 app_config.yaml 读取默认值
+        # 从 workflow_metadata 读取默认值
         from utils.config_loader import get_config
         cfg = get_config()
-        t2i_defaults = cfg.workflow_defaults.workflows.get('t2i', {})
         
         config.current_workflow = "t2i"
-        config.prompt = t2i_defaults.get('prompt')
-        config.lora_prompt = t2i_defaults.get('lora_prompt')
-        config.strength = t2i_defaults.get('strength')
-        config.count = t2i_defaults.get('count')
+        config.prompt = None
+        config.lora_prompt = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt')
+        config.strength = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength')
+        config.count = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count')
         config.images_per_row = cfg.workflow_defaults.col_count
         config.updated_at = datetime.now()
         db.commit()
@@ -360,56 +357,94 @@ def save_chat_message(
             detail="缺少会话ID"
         )
     
-    # 检查消息是否已存在
-    existing = db.query(ChatMessage).filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.message_id == msg_id
-    ).first()
-    
-    if existing:
-        return {"success": True, "message": "消息已存在"}
-    
-    chat_msg = ChatMessage(
-        session_id=session_id,
-        user_id=current_user.id,
-        message_id=msg_id,
-        type=message["type"],
-        content=message.get("content", ""),
-        workflow=message.get("workflow"),
-        strength=message.get("strength"),
-        count=message.get("count"),
-        lora_prompt=message.get("lora_prompt"),
-    )
-    db.add(chat_msg)
-    
-    # 如果是 assistant 消息，保存图片
-    if message["type"] == "assistant" and "images" in message:
-        file_storage = get_file_storage()
-        for idx, img_data in enumerate(message["images"]):
-            if isinstance(img_data, str):  # base64 图片数据
-                try:
-                    # 保存到文件系统
-                    relative_path = file_storage.save_generated_image(
-                        base64_data=img_data,
-                        user_id=current_user.id,
-                        message_id=msg_id,
-                        index=idx
-                    )
-                    gen_img = GeneratedImage(
-                        message_id=msg_id,
-                        image_index=idx,
-                        file_path=relative_path  # 存储相对路径
-                    )
-                    db.add(gen_img)
-                except Exception as e:
-                    print(f"[保存图片] 保存失败: {e}")
-                    # 失败时依然保存 base64 作为备选
-                    gen_img = GeneratedImage(
-                        message_id=msg_id,
-                        image_index=idx,
-                        file_path=img_data
-                    )
-                    db.add(gen_img)
-    
-    db.commit()
-    return {"success": True}
+    try:
+        # 检查消息是否已存在
+        existing = db.query(ChatMessage).filter(
+            ChatMessage.user_id == current_user.id,
+            ChatMessage.message_id == msg_id
+        ).first()
+        
+        if existing:
+            # 如果是 assistant 消息且有新图片，更新图片
+            if message["type"] == "assistant" and "images" in message:
+                file_storage = get_file_storage()
+                for idx, img_data in enumerate(message["images"]):
+                    if isinstance(img_data, str):  # base64 图片数据
+                        try:
+                            # 检查该图片是否已存在
+                            existing_img = db.query(GeneratedImage).filter(
+                                GeneratedImage.message_id == msg_id,
+                                GeneratedImage.image_index == idx
+                            ).first()
+                            
+                            if not existing_img:
+                                relative_path = file_storage.save_generated_image(
+                                    base64_data=img_data,
+                                    user_id=current_user.id,
+                                    message_id=msg_id,
+                                    index=idx
+                                )
+                                gen_img = GeneratedImage(
+                                    message_id=msg_id,
+                                    file_path=relative_path,
+                                    image_index=idx
+                                )
+                                db.add(gen_img)
+                        except Exception as e:
+                            print(f"保存图片失败: {e}")
+                            continue
+                
+                db.commit()
+            return {"success": True, "message": "消息已存在，已更新图片"}
+        
+        chat_msg = ChatMessage(
+            session_id=session_id,
+            user_id=current_user.id,
+            message_id=msg_id,
+            type=message["type"],
+            content=message.get("content", ""),
+            workflow=message.get("workflow"),
+            strength=message.get("strength"),
+            count=message.get("count"),
+            lora_prompt=message.get("lora_prompt"),
+        )
+        db.add(chat_msg)
+        
+        # 如果是 assistant 消息，保存图片
+        if message["type"] == "assistant" and "images" in message:
+            file_storage = get_file_storage()
+            for idx, img_data in enumerate(message["images"]):
+                if isinstance(img_data, str):  # base64 图片数据
+                    try:
+                        # 保存到文件系统
+                        relative_path = file_storage.save_generated_image(
+                            base64_data=img_data,
+                            user_id=current_user.id,
+                            message_id=msg_id,
+                            index=idx
+                        )
+                        gen_img = GeneratedImage(
+                            message_id=msg_id,
+                            image_index=idx,
+                            file_path=relative_path  # 存储相对路径
+                        )
+                        db.add(gen_img)
+                    except Exception as e:
+                        print(f"[保存图片] 保存失败: {e}")
+                        # 失败时依然保存 base64 作为备选
+                        gen_img = GeneratedImage(
+                            message_id=msg_id,
+                            image_index=idx,
+                            file_path=img_data
+                        )
+                        db.add(gen_img)
+        
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        print(f"[保存消息] 错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"保存消息失败: {str(e)}"
+        )

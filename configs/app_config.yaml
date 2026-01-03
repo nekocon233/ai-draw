@@ -14,19 +14,90 @@ workflow_defaults:
   # 工作流文件名映射
   workflow_files:
     t2i: "t2i_workflow_api.json"
-    i2i: "i2i_workflow_api.json"
+    i2i: "qwen_image_edit_workflow_api.json"
+    reference: "reference_workflow_api.json"
+    reference_zimage: "reference_zimage_workflow_api.json"
   
-  # 各工作流的默认参数
-  workflows:
+  # 工作流元数据
+  workflow_metadata:
     t2i:
-      description: "一个女孩"
-      prompt: "1girl"
-      lora_prompt: "<lora:AmeniwaZ:0.8>"
-      strength: 0.8
-      count: 1
+      label: "文生图（Z-Image）"
+      description: "纯文本生成图像"
+      requires_image: false
+      parameters:
+        - name: "count"
+          label: "生成数量"
+          type: "number"
+          min: 1
+          max: 8
+          step: 1
+          default: 1
+        - name: "lora_prompt"
+          label: "LoRA 提示词"
+          type: "text"
+          default: "<lora:AmeniwaZ:0.8>"
     i2i:
-      description: "一个女孩"
-      prompt: "1girl"
-      lora_prompt: "<lora:AmeniwaZ:0.8>"
-      strength: 0.8
-      count: 1
+      label: "图生图（Q-Image）"
+      description: "基于参考图重绘"
+      requires_image: true
+      parameters:
+        - name: "strength"
+          label: "重绘强度"
+          type: "number"
+          min: 0
+          max: 1
+          step: 0.01
+          default: 0.8
+        - name: "count"
+          label: "生成数量"
+          type: "number"
+          min: 1
+          max: 8
+          step: 1
+          default: 1
+    reference:
+      label: "参考图（SDXL）"
+      description: "SDXL 参考图工作流"
+      requires_image: true
+      parameters:
+        - name: "strength"
+          label: "参考强度"
+          type: "number"
+          min: 0
+          max: 1
+          step: 0.01
+          default: 0.8
+        - name: "count"
+          label: "生成数量"
+          type: "number"
+          min: 1
+          max: 8
+          step: 1
+          default: 1
+        - name: "lora_prompt"
+          label: "LoRA 提示词"
+          type: "text"
+          default: "<lora:Ameniwa:0.8>"
+    reference_zimage:
+      label: "参考图（Z-Image）"
+      description: "Z-Image Turbo 参考图工作流"
+      requires_image: true
+      parameters:
+        - name: "strength"
+          label: "参考强度"
+          type: "number"
+          min: 0
+          max: 1
+          step: 0.01
+          default: 0.8
+        - name: "count"
+          label: "生成数量"
+          type: "number"
+          min: 1
+          max: 8
+          step: 1
+          default: 1
+        - name: "lora_prompt"
+          label: "LoRA 提示词"
+          type: "text"
+          default: "<lora:AmeniwaZ:0.8>"

@@ -151,9 +151,27 @@ async def get_previews(service: AIDrawService = Depends(get_ai_draw_service)):
 
 
 @router.get("/workflows")
-async def get_workflows():
-    """获取可用工作流列表"""
-    return {"workflows": ["通用", "上色", "图生图", "线稿"], "default_workflow": "通用"}
+async def get_workflows(service: AIDrawService = Depends(get_ai_draw_service)):
+    """获取可用工作流列表和元数据"""
+    from utils.config_loader import get_config
+    config = get_config()
+    
+    # 获取所有工作流及其元数据
+    workflows = []
+    for workflow_key in service.get_available_workflows():
+        metadata = config.workflow_defaults.workflow_metadata.get(workflow_key, {})
+        workflows.append({
+            "key": workflow_key,
+            "label": metadata.get("label", workflow_key),
+            "description": metadata.get("description", ""),
+            "requires_image": metadata.get("requires_image", False),
+            "parameters": metadata.get("parameters", [])  # 添加参数配置
+        })
+    
+    return {
+        "workflows": workflows,
+        "default_workflow": service.get_current_workflow()
+    }
 
 
 @router.get("/workflow/defaults")

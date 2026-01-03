@@ -22,6 +22,7 @@ export interface GeneratePromptResponse {
 // 生成图像请求
 export interface GenerateImageRequest {
   prompt: string;
+  workflow?: string;
   strength: number;
   lora_prompt?: string;
   count: number;
@@ -41,8 +42,27 @@ export interface UploadImageResponse {
 }
 
 // 工作流列表
+// 工作流元数据
+export interface WorkflowParameter {
+  name: string;
+  label: string;
+  type: 'number' | 'text';
+  min?: number;
+  max?: number;
+  step?: number;
+  default: string | number;
+}
+
+export interface WorkflowMetadata {
+  key: string;
+  label: string;
+  description: string;
+  requires_image: boolean;
+  parameters: WorkflowParameter[];
+}
+
 export interface WorkflowsResponse {
-  workflows: string[];
+  workflows: WorkflowMetadata[];
   default_workflow: string;
 }
 

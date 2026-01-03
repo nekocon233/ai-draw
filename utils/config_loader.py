@@ -116,7 +116,16 @@ class WorkflowDefaultsConfig(BaseModel):
     current_workflow_type: str
     col_count: int
     workflow_files: dict
-    workflows: dict
+    workflow_metadata: dict  # 工作流元数据
+    
+    def get_workflow_parameter_default(self, workflow: str, parameter: str):
+        """从 workflow_metadata 获取参数默认值"""
+        metadata = self.workflow_metadata.get(workflow, {})
+        parameters = metadata.get('parameters', [])
+        for param in parameters:
+            if param.get('name') == parameter:
+                return param.get('default')
+        return None
 
 
 class AppConfig(BaseSettings):

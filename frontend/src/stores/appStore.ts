@@ -18,6 +18,7 @@ import {
 import { saveImages } from '../utils/indexedDB';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
+import type { WorkflowMetadata } from '../types/api';
 
 interface ChatMessage {
   id: string;
@@ -49,7 +50,7 @@ interface AppState {
   
   // 当前工作流
   currentWorkflow: string;
-  availableWorkflows: string[]; // 可用工作流列表（动态从后端获取）
+  availableWorkflows: WorkflowMetadata[]; // 可用工作流列表（动态从后端获取）
   
   // Prompt
   prompt: string;
@@ -152,8 +153,44 @@ export const useAppStore = create<AppState>((set, get) => ({
   }),
   
   setCurrentWorkflow: async (workflow) => {
-    set({ currentWorkflow: workflow });
     const state = get();
+    const workflowMeta = state.availableWorkflows.find(w => w.key === workflow);
+    
+    // 切换工作流时，根据工作流参数配置重置参数为默认值或置空
+    if (workflowMeta) {
+      const updates: Partial<AppState> = { currentWorkflow: workflow };
+      
+      // 检查工作流是否有对应的参数，如果没有则置空
+      const hasStrength = workflowMeta.parameters.some(p => p.name === 'strength');
+      const hasCount = workflowMeta.parameters.some(p => p.name === 'count');
+      const hasLoraPrompt = workflowMeta.parameters.some(p => p.name === 'lora_prompt');
+      
+      workflowMeta.parameters.forEach(param => {
+        if (param.name === 'strength') {
+          updates.strength = param.default as number;
+        } else if (param.name === 'count') {
+          updates.count = param.default as number;
+        } else if (param.name === 'lora_prompt') {
+          updates.loraPrompt = param.default as string;
+        }
+      });
+      
+      // 如果工作流没有对应参数，置空或设为默认值
+      if (!hasLoraPrompt) {
+        updates.loraPrompt = '';
+      }
+      if (!hasStrength) {
+        updates.strength = DEFAULT_CONFIG.STRENGTH;
+      }
+      if (!hasCount) {
+        updates.count = DEFAULT_CONFIG.COUNT;
+      }
+      
+      set(updates);
+    } else {
+      set({ currentWorkflow: workflow });
+    }
+    
     state.saveSessionConfig();
   },
   setPrompt: async (prompt) => {
@@ -476,8 +513,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       
       // 如果当前工作流不在可用列表中，设置为后端配置的默认工作流
       const state = useAppStore.getState();
-      if (workflows.length > 0 && !workflows.includes(state.currentWorkflow)) {
-        state.setCurrentWorkflow(defaultWorkflow || workflows[0]);
+      const workflowKeys = workflows.map(w => w.key);
+      if (workflows.length > 0 && !workflowKeys.includes(state.currentWorkflow)) {
+        state.setCurrentWorkflow(defaultWorkflow || workflows[0].key);
       }
     } catch (error) {
       console.error('加载工作流列表失败:', error);
@@ -591,15 +629,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       state.saveSessionConfig();
     }
     
-    // 新会话始终从后端加载默认配置
-    let backendDefaults = null;
-    try {
-      const response = await apiService.getWorkflowDefaults();
-      if (response.success && response.defaults) {
-        backendDefaults = response.defaults.workflows?.t2i || {};
-      }
-    } catch (error) {
-      console.error('加载后端默认配置失败:', error);
+    // 确保工作流列表已加载
+    if (state.availableWorkflows.length === 0) {
+      await state.loadAvailableWorkflows();
+    }
+    
+    // 从 availableWorkflows 获取默认工作流（文生图）的默认参数
+    const defaultWorkflow = state.availableWorkflows.find(w => w.key === DEFAULT_CONFIG.WORKFLOW);
+    let defaultLoraPrompt: string = DEFAULT_CONFIG.LORA_PROMPT;
+    let defaultStrength: number = DEFAULT_CONFIG.STRENGTH;
+    let defaultCount: number = DEFAULT_CONFIG.COUNT;
+    
+    if (defaultWorkflow) {
+      const loraParam = defaultWorkflow.parameters.find(p => p.name === 'lora_prompt');
+      const strengthParam = defaultWorkflow.parameters.find(p => p.name === 'strength');
+      const countParam = defaultWorkflow.parameters.find(p => p.name === 'count');
+      
+      if (loraParam && loraParam.default !== undefined) defaultLoraPrompt = loraParam.default as string;
+      if (strengthParam && strengthParam.default !== undefined) defaultStrength = strengthParam.default as number;
+      if (countParam && countParam.default !== undefined) defaultCount = countParam.default as number;
     }
     
     const newSession: ChatSession = {
@@ -617,13 +665,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       chatHistory: [], // 清空当前聊天历史
     }));
     
-    // 为新会话初始化配置（从后端默认配置读取）
+    // 为新会话初始化配置（使用默认工作流的默认参数）
     const newSessionConfig = {
-      workflow: 't2i',
-      prompt: backendDefaults?.prompt || DEFAULT_CONFIG.PROMPT,
-      loraPrompt: backendDefaults?.lora_prompt || '',
-      strength: backendDefaults?.strength ?? DEFAULT_CONFIG.STRENGTH,
-      count: backendDefaults?.count ?? DEFAULT_CONFIG.COUNT,
+      workflow: DEFAULT_CONFIG.WORKFLOW,
+      prompt: DEFAULT_CONFIG.PROMPT,
+      loraPrompt: defaultLoraPrompt,
+      strength: defaultStrength,
+      count: defaultCount,
       imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
       referenceImage: null,
     };
@@ -644,6 +692,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
           currentSessionId: realSessionId
         }));
+        
+        // 持久化当前会话ID到后端
+        await apiService.updateUserConfig({ current_session_id: realSessionId })
+          .catch(err => console.error('保存当前会话ID失败:', err));
         
         // 保存新会话的配置到后端
         await apiService.updateSessionConfig(realSessionId, {

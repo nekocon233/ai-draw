@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, message } from 'antd';
+import { Input, Button, message, Select } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -22,9 +22,13 @@ export default function ChatInput() {
     strength,
     count,
     loraPrompt,
+    currentWorkflow,
+    availableWorkflows,
     referenceImage,
     isGenerating,
+    currentSessionId,
     setPrompt,
+    setCurrentWorkflow,
     setReferenceImage,
     setError,
     clearError,
@@ -37,7 +41,7 @@ export default function ChatInput() {
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<any>(null);
 
-  // 组件加载时自动聚焦到输入框，并将光标移到末尾
+  // 组件加载或切换会话时自动聚焦到输入框，并将光标移到末尾
   useEffect(() => {
     if (textAreaRef.current?.resizableTextArea?.textArea) {
       const textarea = textAreaRef.current.resizableTextArea.textArea;
@@ -46,7 +50,7 @@ export default function ChatInput() {
       const length = textarea.value.length;
       textarea.setSelectionRange(length, length);
     }
-  }, []);
+  }, [currentSessionId]); // 监听 currentSessionId 变化
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -92,13 +96,13 @@ export default function ChatInput() {
     clearError();
 
     // 添加聊天消息（用户输入 + 加载占位符）
-    // 根据是否有参考图选择工作流
-    const workflow = referenceImage ? 'i2i_workflow_api' : 't2i_workflow_api';
-    const messageId = await useAppStore.getState().addChatMessage(prompt, workflow, strength, count, loraPrompt);
+    // 使用用户选择的工作流
+    const messageId = await useAppStore.getState().addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
 
     try {
       const res = await apiService.generateImage({
         prompt,
+        workflow: currentWorkflow,
         strength,
         count,
         lora_prompt: loraPrompt || undefined,
@@ -271,6 +275,18 @@ export default function ChatInput() {
             >
               <ThunderboltOutlined />
             </button>
+
+            {/* 工作流选择器 */}
+            <Select
+              value={currentWorkflow}
+              onChange={setCurrentWorkflow}
+              size="small"
+              style={{ width: 160 }}
+              options={availableWorkflows.map(w => ({
+                label: w.label,
+                value: w.key,
+              }))}
+            />
           </div>
 
           {/* 发送/停止按钮 */}

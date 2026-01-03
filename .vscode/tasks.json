@@ -72,6 +72,20 @@
       }
     },
     {
+      "label": "重新构建并启动（有缓存，保留数据库）",
+      "type": "shell",
+      "command": "docker compose down && docker volume rm ai-draw_frontend-dist 2>/dev/null || true && docker compose build ai-draw-backend && docker compose up -d",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      }
+    },
+    {
       "label": "重新构建并启动（无缓存，清空所有数据）",
       "type": "shell",
       "command": "docker compose down -v && docker compose build --no-cache ai-draw-backend && docker compose up -d",

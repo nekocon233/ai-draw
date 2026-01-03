@@ -22,6 +22,7 @@ class GeneratePromptResponse(BaseModel):
 class GenerateImageRequest(BaseModel):
     """生成图像请求"""
     prompt: str
+    workflow: str = "t2i"  # 工作流类型：t2i, i2i, reference, reference_zimage
     strength: float = 0.5
     lora_prompt: str = ""
     count: int = 1

@@ -9,6 +9,8 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const {
+    currentWorkflow,
+    availableWorkflows,
     strength,
     count,
     loraPrompt,
@@ -20,6 +22,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   } = useAppStore();
 
   const [form] = Form.useForm();
+
+  // 获取当前工作流的参数配置
+  const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+  const hasStrength = workflowMeta?.parameters.some(p => p.name === 'strength') || false;
+  const hasCount = workflowMeta?.parameters.some(p => p.name === 'count') || false;
+  const hasLoraPrompt = workflowMeta?.parameters.some(p => p.name === 'lora_prompt') || false;
 
   // 当弹窗打开时，重置表单值为当前状态
   useEffect(() => {
@@ -69,63 +77,69 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           imagesPerRow: imagesPerRow,
         }}
       >
-        <Form.Item label="生成强度">
-          <Row gutter={12} align="middle">
-            <Col flex="auto">
-              <Form.Item name="strength" noStyle>
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  marks={{ 0: '0', 0.5: '0.5', 1: '1' }}
-                />
-              </Form.Item>
-            </Col>
-            <Col>
-              <Form.Item name="strength" noStyle>
-                <InputNumber
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  size="small"
-                  style={{ width: 70 }}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form.Item>
+        {hasStrength && (
+          <Form.Item label="生成强度">
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="strength" noStyle>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    marks={{ 0: '0', 0.5: '0.5', 1: '1' }}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="strength" noStyle>
+                  <InputNumber
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    size="small"
+                    style={{ width: 70 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
 
-        <Form.Item label="生成数量">
-          <Row gutter={12} align="middle">
-            <Col flex="auto">
-              <Form.Item name="count" noStyle>
-                <Slider
-                  min={1}
-                  max={8}
-                  step={1}
-                  marks={{ 1: '1', 2: '2', 4: '4', 6: '6', 8: '8' }}
-                />
-              </Form.Item>
-            </Col>
-            <Col>
-              <Form.Item name="count" noStyle>
-                <InputNumber
-                  min={1}
-                  max={8}
-                  size="small"
-                  style={{ width: 70 }}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form.Item>
+        {hasCount && (
+          <Form.Item label="生成数量">
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="count" noStyle>
+                  <Slider
+                    min={1}
+                    max={8}
+                    step={1}
+                    marks={{ 1: '1', 2: '2', 4: '4', 6: '6', 8: '8' }}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="count" noStyle>
+                  <InputNumber
+                    min={1}
+                    max={8}
+                    size="small"
+                    style={{ width: 70 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
 
-        <Form.Item label="LoRA 提示词" name="loraPrompt">
-          <Input
-            placeholder="例如: <lora:style_name:0.8>"
-            allowClear
-          />
-        </Form.Item>
+        {hasLoraPrompt && (
+          <Form.Item label="LoRA 提示词" name="loraPrompt">
+            <Input
+              placeholder="例如: <lora:style_name:0.8>"
+              allowClear
+            />
+          </Form.Item>
+        )}
 
         <Form.Item label="每行显示数量">
           <Row gutter={12} align="middle">

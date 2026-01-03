@@ -2,12 +2,13 @@ import { Radio, Space, Typography } from 'antd';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
 import { useEffect, useState } from 'react';
+import type { WorkflowMetadata } from '../types/api';
 
 const { Title } = Typography;
 
 export default function WorkflowSelector() {
   const { currentWorkflow, setCurrentWorkflow, setError } = useAppStore();
-  const [workflows, setWorkflows] = useState<string[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowMetadata[]>([]);
 
   useEffect(() => {
     apiService.getWorkflows()
@@ -34,8 +35,8 @@ export default function WorkflowSelector() {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {workflows.map(workflow => (
-            <Radio key={workflow} value={workflow} style={{ width: '100%' }}>
-              {workflow}
+            <Radio key={workflow.key} value={workflow.key} style={{ width: '100%' }}>
+              {workflow.label}
             </Radio>
           ))}
         </Space>

@@ -17,10 +17,11 @@ async def generate_image(
     request: GenerateImageRequest,
     service: AIDrawService = Depends(get_ai_draw_service)
 ) -> GenerateImageResponse:
-    """生成图像 - 自动根据是否有参考图选择工作流"""
+    """生成图像 - 使用用户选择的工作流"""
     try:
         images = await service.generate_image(
             prompt=request.prompt,
+            workflow=request.workflow,
             strength=request.strength,
             lora_prompt=request.lora_prompt,
             count=request.count,

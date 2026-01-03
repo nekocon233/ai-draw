@@ -105,26 +105,21 @@ class AIDrawService:
     async def generate_image(
         self,
         prompt: str,
+        workflow: str = "t2i",
         strength: float = 0.5,
         lora_prompt: str = "",
         count: int = 1,
         reference_image: Optional[str] = None
     ) -> list:
-        """生成图像 - 自动根据是否有参考图选择 T2I 或 I2I 工作流"""
+        """生成图像 - 使用用户选择的工作流"""
         try:
             self.is_generating = True
             self._notify_state_change('is_generating', True)
             self._notify_state_change('generation_progress', '正在生成图像...')
             
-            # 根据是否有参考图自动选择工作流
-            if reference_image:
-                # 有图片 - 使用 I2I 工作流
-                workflow_type = "i2i"
-                print(f"[AIDrawService] 检测到参考图，使用 I2I 工作流")
-            else:
-                # 无图片 - 使用 T2I 工作流
-                workflow_type = "t2i"
-                print(f"[AIDrawService] 无参考图，使用 T2I 工作流")
+            # 使用用户选择的工作流
+            workflow_type = workflow
+            print(f"[AIDrawService] 使用工作流: {workflow_type}")
             
             # 切换工作流
             if workflow_type != self.comfyui.get_current_workflow_type():
@@ -163,7 +158,18 @@ class AIDrawService:
                     })
                 
                 # 根据工作流类型调用不同的方法
-                if workflow_type == "i2i":
+                # 从配置中获取工作流元数据判断是否需要参考图
+                from utils.config_loader import get_config
+                config = get_config()
+                workflow_meta = config.workflow_defaults.workflow_metadata.get(workflow_type, {})
+                requires_image = workflow_meta.get('requires_image', False)
+                
+                if requires_image:
+                    # 需要参考图的工作流
+                    if not image_base64:
+                        workflow_label = workflow_meta.get('label', workflow_type)
+                        raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
+                    
                     await self.comfyui.generate_i2i(
                         finish_callback=finish_callback,
                         image_base64=image_base64,
@@ -172,7 +178,8 @@ class AIDrawService:
                         lora_prompt=lora_prompt or "",
                         seed=seed
                     )
-                else:  # t2i
+                else:
+                    # 文生图工作流
                     await self.comfyui.generate_t2i(
                         finish_callback=finish_callback,
                         prompt_text=prompt,
