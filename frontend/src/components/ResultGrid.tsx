@@ -83,7 +83,22 @@ export default function ResultGrid() {
                   {message.images && message.images.map((image, imgIndex) => (
                     <div key={imgIndex} className="chat-image-item">
                       {typeof image === 'string' ? (
-                        <div className="chat-image-wrapper">
+                        <div 
+                          className="chat-image-wrapper"
+                          draggable={true}
+                          onDragStart={(e) => {
+                            // 设置拖放数据，确保目标可以接收到图片 URL
+                            e.dataTransfer.setData('text/uri-list', image);
+                            e.dataTransfer.setData('text/plain', image);
+                            e.dataTransfer.effectAllowed = 'copy';
+                            
+                            // 创建拖放时的预览图
+                            const img = new window.Image();
+                            img.src = image;
+                            e.dataTransfer.setDragImage(img, 50, 50);
+                          }}
+                          style={{ cursor: 'grab' }}
+                        >
                           <Image
                             src={image}
                             alt={`生成图片 ${imgIndex + 1}`}

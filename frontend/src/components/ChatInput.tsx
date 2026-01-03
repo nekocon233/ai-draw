@@ -159,10 +159,8 @@ export default function ChatInput() {
     dragCounterRef.current = 0;
     setIsDragging(false);
 
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      
+    // 辅助函数：上传文件
+    const uploadFile = async (file: File) => {
       const isImage = file.type.startsWith('image/');
       if (!isImage) {
         message.error('只能上传图片文件!');
@@ -182,6 +180,81 @@ export default function ChatInput() {
       } catch (err: any) {
         setError(err.message);
         message.error('上传失败: ' + err.message);
+      }
+    };
+
+    // 情况1：拖放的是文件
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await uploadFile(files[0]);
+      return;
+    }
+
+    // 情况2：拖放的是图片 URL（从网页拖放图片）
+    // 尝试获取图片 URL
+    const imageUrl = e.dataTransfer.getData('text/uri-list') || 
+                     e.dataTransfer.getData('text/plain');
+    
+    // 检查是否是有效的图片路径（支持相对路径、绝对URL、data URL）
+    const isValidImagePath = imageUrl && (
+      imageUrl.startsWith('http://') || 
+      imageUrl.startsWith('https://') || 
+      imageUrl.startsWith('data:') ||
+      imageUrl.startsWith('/uploads/') ||  // 本站生成的图片相对路径
+      imageUrl.startsWith('/')  // 其他相对路径
+    );
+    
+    if (isValidImagePath) {
+      try {
+        message.loading({ content: '正在处理图片...', key: 'dropImage' });
+        
+        // 构建完整 URL
+        let fullUrl = imageUrl;
+        if (imageUrl.startsWith('/')) {
+          fullUrl = window.location.origin + imageUrl;
+        }
+        
+        // 如果是 data URL，直接转换
+        if (imageUrl.startsWith('data:')) {
+          const res = await fetch(imageUrl);
+          const blob = await res.blob();
+          const file = new File([blob], `dropped-image-${Date.now()}.png`, { type: blob.type || 'image/png' });
+          message.destroy('dropImage');
+          await uploadFile(file);
+          return;
+        }
+
+        // 如果是 HTTP URL，尝试 fetch
+        const res = await fetch(fullUrl);
+        if (!res.ok) {
+          throw new Error('无法获取图片');
+        }
+        const blob = await res.blob();
+        
+        // 检查是否是图片
+        if (!blob.type.startsWith('image/')) {
+          message.destroy('dropImage');
+          message.error('拖放的不是有效图片!');
+          return;
+        }
+        
+        const file = new File([blob], `dropped-image-${Date.now()}.png`, { type: blob.type });
+        message.destroy('dropImage');
+        await uploadFile(file);
+      } catch (err: any) {
+        message.destroy('dropImage');
+        console.error('Drop image error:', err);
+        // 如果 fetch 失败，尝试直接使用 URL 作为参考图
+        if (imageUrl.startsWith('/')) {
+          // 相对路径，构建完整 URL 后设置
+          setReferenceImage(window.location.origin + imageUrl);
+          message.success('图片已设置!');
+        } else if (imageUrl.startsWith(window.location.origin)) {
+          setReferenceImage(imageUrl);
+          message.success('图片已设置!');
+        } else {
+          message.error('无法获取跨域图片，请尝试先保存到本地再上传');
+        }
       }
     }
   };
@@ -281,7 +354,7 @@ export default function ChatInput() {
               value={currentWorkflow}
               onChange={setCurrentWorkflow}
               size="small"
-              style={{ width: 160 }}
+              style={{ width: 155 }}
               options={availableWorkflows.map(w => ({
                 label: w.label,
                 value: w.key,
