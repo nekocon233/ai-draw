@@ -38,6 +38,8 @@ export default function GenerateButton() {
         count,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
+        width: useAppStore.getState().width || undefined,
+        height: useAppStore.getState().height || undefined,
       });
 
       // 图片通过 WebSocket 实时推送，生成完成时自动保存

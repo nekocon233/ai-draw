@@ -15,10 +15,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     count,
     loraPrompt,
     imagesPerRow,
+    width,
+    height,
     setStrength,
     setCount,
     setLoraPrompt,
     setImagesPerRow,
+    setWidth,
+    setHeight,
   } = useAppStore();
 
   const [form] = Form.useForm();
@@ -28,6 +32,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasStrength = workflowMeta?.parameters.some(p => p.name === 'strength') || false;
   const hasCount = workflowMeta?.parameters.some(p => p.name === 'count') || false;
   const hasLoraPrompt = workflowMeta?.parameters.some(p => p.name === 'lora_prompt') || false;
+  const hasWidth = workflowMeta?.parameters.some(p => p.name === 'width') || false;
+  const hasHeight = workflowMeta?.parameters.some(p => p.name === 'height') || false;
+
+  // 获取 width 和 height 的参数配置
+  const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
+  const heightParam = workflowMeta?.parameters.find(p => p.name === 'height');
 
   // 当弹窗打开时，重置表单值为当前状态
   useEffect(() => {
@@ -37,9 +47,11 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         count: count,
         loraPrompt: loraPrompt,
         imagesPerRow: imagesPerRow,
+        width: width ?? widthParam?.default ?? 1024,
+        height: height ?? heightParam?.default ?? 1024,
       });
     }
-  }, [open, form, strength, count, loraPrompt, imagesPerRow]);
+  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam]);
 
   const handleOk = () => {
     form.validateFields().then((values) => {
@@ -47,6 +59,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       setCount(values.count);
       setLoraPrompt(values.loraPrompt || '');
       setImagesPerRow(values.imagesPerRow);
+      if (hasWidth) setWidth(values.width);
+      if (hasHeight) setHeight(values.height);
       onClose();
     });
   };
@@ -138,6 +152,60 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               placeholder="例如: <lora:style_name:0.8>"
               allowClear
             />
+          </Form.Item>
+        )}
+
+        {hasWidth && (
+          <Form.Item label={widthParam?.label || "图像宽度"}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="width" noStyle>
+                  <Slider
+                    min={widthParam?.min || 512}
+                    max={widthParam?.max || 2048}
+                    step={widthParam?.step || 64}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="width" noStyle>
+                  <InputNumber
+                    min={widthParam?.min || 512}
+                    max={widthParam?.max || 2048}
+                    step={widthParam?.step || 64}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
+
+        {hasHeight && (
+          <Form.Item label={heightParam?.label || "图像高度"}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="height" noStyle>
+                  <Slider
+                    min={heightParam?.min || 512}
+                    max={heightParam?.max || 2048}
+                    step={heightParam?.step || 64}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="height" noStyle>
+                  <InputNumber
+                    min={heightParam?.min || 512}
+                    max={heightParam?.max || 2048}
+                    step={heightParam?.step || 64}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
           </Form.Item>
         )}
 

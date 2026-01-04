@@ -107,6 +107,8 @@ export default function ChatInput() {
         count,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
+        width: useAppStore.getState().width || undefined,
+        height: useAppStore.getState().height || undefined,
       });
 
       // 图片通过 WebSocket 实时推送，这里只等待生成完成

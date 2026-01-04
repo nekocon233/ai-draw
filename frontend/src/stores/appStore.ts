@@ -60,6 +60,8 @@ interface AppState {
   strength: number;
   count: number;
   imagesPerRow: number; // 每行显示图片数量
+  width: number | null;  // 图像宽度（部分工作流支持）
+  height: number | null; // 图像高度（部分工作流支持）
   
   // 参考图片
   referenceImage: string | null;
@@ -78,6 +80,8 @@ interface AppState {
   setStrength: (strength: number) => void;
   setCount: (count: number) => void;
   setImagesPerRow: (count: number) => void;
+  setWidth: (width: number | null) => void;
+  setHeight: (height: number | null) => void;
   setReferenceImage: (image: string | null) => void;
   addChatMessage: (prompt: string, workflow: string, strength: number, count: number, loraPrompt?: string) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
@@ -139,6 +143,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   strength: initialConfig.strength,
   count: initialConfig.count,
   imagesPerRow: initialConfig.imagesPerRow,
+  width: null,  // 图像宽度，默认为 null 表示使用工作流默认值
+  height: null, // 图像高度，默认为 null 表示使用工作流默认值
   referenceImage: initialConfig.referenceImage,
   chatHistory: [],
   loading: false,
@@ -164,6 +170,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hasStrength = workflowMeta.parameters.some(p => p.name === 'strength');
       const hasCount = workflowMeta.parameters.some(p => p.name === 'count');
       const hasLoraPrompt = workflowMeta.parameters.some(p => p.name === 'lora_prompt');
+      const hasWidth = workflowMeta.parameters.some(p => p.name === 'width');
+      const hasHeight = workflowMeta.parameters.some(p => p.name === 'height');
       
       workflowMeta.parameters.forEach(param => {
         if (param.name === 'strength') {
@@ -172,6 +180,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           updates.count = param.default as number;
         } else if (param.name === 'lora_prompt') {
           updates.loraPrompt = param.default as string;
+        } else if (param.name === 'width') {
+          updates.width = param.default as number;
+        } else if (param.name === 'height') {
+          updates.height = param.default as number;
         }
       });
       
@@ -184,6 +196,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (!hasCount) {
         updates.count = DEFAULT_CONFIG.COUNT;
+      }
+      if (!hasWidth) {
+        updates.width = null;
+      }
+      if (!hasHeight) {
+        updates.height = null;
       }
       
       set(updates);
@@ -215,6 +233,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setImagesPerRow: async (count) => {
     set({ imagesPerRow: count });
+    const state = get();
+    state.saveSessionConfig();
+  },
+  setWidth: async (width) => {
+    set({ width });
+    const state = get();
+    state.saveSessionConfig();
+  },
+  setHeight: async (height) => {
+    set({ height });
     const state = get();
     state.saveSessionConfig();
   },

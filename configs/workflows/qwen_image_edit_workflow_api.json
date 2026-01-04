@@ -135,7 +135,7 @@
         0
       ],
       "image1": [
-        "88",
+        "93",
         0
       ]
     },
@@ -156,7 +156,7 @@
         0
       ],
       "image1": [
-        "88",
+        "93",
         0
       ]
     },
@@ -194,7 +194,7 @@
   "75": {
     "inputs": {
       "pixels": [
-        "88",
+        "93",
         0
       ],
       "vae": [
@@ -241,6 +241,50 @@
     "class_type": "FloatConstant",
     "_meta": {
       "title": "denoise"
+    }
+  },
+  "93": {
+    "inputs": {
+      "width": [
+        "95",
+        0
+      ],
+      "height": [
+        "96",
+        0
+      ],
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "pad_edge",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "88",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "95": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "width"
+    }
+  },
+  "96": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "height"
     }
   }
 }

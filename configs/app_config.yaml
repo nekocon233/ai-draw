@@ -55,6 +55,20 @@ workflow_defaults:
           max: 8
           step: 1
           default: 1
+        - name: "width"
+          label: "图像宽度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
+        - name: "height"
+          label: "图像高度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
     reference:
       label: "参考图（SDXL）"
       description: "SDXL 参考图工作流"

@@ -190,7 +190,7 @@ class ComfyUIService:
         else:
             print(f"[ComfyUIService] T2I生成失败: {result.error}")
 
-    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None):
+    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None, width=None, height=None):
         """
         图生图（Image-to-Image）
         image_base64: 原始图片base64
@@ -198,6 +198,8 @@ class ComfyUIService:
         denoise_value: 去噪强度
         lora_prompt: lora提示词
         seed: 随机种子
+        width: 图像宽度（可选，部分工作流支持）
+        height: 图像高度（可选，部分工作流支持）
         finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
         """
         if seed is None:
@@ -208,11 +210,10 @@ class ComfyUIService:
         image_b64, valid_region = self.image_processor.prepare_image_base64(img)
 
         # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_i2i(self.workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed)
+        result = await self.request.generate_i2i(self.workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width, height)
         if result.is_success:
             print(f"[ComfyUIService] I2I生成成功")
-            base64_content = self.image_processor.resize(result.data, target_size=orig_size, crop_box=valid_region)
-            finish_callback(base64_content)
+            finish_callback(result.data)
         else:
             print(f"[ComfyUIService] I2I生成失败: {result.error}")
 

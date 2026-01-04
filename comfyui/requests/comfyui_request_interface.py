@@ -30,9 +30,11 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed) -> ComfyUIRequestResult:
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None) -> ComfyUIRequestResult:
         """
         图生图（Image-to-Image）推理请求，由子类实现
+        width: 图像宽度（可选）
+        height: 图像高度（可选）
         """
 
     @abstractmethod

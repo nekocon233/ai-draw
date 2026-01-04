@@ -27,6 +27,8 @@ class GenerateImageRequest(BaseModel):
     lora_prompt: str = ""
     count: int = 1
     reference_image: Optional[str] = None
+    width: Optional[int] = None  # 图像宽度（部分工作流支持）
+    height: Optional[int] = None  # 图像高度（部分工作流支持）
 
 
 class GenerateImageResponse(BaseModel):

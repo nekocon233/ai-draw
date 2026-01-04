@@ -109,7 +109,9 @@ class AIDrawService:
         strength: float = 0.5,
         lora_prompt: str = "",
         count: int = 1,
-        reference_image: Optional[str] = None
+        reference_image: Optional[str] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
@@ -176,7 +178,9 @@ class AIDrawService:
                         prompt_text=prompt,
                         denoise_value=strength,
                         lora_prompt=lora_prompt or "",
-                        seed=seed
+                        seed=seed,
+                        width=width,
+                        height=height
                     )
                 else:
                     # 文生图工作流

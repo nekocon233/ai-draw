@@ -255,7 +255,7 @@ ai-draw/
 │   │   │   ├── ChatSessionSidebar.tsx
 │   │   │   ├── ResultGrid.tsx
 │   │   │   ├── WorkflowSelector.tsx
-│   │   │   ├── ParametersPanel.tsx
+│   │   │   ├── SettingsModal.tsx
 │   │   │   ├── LoginModal.tsx
 │   │   │   └── ...
 │   │   ├── stores/          # Zustand 状态管理

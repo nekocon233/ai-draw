@@ -26,6 +26,8 @@ async def generate_image(
             lora_prompt=request.lora_prompt,
             count=request.count,
             reference_image=request.reference_image,
+            width=request.width,
+            height=request.height,
         )
         return GenerateImageResponse(
             count=len(images),

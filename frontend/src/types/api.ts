@@ -27,6 +27,8 @@ export interface GenerateImageRequest {
   lora_prompt?: string;
   count: number;
   reference_image?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface GenerateImageResponse {

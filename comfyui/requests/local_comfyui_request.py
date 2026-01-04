@@ -151,9 +151,11 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
         return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
 
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed):
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None):
         """
         异步发送I2I生成请求，返回ComfyRequestResult对象
+        width: 图像宽度（可选）
+        height: 图像高度（可选）
         """
         # 先在系统tmp目录下根据image_b64创建临时图片
         input_filename = os.path.join(tempfile.gettempdir(), "input_image.png")
@@ -199,6 +201,21 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print("[LocalComfyUIRequest] seed参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
+
+        # 设置可选的 width 和 height 参数
+        if width is not None:
+            try:
+                workflow.set_node_param("width", "value", width)
+                print(f"[LocalComfyUIRequest] width参数设置成功: {width}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置width参数失败（工作流可能不支持）: {str(e)}")
+
+        if height is not None:
+            try:
+                workflow.set_node_param("height", "value", height)
+                print(f"[LocalComfyUIRequest] height参数设置成功: {height}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置height参数失败（工作流可能不支持）: {str(e)}")
 
         print("[LocalComfyUIRequest] I2I workflow参数设置完成")
 
