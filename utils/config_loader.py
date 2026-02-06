@@ -83,11 +83,12 @@ class PathsConfig(BaseSettings):
 
 class DatabaseConfig(BaseSettings):
     """数据库配置"""
-    host: str = Field(validation_alias="DB_HOST")
-    port: int = Field(validation_alias="DB_PORT")
+    type: str = Field(default="postgresql", validation_alias="DB_TYPE")
+    host: Optional[str] = Field(default=None, validation_alias="DB_HOST")
+    port: Optional[int] = Field(default=None, validation_alias="DB_PORT")
     name: str = Field(validation_alias="DB_NAME")
-    user: str = Field(validation_alias="DB_USER")
-    password: str = Field(validation_alias="DB_PASSWORD")
+    user: Optional[str] = Field(default=None, validation_alias="DB_USER")
+    password: Optional[str] = Field(default=None, validation_alias="DB_PASSWORD")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
