@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Input, Button, Space, message } from 'antd';
+import { Modal, Input, Button, Space, App } from 'antd';
 import { ThunderboltOutlined, CopyOutlined } from '@ant-design/icons';
 import { apiService } from '../api/services';
 
@@ -12,9 +12,10 @@ interface AIPromptModalProps {
 }
 
 export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalProps) {
+  const { message } = App.useApp();
   const [description, setDescription] = useState('');
-  const [generatedPrompt, setGeneratedPrompt] = useState('');
   const [loading, setLoading] = useState(false);
+  const [generatedPrompt, setGeneratedPrompt] = useState('');
 
   const handleGenerate = async () => {
     if (!description.trim()) {
@@ -66,6 +67,9 @@ export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalP
       onCancel={handleClose}
       width={600}
       centered
+      maskClosable={false}
+      keyboard={false}
+      destroyOnClose
       footer={[
         <Button key="cancel" onClick={handleClose}>
           取消

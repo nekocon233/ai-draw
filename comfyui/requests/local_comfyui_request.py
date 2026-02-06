@@ -131,8 +131,13 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print(f"[LocalComfyUIRequest] 设置lora_prompt参数失败: {str(e)}")
 
         try:
-            workflow.set_node_param("seed", "value", seed)
-            print("[LocalComfyUIRequest] seed参数设置成功")
+            try:
+                workflow.set_node_param("seed", "value", seed)
+                print("[LocalComfyUIRequest] seed参数设置成功")
+            except Exception:
+                # 尝试设置 KSampler 的 seed
+                workflow.set_node_param("K采样器", "seed", seed)
+                print("[LocalComfyUIRequest] K采样器 seed参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
 
@@ -197,8 +202,13 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print(f"[LocalComfyUIRequest] 设置lora_prompt参数失败: {str(e)}")
 
         try:
-            workflow.set_node_param("seed", "value", seed)
-            print("[LocalComfyUIRequest] seed参数设置成功")
+            try:
+                workflow.set_node_param("seed", "value", seed)
+                print("[LocalComfyUIRequest] seed参数设置成功")
+            except Exception:
+                # 尝试设置 KSampler 的 seed
+                workflow.set_node_param("K采样器", "seed", seed)
+                print("[LocalComfyUIRequest] K采样器 seed参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
 

@@ -10,7 +10,12 @@ import time
 # 从配置加载数据库连接信息
 db_config = get_database_config()
 
-DATABASE_URL = f"postgresql://{db_config.user}:{db_config.password}@{db_config.host}:{db_config.port}/{db_config.name}"
+if db_config.host == "sqlite":
+    DATABASE_URL = f"sqlite:///./{db_config.name}.db"
+    connect_args = {"check_same_thread": False}
+else:
+    DATABASE_URL = f"postgresql://{db_config.user}:{db_config.password}@{db_config.host}:{db_config.port}/{db_config.name}"
+    connect_args = {"connect_timeout": 10}
 
 # 创建数据库引擎
 engine = create_engine(
@@ -19,7 +24,7 @@ engine = create_engine(
     max_overflow=20,  # 最大溢出连接数
     pool_pre_ping=True,  # 连接前测试
     echo=False,  # 生产环境设为 False
-    connect_args={"connect_timeout": 10}  # 连接超时
+    connect_args=connect_args
 )
 
 # 会话工厂

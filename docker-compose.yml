@@ -107,6 +107,21 @@ services:
       - "${DB_PORT:-5432}:5432"
 
   # ============================================
+  # Redis 缓存
+  # ============================================
+  redis:
+    image: redis:alpine
+    container_name: ai-draw-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai-draw-network
+
+  # ============================================
   # Nginx 反向代理
   # ============================================
   nginx:
@@ -143,6 +158,8 @@ networks:
 # ============================================
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
   uploads-data:
     driver: local

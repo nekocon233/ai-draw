@@ -54,3 +54,11 @@ async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_s
         "workflows": workflows,
         "default_workflow": service.get_current_workflow()
     }
+
+
+@router.get("/loras")
+async def get_lora_models() -> dict:
+    """获取所有可用的 LoRA 模型列表"""
+    from utils.lora_scanner import scan_lora_models
+    loras = scan_lora_models()
+    return {"loras": loras}

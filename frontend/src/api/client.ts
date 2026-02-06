@@ -2,7 +2,6 @@
  * Axios HTTP 客户端配置
  */
 import axios, { AxiosError } from 'axios';
-import { message } from 'antd';
 import { getAccessToken, clearAccessToken } from '../utils/helpers';
 
 /**
@@ -61,8 +60,8 @@ client.interceptors.response.use(
     
     // 处理网络错误
     if (!error.response) {
-      message.error('网络连接失败，请检查网络设置');
-      return Promise.reject(new Error('网络连接失败'));
+      // 移除直接使用 message.error，让调用方处理或在组件中显示
+      return Promise.reject(new Error('网络连接失败，请检查网络设置'));
     }
 
     const { status, data } = error.response;
@@ -80,15 +79,7 @@ client.interceptors.response.use(
       switch (errorCode) {
         case 'AUTHENTICATION_ERROR':
           clearAccessToken();
-          message.error('认证失败，请重新登录');
-          break;
-          
-        case 'AUTHORIZATION_ERROR':
-          message.error('权限不足');
-          break;
-          
-        case 'RESOURCE_NOT_FOUND':
-          message.error('资源不存在');
+          // 不再直接调用 message.error，避免 Context 丢失问题
           break;
           
         case 'VALIDATION_ERROR':
@@ -99,50 +90,19 @@ client.interceptors.response.use(
               message: string;
             }>;
             const firstError = validationErrors[0];
-            message.error(`${firstError.field}: ${firstError.message}`);
-          } else {
-            message.error(errorMessage);
+            errorMessage = `${firstError.field}: ${firstError.message}`;
           }
           break;
-          
-        case 'DATABASE_ERROR':
-          message.error('数据库操作失败，请稍后重试');
-          break;
-          
-        case 'EXTERNAL_SERVICE_ERROR':
-          message.error('外部服务暂时不可用，请稍后重试');
-          break;
-          
-        default:
-          message.error(errorMessage);
       }
     } else {
       // 兼容旧版错误格式
       errorMessage = (data as any)?.detail || error.message || '请求失败';
       
       // HTTP 状态码处理
-      switch (status) {
-        case 400:
-          message.error(`请求参数错误: ${errorMessage}`);
-          break;
-        case 401:
-          clearAccessToken();
-          message.error('认证失败，请重新登录');
-          break;
-        case 403:
-          message.error('权限不足');
-          break;
-        case 404:
-          message.error('资源不存在');
-          break;
-        case 500:
-          message.error('服务器内部错误');
-          break;
-        case 503:
-          message.error('服务暂时不可用');
-          break;
-        default:
-          message.error(errorMessage);
+      if (status === 401) {
+        clearAccessToken();
+      } else if (status === 400) {
+        errorMessage = `请求参数错误: ${errorMessage}`;
       }
     }
     
