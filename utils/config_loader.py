@@ -156,6 +156,25 @@ class Config(BaseSettings):
 
 # 全局配置实例（单例模式）
 _config: Optional[Config] = None
+_workflow_defaults_mtime: Optional[float] = None
+_workflow_defaults_path: str = "configs/app_config.yaml"
+
+
+def _refresh_workflow_defaults(config: Config, config_path: str) -> None:
+    global _workflow_defaults_mtime
+    if not config_path or not os.path.exists(config_path):
+        return
+    try:
+        mtime = os.path.getmtime(config_path)
+        if _workflow_defaults_mtime is not None and mtime == _workflow_defaults_mtime:
+            return
+        with open(config_path, 'r', encoding='utf-8') as f:
+            yaml_data = yaml.safe_load(f)
+        if yaml_data and 'workflow_defaults' in yaml_data:
+            config.workflow_defaults = WorkflowDefaultsConfig(**yaml_data['workflow_defaults'])
+            _workflow_defaults_mtime = mtime
+    except Exception as e:
+        print(f"警告: 无法从 {config_path} 读取工作流配置: {e}")
 
 
 def load_config(config_path: str = "configs/app_config.yaml") -> Config:
@@ -184,18 +203,7 @@ def load_config(config_path: str = "configs/app_config.yaml") -> Config:
     _config = Config()
     
     # 从 YAML 读取工作流配置（如果文件存在）
-    if config_path and os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                yaml_data = yaml.safe_load(f)
-                
-            # 仅覆盖工作流配置
-            if yaml_data and 'workflow_defaults' in yaml_data:
-                workflow_data = yaml_data['workflow_defaults']
-                _config.workflow_defaults = WorkflowDefaultsConfig(**workflow_data)
-        except Exception as e:
-            print(f"警告: 无法从 {config_path} 读取工作流配置: {e}")
-            print("将使用默认工作流配置")
+    _refresh_workflow_defaults(_config, config_path)
     
     return _config
 
@@ -210,6 +218,8 @@ def get_config() -> Config:
     global _config
     if _config is None:
         _config = load_config()
+    else:
+        _refresh_workflow_defaults(_config, _workflow_defaults_path)
     return _config
 
 

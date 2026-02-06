@@ -1,13 +1,16 @@
-import { Button, message } from 'antd';
+import { Button, App } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
+import { wsManager } from '../api/websocket';
 import './GenerateButton.css';
 
 export default function GenerateButton() {
+  const { message } = App.useApp();
   const {
     prompt,
     currentWorkflow,
+    availableWorkflows,
     strength,
     count,
     loraPrompt,
@@ -24,11 +27,17 @@ export default function GenerateButton() {
       return;
     }
 
+    const currentWorkflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+    if (currentWorkflowMeta?.requires_image && !referenceImage) {
+      message.warning(`当前工作流“${currentWorkflowMeta.label}”需要先上传参考图`);
+      return;
+    }
+
     clearError();
 
     // 添加用户消息到聊天历史（包含加载占位符）
     // 使用用户选择的工作流
-    await addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
+    const messageId = await addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
 
     try {
       const res = await apiService.generateImage({
@@ -43,6 +52,9 @@ export default function GenerateButton() {
       });
 
       // 图片通过 WebSocket 实时推送，生成完成时自动保存
+      if (!wsManager.isConnected) {
+        useAppStore.getState().updateChatImages(messageId, res.images);
+      }
       message.success(`成功生成 ${res.count} 张图片!`);
     } catch (err: any) {
       setError(err.message);

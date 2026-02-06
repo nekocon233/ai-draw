@@ -2,7 +2,7 @@
  * 登录/注册弹窗
  */
 import { useState } from 'react';
-import { Modal, Form, Input, Tabs, message } from 'antd';
+import { Modal, Form, Input, Tabs, App } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { setAccessToken, setUsername } from '../utils/helpers';
@@ -15,6 +15,7 @@ interface LoginModalProps {
 }
 
 export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();

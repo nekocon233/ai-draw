@@ -254,11 +254,16 @@ class AIDrawService:
 
 # 全局服务实例
 _service_instance: Optional[AIDrawService] = None
+_service_instance_workflow_files_sig: Optional[str] = None
 
 
 def get_ai_draw_service() -> AIDrawService:
     """获取 AI 绘画服务单例"""
-    global _service_instance
-    if _service_instance is None:
+    global _service_instance, _service_instance_workflow_files_sig
+    config = get_config()
+    workflow_files = (config.workflow_defaults.workflow_files if config.workflow_defaults else {}) or {}
+    sig = str(sorted(workflow_files.items()))
+    if _service_instance is None or _service_instance_workflow_files_sig != sig:
         _service_instance = AIDrawService()
+        _service_instance_workflow_files_sig = sig
     return _service_instance

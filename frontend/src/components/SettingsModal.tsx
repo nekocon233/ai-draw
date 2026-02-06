@@ -79,7 +79,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       centered
       okText="确定"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form
         form={form}

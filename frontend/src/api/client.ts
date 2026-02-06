@@ -2,8 +2,36 @@
  * Axios HTTP 客户端配置
  */
 import axios, { AxiosError } from 'axios';
-import { message } from 'antd';
+import { message as antdMessage } from 'antd';
+import { getMessageApi } from '../utils/antd-helpers';
 import { getAccessToken, clearAccessToken } from '../utils/helpers';
+
+// 获取 message 实例的辅助函数
+const getMessage = () => {
+  const api = getMessageApi();
+  if (api) {
+    return api;
+  }
+  
+  // Fallback to static methods if App context is not yet available
+  // Note: Static methods might not work with context-based features (like themes)
+  // but they prevent "is not a function" errors.
+  if (antdMessage && typeof antdMessage.error === 'function') {
+    return antdMessage;
+  }
+
+  // Last resort fallback to console to prevent crash
+  console.warn('Message API not available, falling back to console');
+  return {
+    success: (content: any) => console.log('Success:', content),
+    error: (content: any) => console.error('Error:', content),
+    info: (content: any) => console.log('Info:', content),
+    warning: (content: any) => console.warn('Warning:', content),
+    loading: (content: any) => console.log('Loading:', content),
+    open: (config: any) => console.log('Message:', config),
+    destroy: () => {},
+  } as any;
+};
 
 /**
  * API 错误响应格式
@@ -61,7 +89,7 @@ client.interceptors.response.use(
     
     // 处理网络错误
     if (!error.response) {
-      message.error('网络连接失败，请检查网络设置');
+      getMessage().error('网络连接失败，请检查网络设置');
       return Promise.reject(new Error('网络连接失败'));
     }
 
@@ -80,15 +108,15 @@ client.interceptors.response.use(
       switch (errorCode) {
         case 'AUTHENTICATION_ERROR':
           clearAccessToken();
-          message.error('认证失败，请重新登录');
+          getMessage().error('认证失败，请重新登录');
           break;
           
         case 'AUTHORIZATION_ERROR':
-          message.error('权限不足');
+          getMessage().error('权限不足');
           break;
           
         case 'RESOURCE_NOT_FOUND':
-          message.error('资源不存在');
+          getMessage().error('资源不存在');
           break;
           
         case 'VALIDATION_ERROR':
@@ -99,22 +127,22 @@ client.interceptors.response.use(
               message: string;
             }>;
             const firstError = validationErrors[0];
-            message.error(`${firstError.field}: ${firstError.message}`);
+            getMessage().error(`${firstError.field}: ${firstError.message}`);
           } else {
-            message.error(errorMessage);
+            getMessage().error(errorMessage);
           }
           break;
           
         case 'DATABASE_ERROR':
-          message.error('数据库操作失败，请稍后重试');
+          getMessage().error('数据库操作失败，请稍后重试');
           break;
           
         case 'EXTERNAL_SERVICE_ERROR':
-          message.error('外部服务暂时不可用，请稍后重试');
+          getMessage().error('外部服务暂时不可用，请稍后重试');
           break;
           
         default:
-          message.error(errorMessage);
+          getMessage().error(errorMessage);
       }
     } else {
       // 兼容旧版错误格式
@@ -123,26 +151,26 @@ client.interceptors.response.use(
       // HTTP 状态码处理
       switch (status) {
         case 400:
-          message.error(`请求参数错误: ${errorMessage}`);
+          getMessage().error(`请求参数错误: ${errorMessage}`);
           break;
         case 401:
           clearAccessToken();
-          message.error('认证失败，请重新登录');
+          getMessage().error('认证失败，请重新登录');
           break;
         case 403:
-          message.error('权限不足');
+          getMessage().error('权限不足');
           break;
         case 404:
-          message.error('资源不存在');
+          getMessage().error('资源不存在');
           break;
         case 500:
-          message.error('服务器内部错误');
+          getMessage().error((data as any)?.detail || '服务器内部错误');
           break;
         case 503:
-          message.error('服务暂时不可用');
+          getMessage().error('服务暂时不可用');
           break;
         default:
-          message.error(errorMessage);
+          getMessage().error(errorMessage);
       }
     }
     

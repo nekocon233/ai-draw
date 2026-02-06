@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Layout, ConfigProvider, theme, App as AntApp, message } from 'antd';
+import { Layout, ConfigProvider, theme, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import ChatInput from './components/ChatInput';
 import ResultGrid from './components/ResultGrid';
@@ -12,30 +12,26 @@ import { isLoggedIn, getStorageUsage } from './utils/helpers';
 import { WS_MESSAGE_TYPES, STATE_FIELDS, STORAGE_CONFIG } from './utils/constants';
 import './App.css';
 
-function AppContent() {
+import { setMessageApi } from './utils/antd-helpers';
+
+// Inner component that has access to AntApp context
+function AppLayout({ isDark }: { isDark: boolean }) {
   const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore();
-  const [isDark, setIsDark] = useState(false);
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message } = AntApp.useApp();
 
-  // 主题检测和存储监控
+  // 初始化静态 message 实例
   useEffect(() => {
-    // 检测系统主题
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDark(mediaQuery.matches);
+    setMessageApi(message);
+  }, [message]);
 
-    const handleThemeChange = (e: MediaQueryListEvent) => {
-      setIsDark(e.matches);
-    };
-
-    mediaQuery.addEventListener('change', handleThemeChange);
-
-    // 检查游客模式的存储使用情况
+  // 检查游客模式的存储使用情况
+  useEffect(() => {
     let storageCheckInterval: number | null = null;
     if (!isLoggedIn()) {
       const checkStorage = () => {
         const usage = getStorageUsage();
         if (usage.percentage > STORAGE_CONFIG.WARN_USAGE_PERCENTAGE) {
-          messageApi.warning({
+          message.warning({
             content: `浏览器存储空间已使用 ${usage.percentage.toFixed(0)}%，建议登录以保存更多历史记录`,
             duration: 5,
           });
@@ -50,12 +46,11 @@ function AppContent() {
     }
     
     return () => {
-      mediaQuery.removeEventListener('change', handleThemeChange);
       if (storageCheckInterval) {
         clearInterval(storageCheckInterval);
       }
     };
-  }, [messageApi]);
+  }, [message]);
 
   // 数据加载和 WebSocket 连接
   useEffect(() => {
@@ -131,6 +126,64 @@ function AppContent() {
   }, [setServiceStatus, setError, loadUserConfig, loadSessions]);
 
   return (
+    <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
+      {/* 顶部状态栏 */}
+      <div style={{ 
+        padding: '12px 24px', 
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        background: isDark ? 'rgba(22, 27, 34, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(10px)'
+      }}>
+        <StatusBar />
+      </div>
+
+      <div className="app-content">
+        {/* 左侧会话栏 */}
+        <ChatSessionSidebar />
+        
+        {/* 主内容区域 */}
+        <div className={`chat-container ${chatHistory.length === 0 ? 'empty-state' : ''}`}>
+          {/* 结果展示区域 */}
+          <div className={`results-area ${chatHistory.length === 0 ? 'empty' : ''}`}>
+            <ResultGrid />
+          </div>
+          
+          {/* 聊天输入区域 */}
+          <div className="chat-input-area">
+            {chatHistory.length === 0 && (
+              <div className="chat-welcome">
+                <h2 className="welcome-title">AI-DRAW</h2>
+                <p className="welcome-subtitle">用文字描述，创造无限可能</p>
+              </div>
+            )}
+            <ChatInput />
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+function App() {
+  const [isDark, setIsDark] = useState(false);
+
+  // 主题检测
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    setIsDark(mediaQuery.matches);
+
+    const handleThemeChange = (e: MediaQueryListEvent) => {
+      setIsDark(e.matches);
+    };
+
+    mediaQuery.addEventListener('change', handleThemeChange);
+    
+    return () => {
+      mediaQuery.removeEventListener('change', handleThemeChange);
+    };
+  }, []);
+
+  return (
     <ConfigProvider
       locale={zhCN}
       theme={{
@@ -143,49 +196,10 @@ function AppContent() {
       }}
     >
       <AntApp>
-        {contextHolder}
-        <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
-          {/* 顶部状态栏 */}
-          <div style={{ 
-            padding: '12px 24px', 
-            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-            background: isDark ? 'rgba(22, 27, 34, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <StatusBar />
-          </div>
-
-          <div className="app-content">
-            {/* 左侧会话栏 */}
-            <ChatSessionSidebar />
-            
-            {/* 主内容区域 */}
-            <div className={`chat-container ${chatHistory.length === 0 ? 'empty-state' : ''}`}>
-              {/* 结果展示区域 */}
-              <div className={`results-area ${chatHistory.length === 0 ? 'empty' : ''}`}>
-                <ResultGrid />
-              </div>
-              
-              {/* 聊天输入区域 */}
-              <div className="chat-input-area">
-                {chatHistory.length === 0 && (
-                  <div className="chat-welcome">
-                    <h2 className="welcome-title">AI-DRAW</h2>
-                    <p className="welcome-subtitle">用文字描述，创造无限可能</p>
-                  </div>
-                )}
-                <ChatInput />
-              </div>
-            </div>
-          </div>
-        </Layout>
+        <AppLayout isDark={isDark} />
       </AntApp>
     </ConfigProvider>
   );
-}
-
-function App() {
-  return <AppContent />;
 }
 
 export default App;

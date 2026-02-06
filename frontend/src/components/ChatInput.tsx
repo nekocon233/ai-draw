@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, message, Select } from 'antd';
+import { Input, Button, Select, App } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
+import { wsManager } from '../api/websocket';
 import SettingsModal from './SettingsModal';
 import AIPromptModal from './AIPromptModal';
 import './ChatInput.css';
@@ -17,6 +18,7 @@ import './ChatInput.css';
 const { TextArea } = Input;
 
 export default function ChatInput() {
+  const { message } = App.useApp();
   const {
     prompt,
     strength,
@@ -93,6 +95,12 @@ export default function ChatInput() {
       return;
     }
 
+    const currentWorkflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+    if (currentWorkflowMeta?.requires_image && !referenceImage) {
+      message.warning(`当前工作流“${currentWorkflowMeta.label}”需要先上传参考图`);
+      return;
+    }
+
     clearError();
 
     // 添加聊天消息（用户输入 + 加载占位符）
@@ -112,7 +120,9 @@ export default function ChatInput() {
       });
 
       // 图片通过 WebSocket 实时推送，这里只等待生成完成
-      // useAppStore.getState().updateChatImages(messageId, res.images);
+      if (!wsManager.isConnected) {
+        useAppStore.getState().updateChatImages(messageId, res.images);
+      }
       message.success(`成功生成 ${res.count} 张图片!`);
       // loading 状态由后端通过 WebSocket 自动设置为 false
     } catch (err: any) {

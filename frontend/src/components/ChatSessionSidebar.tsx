@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, List, Input, Popconfirm, Tooltip } from 'antd';
+import { Button, Input, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined,
   MessageOutlined,
@@ -103,10 +103,10 @@ export default function ChatSessionSidebar() {
       </div>
 
       <div className="session-list">
-        <List
-          dataSource={sessions.sort((a, b) => b.updated_at - a.updated_at)}
-          renderItem={(session) => (
-            <List.Item
+        {sessions
+          .sort((a, b) => b.updated_at - a.updated_at)
+          .map((session) => (
+            <div
               key={session.id}
               className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
               onClick={() => handleSwitchSession(session.id)}
@@ -177,9 +177,8 @@ export default function ChatSessionSidebar() {
                   </>
                 )}
               </div>
-            </List.Item>
-          )}
-        />
+            </div>
+          ))}
       </div>
     </div>
   );

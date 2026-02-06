@@ -1,4 +1,4 @@
-import { Upload, Button, Image, message } from 'antd';
+import { Upload, Button, Image, App } from 'antd';
 import { InboxOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
@@ -7,6 +7,7 @@ import type { UploadProps } from 'antd';
 const { Dragger } = Upload;
 
 export default function ImageUploader() {
+  const { message } = App.useApp();
   const { referenceImage, setReferenceImage, setError } = useAppStore();
 
   const uploadProps: UploadProps = {
