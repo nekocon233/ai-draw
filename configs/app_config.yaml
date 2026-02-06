@@ -17,6 +17,7 @@ workflow_defaults:
     i2i: "qwen_image_edit_workflow_api.json"
     reference: "reference_workflow_api.json"
     reference_zimage: "reference_zimage_workflow_api.json"
+    sdxl_simple: "sdxl_simple_example.json"
   
   # 工作流元数据
   workflow_metadata:
@@ -36,6 +37,32 @@ workflow_defaults:
           label: "LoRA 提示词"
           type: "text"
           default: "<lora:AmeniwaZ:0.8>"
+    sdxl_simple:
+      label: "SDXL 基础生图"
+      description: "SDXL 基础文生图工作流"
+      requires_image: false
+      parameters:
+        - name: "count"
+          label: "生成数量"
+          type: "number"
+          min: 1
+          max: 8
+          step: 1
+          default: 1
+        - name: "width"
+          label: "图像宽度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
+        - name: "height"
+          label: "图像高度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
     i2i:
       label: "图生图（Q-Image）"
       description: "基于参考图重绘"

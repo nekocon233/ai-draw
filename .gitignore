@@ -76,10 +76,5 @@ local_settings.py
 
 *.zip
 
-# Settings folders
+# 设置文件夹
 settings/
-
-# Local ComfyUI Server
-ComfyUI_Server/
-scripts/allow_firewall.ps1
-scripts/set_private_network.ps1

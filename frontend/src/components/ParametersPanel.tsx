@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Card, Slider, InputNumber, Row, Col, Typography, Input, Select } from 'antd';
+import { Slider, InputNumber, Row, Col, Typography, Input } from 'antd';
 import { useAppStore } from '../stores/appStore';
-import { apiService } from '../api/services';
 
-const { Text } = Typography;
+const { Title, Text } = Typography;
 
 export default function ParametersPanel() {
   const { 
@@ -21,25 +19,6 @@ export default function ParametersPanel() {
     setHeight
   } = useAppStore();
 
-  const [loraList, setLoraList] = useState<string[]>([]);
-  const [loadingLoras, setLoadingLoras] = useState(false);
-
-  useEffect(() => {
-    // 获取 LoRA 列表
-    const fetchLoras = async () => {
-      try {
-        setLoadingLoras(true);
-        const res = await apiService.getLoras();
-        setLoraList(res.loras || []);
-      } catch (error) {
-        console.error("Failed to fetch loras:", error);
-      } finally {
-        setLoadingLoras(false);
-      }
-    };
-    fetchLoras();
-  }, []);
-
   // 获取当前工作流的参数配置
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   if (!workflowMeta) {
@@ -53,27 +32,10 @@ export default function ParametersPanel() {
   const hasWidth = workflowMeta.parameters.some(p => p.name === 'width');
   const hasHeight = workflowMeta.parameters.some(p => p.name === 'height');
 
-  const handleLoraChange = (value: string) => {
-    // 如果选择了某个 LoRA，自动格式化为标准格式
-    // 默认权重设为 0.8，用户可以后续手动修改
-    if (value && !value.startsWith('<lora:')) {
-      // 提取文件名（不含路径和扩展名）作为显示名称的一部分
-      // 但 ComfyUI 通常需要相对路径，所以这里保留原始选择的值
-      setLoraPrompt(`<lora:${value}:0.8>`);
-    } else {
-      setLoraPrompt(value);
-    }
-  };
-
   return (
-    <Card 
-      title="生成参数" 
-      size="small" 
-      bordered={false}
-      style={{ boxShadow: 'none' }}
-      headStyle={{ fontSize: 14, fontWeight: 'bold' }}
-      bodyStyle={{ padding: '12px 16px' }}
-    >
+    <div>
+      <Title level={5} style={{ marginBottom: 16 }}>参数设置</Title>
+      
       {hasStrength && (
         <div style={{ marginBottom: 24 }}>
           <Text strong style={{ fontSize: 13 }}>
@@ -140,29 +102,12 @@ export default function ParametersPanel() {
           <Text strong style={{ fontSize: 13 }}>
             {workflowMeta.parameters.find(p => p.name === 'lora_prompt')?.label || 'LoRA 提示词'}
           </Text>
-          <div style={{ marginTop: 12 }}>
-            <Select
-              showSearch
-              allowClear
-              style={{ width: '100%', marginBottom: 8 }}
-              placeholder="选择 LoRA 模型"
-              optionFilterProp="children"
-              loading={loadingLoras}
-              onChange={handleLoraChange}
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={loraList.map(lora => ({
-                value: lora,
-                label: lora
-              }))}
-            />
-            <Input
-              value={loraPrompt}
-              onChange={(e) => setLoraPrompt(e.target.value)}
-              placeholder="自定义 LoRA 格式: <lora:模型名:权重>"
-            />
-          </div>
+          <Input
+            value={loraPrompt}
+            onChange={(e) => setLoraPrompt(e.target.value)}
+            placeholder="<lora:模型名:权重>"
+            style={{ marginTop: 12 }}
+          />
         </div>
       )}
 

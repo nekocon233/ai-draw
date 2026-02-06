@@ -2,7 +2,7 @@
  * 登录/注册弹窗
  */
 import { useState } from 'react';
-import { Modal, Form, Input, Tabs, App } from 'antd';
+import { Modal, Form, Input, Tabs, message } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { setAccessToken, setUsername } from '../utils/helpers';
@@ -11,11 +11,10 @@ import { VALIDATION } from '../utils/constants';
 interface LoginModalProps {
   open: boolean;
   onClose: () => void;
-  onLoginSuccess: () => void;
+  onSuccess: (username: string) => void;
 }
 
-export default function LoginModal({ open, onClose, onLoginSuccess }: LoginModalProps) {
-  const { message } = App.useApp();
+export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
   const [loading, setLoading] = useState(false);
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();
@@ -181,9 +180,6 @@ export default function LoginModal({ open, onClose, onLoginSuccess }: LoginModal
       confirmLoading={loading}
       width={450}
       centered
-      maskClosable={false}
-      keyboard={false}
-      destroyOnClose
     >
       <Tabs
         defaultActiveKey="login"

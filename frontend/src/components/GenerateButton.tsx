@@ -1,11 +1,10 @@
-import { Button, App } from 'antd';
+import { Button, message } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
 import './GenerateButton.css';
 
 export default function GenerateButton() {
-  const { message } = App.useApp();
   const {
     prompt,
     currentWorkflow,

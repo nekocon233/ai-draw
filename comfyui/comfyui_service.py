@@ -169,13 +169,15 @@ class ComfyUIService:
         """
         self._cleanup_temp_file()
 
-    async def generate_t2i(self, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None):
+    async def generate_t2i(self, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None, width=None, height=None):
         """
         文生图（Text-to-Image）
         prompt_text: 文本提示
         denoise_value: 去噪强度
         lora_prompt: lora提示词
         seed: 随机种子
+        width: 图像宽度（可选）
+        height: 图像高度（可选）
         finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
         """
         if seed is None:
@@ -183,7 +185,7 @@ class ComfyUIService:
             seed = random.randrange(0, 2**63)
 
         # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_t2i(self.workflow, prompt_text, denoise_value, lora_prompt, seed)
+        result = await self.request.generate_t2i(self.workflow, prompt_text, denoise_value, lora_prompt, seed, width, height)
         if result.is_success:
             print(f"[ComfyUIService] T2I生成成功")
             finish_callback(result.data)

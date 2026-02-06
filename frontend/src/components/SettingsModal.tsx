@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Modal, Form, Slider, InputNumber, Input, Row, Col, Select } from 'antd';
+import { useEffect } from 'react';
+import { Modal, Form, Slider, InputNumber, Input, Row, Col } from 'antd';
 import { useAppStore } from '../stores/appStore';
-import { apiService } from '../api/services';
 
 interface SettingsModalProps {
   open: boolean;
@@ -27,26 +26,6 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   } = useAppStore();
 
   const [form] = Form.useForm();
-  const [loraList, setLoraList] = useState<string[]>([]);
-  const [loadingLoras, setLoadingLoras] = useState(false);
-
-  useEffect(() => {
-    // 获取 LoRA 列表
-    const fetchLoras = async () => {
-      try {
-        setLoadingLoras(true);
-        const res = await apiService.getLoras();
-        setLoraList(res.loras || []);
-      } catch (error) {
-        console.error("Failed to fetch loras:", error);
-      } finally {
-        setLoadingLoras(false);
-      }
-    };
-    if (open) {
-      fetchLoras();
-    }
-  }, [open]);
 
   // 获取当前工作流的参数配置
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
@@ -90,20 +69,6 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     onClose();
   };
 
-  const handleLoraChange = (value: string) => {
-    // 如果选择了某个 LoRA，自动格式化为标准格式
-    // 默认权重设为 0.8，用户可以后续手动修改
-    if (value && !value.startsWith('<lora:')) {
-      form.setFieldsValue({
-        loraPrompt: `<lora:${value}:0.8>`
-      });
-    } else {
-      form.setFieldsValue({
-        loraPrompt: value
-      });
-    }
-  };
-
   return (
     <Modal
       title="生成设置"
@@ -114,8 +79,6 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       centered
       okText="确定"
       cancelText="取消"
-      maskClosable={false}
-      keyboard={false}
       destroyOnClose
     >
       <Form
@@ -184,29 +147,11 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         )}
 
         {hasLoraPrompt && (
-          <Form.Item label="LoRA 提示词">
-            <Select
-              showSearch
+          <Form.Item label="LoRA 提示词" name="loraPrompt">
+            <Input
+              placeholder="例如: <lora:style_name:0.8>"
               allowClear
-              style={{ width: '100%', marginBottom: 8 }}
-              placeholder="选择 LoRA 模型"
-              optionFilterProp="children"
-              loading={loadingLoras}
-              onChange={handleLoraChange}
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={loraList.map(lora => ({
-                value: lora,
-                label: lora
-              }))}
             />
-            <Form.Item name="loraPrompt" noStyle>
-              <Input
-                placeholder="自定义 LoRA 格式: <lora:模型名:权重>"
-                allowClear
-              />
-            </Form.Item>
           </Form.Item>
         )}
 

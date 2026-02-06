@@ -95,17 +95,6 @@ async def health_check():
     return {"status": "healthy", "app": config.app.name, "version": config.app.version}
 
 
-@app.get("/")
-async def root():
-    """根路径重定向"""
-    return {
-        "message": "AI-Draw API Service is running",
-        "docs": "/docs",
-        "health": "/health",
-        "version": config.app.version
-    }
-
-
 if __name__ == "__main__":
     server_config = config.server
     uvicorn.run(

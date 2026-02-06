@@ -29,6 +29,7 @@
           ]
         }
       ],
+      "title": "分辨率",
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.3.33",
@@ -490,7 +491,7 @@
           ]
         }
       ],
-      "title": "KSampler (Advanced) - BASE",
+      "title": "K采样器",
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.3.33",
@@ -832,7 +833,7 @@
           ]
         }
       ],
-      "title": "Positive Prompt (Text)",
+      "title": "positive_prompt",
       "properties": {
         "Run widget replace on values": false
       },
@@ -1004,6 +1005,7 @@
         }
       ],
       "outputs": [],
+      "title": "保存图像",
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.3.33"

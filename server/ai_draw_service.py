@@ -189,7 +189,9 @@ class AIDrawService:
                         prompt_text=prompt,
                         denoise_value=strength,
                         lora_prompt=lora_prompt or "",
-                        seed=seed
+                        seed=seed,
+                        width=width,
+                        height=height
                     )
                 
                 if result_images and result_images[0] is not None:

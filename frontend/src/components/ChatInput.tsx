@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, Select, App } from 'antd';
+import { Input, Button, message, Select } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -17,7 +17,6 @@ import './ChatInput.css';
 const { TextArea } = Input;
 
 export default function ChatInput() {
-  const { message } = App.useApp();
   const {
     prompt,
     strength,

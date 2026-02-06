@@ -131,9 +131,6 @@ export const apiService = {
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),
 
-  getLoras: (): Promise<{ loras: string[] }> =>
-    client.get('/service/loras'),
-
   getWorkflowDefaults: (): Promise<{ success: boolean; defaults: any }> =>
     client.get('/workflow/defaults'),
   

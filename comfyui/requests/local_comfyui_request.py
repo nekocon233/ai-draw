@@ -113,13 +113,15 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         #     self.log_thread.join(timeout=1)
         #     self.log_thread = None
 
-    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed):
+    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None):
         """
         异步发送T2I生成请求，返回ComfyRequestResult对象
         """
         # 设置workflow参数
         try:
             workflow.set_node_param("positive_prompt", "positive", prompt_text)
+            # 兼容 PrimitiveNode 的 text 参数 (sdxl_simple 工作流)
+            workflow.set_node_param("positive_prompt", "text", prompt_text)
             print("[LocalComfyUIRequest] positive_prompt参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置positive_prompt参数失败: {str(e)}")
@@ -128,7 +130,8 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             workflow.set_node_param("lora_prompt", "positive", lora_prompt)
             print(f"[LocalComfyUIRequest] lora_prompt参数设置成功: {lora_prompt}")
         except Exception as e:
-            print(f"[LocalComfyUIRequest] 设置lora_prompt参数失败: {str(e)}")
+            # 这是一个可选参数，如果工作流不支持也没关系
+            pass
 
         try:
             try:
@@ -140,6 +143,16 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 print("[LocalComfyUIRequest] K采样器 seed参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
+
+        # 设置可选的 width 和 height 参数 (针对 SDXL 工作流)
+        if width is not None and height is not None:
+            try:
+                # 尝试设置 EmptyLatentImage 的宽高 (需在 JSON 中将节点 Title 设为 "分辨率")
+                workflow.set_node_param("分辨率", "width", width)
+                workflow.set_node_param("分辨率", "height", height)
+                print(f"[LocalComfyUIRequest] 分辨率参数设置成功: {width}x{height}")
+            except Exception as e:
+                 print(f"[LocalComfyUIRequest] 设置分辨率失败: {str(e)}")
 
         print("[LocalComfyUIRequest] T2I workflow参数设置完成")
 
