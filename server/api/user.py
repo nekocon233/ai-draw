@@ -76,14 +76,18 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     # 创建默认配置（从 workflow_metadata 读取）
     from utils.config_loader import get_config
     cfg = get_config()
+
+    def get_default_param(name: str, fallback):
+        value = cfg.workflow_defaults.get_workflow_parameter_default('t2i', name)
+        return fallback if value is None else value
     
     config = UserConfig(
         user_id=user.id,
         current_workflow="t2i",
-        prompt=None,
-        lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-        strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-        count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+        prompt="",
+        lora_prompt=get_default_param('lora_prompt', ""),
+        strength=get_default_param('strength', 0.5),
+        count=get_default_param('count', 1),
         images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(config)
@@ -130,26 +134,35 @@ def get_user_config(
         # 创建默认配置（从 workflow_metadata 读取）
         from utils.config_loader import get_config
         cfg = get_config()
+
+        def get_default_param(name: str, fallback):
+            value = cfg.workflow_defaults.get_workflow_parameter_default('t2i', name)
+            return fallback if value is None else value
         
         config = UserConfig(
             user_id=current_user.id,
             current_workflow="t2i",
-            prompt=None,
-            lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-            strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-            count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+            prompt="",
+            lora_prompt=get_default_param('lora_prompt', ""),
+            strength=get_default_param('strength', 0.5),
+            count=get_default_param('count', 1),
             images_per_row=cfg.workflow_defaults.col_count
         )
         db.add(config)
         db.commit()
         db.refresh(config)
+
+    prompt = config.prompt if config.prompt is not None else ""
+    lora_prompt = config.lora_prompt if config.lora_prompt is not None else ""
+    strength = config.strength if config.strength is not None else 0.5
+    count = config.count if config.count is not None else 1
     
     return UserConfigResponse(
-        current_workflow=config.current_workflow,
-        prompt=config.prompt,
-        lora_prompt=config.lora_prompt,
-        strength=config.strength,
-        count=config.count,
+        current_workflow=config.current_workflow or "t2i",
+        prompt=prompt,
+        lora_prompt=lora_prompt,
+        strength=strength,
+        count=count,
         images_per_row=config.images_per_row,
         current_session_id=config.current_session_id
     )
@@ -187,12 +200,16 @@ def reset_user_config(
         # 从 workflow_metadata 读取默认值
         from utils.config_loader import get_config
         cfg = get_config()
+
+        def get_default_param(name: str, fallback):
+            value = cfg.workflow_defaults.get_workflow_parameter_default('t2i', name)
+            return fallback if value is None else value
         
         config.current_workflow = "t2i"
-        config.prompt = None
-        config.lora_prompt = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt')
-        config.strength = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength')
-        config.count = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count')
+        config.prompt = ""
+        config.lora_prompt = get_default_param('lora_prompt', "")
+        config.strength = get_default_param('strength', 0.5)
+        config.count = get_default_param('count', 1)
         config.images_per_row = cfg.workflow_defaults.col_count
         config.updated_at = datetime.now()
         db.commit()

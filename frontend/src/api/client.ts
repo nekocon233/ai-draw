@@ -84,7 +84,7 @@ client.interceptors.response.use(
     // 成功响应直接返回 data
     return response.data;
   },
-  (error: AxiosError<APIErrorResponse>) => {
+  (error: AxiosError<any>) => {
     console.error('Response error:', error);
     
     // 处理网络错误
@@ -93,7 +93,8 @@ client.interceptors.response.use(
       return Promise.reject(new Error('网络连接失败'));
     }
 
-    const { status, data } = error.response;
+    const status = error.response.status;
+    const data: any = error.response.data as any;
     
     // 统一错误消息格式
     let errorMessage = '请求失败';
@@ -146,7 +147,11 @@ client.interceptors.response.use(
       }
     } else {
       // 兼容旧版错误格式
-      errorMessage = (data as any)?.detail || error.message || '请求失败';
+      if (typeof data === 'string' && data.trim()) {
+        errorMessage = data.trim();
+      } else {
+        errorMessage = (data as any)?.detail || error.message || '请求失败';
+      }
       
       // HTTP 状态码处理
       switch (status) {
@@ -179,6 +184,7 @@ client.interceptors.response.use(
     (apiError as any).code = errorCode;
     (apiError as any).status = status;
     (apiError as any).details = data?.error?.details;
+    (apiError as any).raw = data;
     
     return Promise.reject(apiError);
   }

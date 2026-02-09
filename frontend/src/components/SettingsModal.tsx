@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
-import { Modal, Form, Slider, InputNumber, Input, Row, Col } from 'antd';
+import { useEffect, useState } from 'react';
+import { Modal, Form, Slider, InputNumber, Input, Row, Col, Button, Divider } from 'antd';
 import { useAppStore } from '../stores/appStore';
+import WorkflowAdminModal from './WorkflowAdminModal';
 
 interface SettingsModalProps {
   open: boolean;
@@ -26,6 +27,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   } = useAppStore();
 
   const [form] = Form.useForm();
+  const [workflowAdminOpen, setWorkflowAdminOpen] = useState(false);
 
   // 获取当前工作流的参数配置
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
@@ -70,6 +72,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   };
 
   return (
+    <>
     <Modal
       title="生成设置"
       open={open}
@@ -233,7 +236,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             </Col>
           </Row>
         </Form.Item>
+
+        <Divider style={{ margin: '12px 0' }} />
+        <Button onClick={() => setWorkflowAdminOpen(true)} block>
+          工作流管理
+        </Button>
       </Form>
     </Modal>
+    <WorkflowAdminModal open={workflowAdminOpen} onClose={() => setWorkflowAdminOpen(false)} />
+    </>
   );
 }

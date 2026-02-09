@@ -26,6 +26,13 @@ workflow_defaults:
       description: "纯文本生成图像"
       requires_image: false
       parameters:
+        - name: "strength"
+          label: "生成强度"
+          type: "number"
+          min: 0
+          max: 1
+          step: 0.01
+          default: 0.5
         - name: "count"
           label: "生成数量"
           type: "number"
@@ -33,6 +40,20 @@ workflow_defaults:
           max: 8
           step: 1
           default: 1
+        - name: "width"
+          label: "图像宽度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
+        - name: "height"
+          label: "图像高度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
         - name: "lora_prompt"
           label: "LoRA 提示词"
           type: "text"
@@ -42,6 +63,13 @@ workflow_defaults:
       description: "临时使用 API 文生图工作流"
       requires_image: false
       parameters:
+        - name: "strength"
+          label: "生成强度"
+          type: "number"
+          min: 0
+          max: 1
+          step: 0.01
+          default: 0.5
         - name: "count"
           label: "生成数量"
           type: "number"
@@ -49,6 +77,20 @@ workflow_defaults:
           max: 8
           step: 1
           default: 1
+        - name: "width"
+          label: "图像宽度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
+        - name: "height"
+          label: "图像高度"
+          type: "number"
+          min: 512
+          max: 2048
+          step: 64
+          default: 1024
         - name: "lora_prompt"
           label: "LoRA 提示词"
           type: "text"

@@ -5,10 +5,14 @@ AI 绘画服务核心模块
 """
 import asyncio
 from typing import Optional, Dict, Any
+import json
+import os
 from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
+from server.database import SessionLocal
+from server.models import WorkflowDefinition
 
 
 class AIDrawService:
@@ -123,10 +127,6 @@ class AIDrawService:
             workflow_type = workflow
             print(f"[AIDrawService] 使用工作流: {workflow_type}")
             
-            # 切换工作流
-            if workflow_type != self.comfyui.get_current_workflow_type():
-                self.comfyui.switch_workflow(workflow_type)
-            
             # 处理参考图（如果有）
             image_base64 = None
             if reference_image:
@@ -136,6 +136,40 @@ class AIDrawService:
                     image_base64 = reference_image.split(',', 1)[1]
                 else:
                     image_base64 = reference_image
+
+            requires_image = False
+            workflow_label = workflow_type
+
+            db = SessionLocal()
+            try:
+                row = db.query(WorkflowDefinition).filter(WorkflowDefinition.key == workflow_type).first()
+                if row:
+                    requires_image = bool(row.requires_image)
+                    workflow_label = row.label or workflow_type
+            finally:
+                db.close()
+
+            if not requires_image:
+                config = get_config()
+                workflow_meta = (config.workflow_defaults.workflow_metadata.get(workflow_type, {}) if config.workflow_defaults else {})
+                requires_image = bool(workflow_meta.get('requires_image', False))
+                workflow_label = workflow_meta.get('label', workflow_label) or workflow_label
+
+            if not requires_image:
+                try:
+                    template = await self.comfyui.get_workflow_template_dict(workflow_type)
+                    if isinstance(template, dict):
+                        for node in template.values():
+                            if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+                                requires_image = True
+                                break
+                except Exception:
+                    pass
+
+            if requires_image and not image_base64:
+                raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
+
+            bindings, output_node_title, image_binding = self.comfyui.get_runtime_config(workflow_type, requires_image)
             
             # 生成多张图片
             images = []
@@ -158,39 +192,54 @@ class AIDrawService:
                         'index': i,
                         'total': count
                     })
-                
-                # 根据工作流类型调用不同的方法
-                # 从配置中获取工作流元数据判断是否需要参考图
-                from utils.config_loader import get_config
-                config = get_config()
-                workflow_meta = config.workflow_defaults.workflow_metadata.get(workflow_type, {})
-                requires_image = workflow_meta.get('requires_image', False)
-                
-                if requires_image:
-                    # 需要参考图的工作流
-                    if not image_base64:
-                        workflow_label = workflow_meta.get('label', workflow_type)
-                        raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
-                    
-                    await self.comfyui.generate_i2i(
-                        finish_callback=finish_callback,
-                        image_base64=image_base64,
-                        prompt_text=prompt,
-                        denoise_value=strength,
-                        lora_prompt=lora_prompt or "",
-                        seed=seed,
-                        width=width,
-                        height=height
-                    )
-                else:
-                    # 文生图工作流
-                    await self.comfyui.generate_t2i(
-                        finish_callback=finish_callback,
-                        prompt_text=prompt,
-                        denoise_value=strength,
-                        lora_prompt=lora_prompt or "",
-                        seed=seed
-                    )
+
+                workflow_snapshot, temp_path = await self.comfyui.create_workflow_snapshot(workflow_type)
+                if requires_image and not image_binding:
+                    try:
+                        with open(temp_path, "r", encoding="utf-8") as f:
+                            workflow_dict = json.load(f)
+                        if isinstance(workflow_dict, dict):
+                            for node in workflow_dict.values():
+                                if not isinstance(node, dict):
+                                    continue
+                                if node.get("class_type") != "LoadImage":
+                                    continue
+                                meta = node.get("_meta") or {}
+                                title = meta.get("title")
+                                if title:
+                                    image_binding = {"node_title": str(title), "input_name": "image"}
+                                    break
+                    except Exception:
+                        pass
+                try:
+                    if requires_image:
+                        await self.comfyui.generate_i2i_snapshot(
+                            workflow=workflow_snapshot,
+                            finish_callback=finish_callback,
+                            image_base64=image_base64,
+                            prompt_text=prompt,
+                            denoise_value=strength,
+                            lora_prompt=lora_prompt or "",
+                            seed=seed,
+                            width=width,
+                            height=height,
+                            bindings=bindings,
+                            output_node_title=output_node_title,
+                            image_binding=image_binding,
+                        )
+                    else:
+                        await self.comfyui.generate_t2i_snapshot(
+                            workflow=workflow_snapshot,
+                            finish_callback=finish_callback,
+                            prompt_text=prompt,
+                            denoise_value=strength,
+                            lora_prompt=lora_prompt or "",
+                            seed=seed,
+                            bindings=bindings,
+                            output_node_title=output_node_title,
+                        )
+                finally:
+                    self.comfyui.cleanup_snapshot_file(temp_path)
                 
                 if result_images and result_images[0] is not None:
                     images.extend(result_images)

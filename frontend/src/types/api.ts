@@ -68,6 +68,38 @@ export interface WorkflowsResponse {
   default_workflow: string;
 }
 
+export interface InspectWorkflowNode {
+  node_id: string;
+  node_title: string;
+  class_type?: string;
+  inputs: string[];
+}
+
+export interface InspectWorkflowResponse {
+  nodes: InspectWorkflowNode[];
+}
+
+export interface WorkflowDefinitionItem {
+  key: string;
+  label?: string;
+  description?: string;
+  enabled: boolean;
+  requires_image: boolean;
+  generator_type?: string;
+  parameters: WorkflowParameter[];
+  bindings: Record<string, any>[];
+  workflow_json?: string;
+  output_node_title?: string;
+  is_custom: boolean;
+  builtin_version?: string | null;
+  content_hash?: string | null;
+  updated_at?: number | null;
+}
+
+export interface WorkflowDefinitionsResponse {
+  items: WorkflowDefinitionItem[];
+}
+
 // WebSocket 消息类型
 export interface WSMessage {
   type: 'state_change' | 'progress' | 'error' | 'result';

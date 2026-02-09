@@ -10,6 +10,9 @@ import type {
   GenerateImageResponse,
   UploadImageResponse,
   WorkflowsResponse,
+  InspectWorkflowResponse,
+  WorkflowDefinitionsResponse,
+  WorkflowDefinitionItem,
 } from '../types/api';
 
 import type { AuthResponse, UserConfig } from '../types/models';
@@ -130,6 +133,54 @@ export const apiService = {
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),
+
+  inspectWorkflow: (file: File): Promise<InspectWorkflowResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return client.post('/service/inspect-workflow', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+
+  listWorkflowDefinitions: (): Promise<WorkflowDefinitionsResponse> =>
+    client.get('/service/workflow-definitions'),
+
+  getWorkflowDefinition: (workflowKey: string): Promise<WorkflowDefinitionItem> =>
+    client.get(`/service/workflow-definitions/${workflowKey}`),
+
+  createWorkflowDefinition: (data: {
+    key: string;
+    label?: string;
+    description?: string;
+    enabled?: boolean;
+    requires_image: boolean;
+    generator_type?: string;
+    parameters: any[];
+    bindings: any[];
+    workflow_json: string;
+    output_node_title?: string;
+  }): Promise<{ success: boolean; key: string }> =>
+    client.post('/service/workflow-definitions', data),
+
+  updateWorkflowDefinition: (workflowKey: string, data: {
+    key: string;
+    label?: string;
+    description?: string;
+    enabled?: boolean;
+    requires_image: boolean;
+    generator_type?: string;
+    parameters: any[];
+    bindings: any[];
+    workflow_json: string;
+    output_node_title?: string;
+  }): Promise<{ success: boolean; key: string }> =>
+    client.put(`/service/workflow-definitions/${workflowKey}`, data),
+
+  deleteWorkflowDefinition: (workflowKey: string): Promise<{ success: boolean }> =>
+    client.delete(`/service/workflow-definitions/${workflowKey}`),
+
+  syncWorkflows: (): Promise<{ success: boolean; result: any }> =>
+    client.post('/service/sync-workflows'),
 
   getWorkflowDefaults: (): Promise<{ success: boolean; defaults: any }> =>
     client.get('/workflow/defaults'),

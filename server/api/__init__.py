@@ -29,10 +29,14 @@ from fastapi import UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import base64
+import json
 from io import BytesIO
 from PIL import Image
+from sqlalchemy.orm import Session
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
+from server.database import get_db
+from server.models import WorkflowDefinition
 
 
 class GeneratePromptRequest(BaseModel):
@@ -151,8 +155,40 @@ async def get_previews(service: AIDrawService = Depends(get_ai_draw_service)):
 
 
 @router.get("/workflows")
-async def get_workflows(service: AIDrawService = Depends(get_ai_draw_service)):
+async def get_workflows(
+    service: AIDrawService = Depends(get_ai_draw_service),
+    db: Session = Depends(get_db),
+):
     """获取可用工作流列表和元数据"""
+    try:
+        rows = (
+            db.query(WorkflowDefinition)
+            .filter(WorkflowDefinition.enabled == True)
+            .order_by(WorkflowDefinition.is_custom.asc(), WorkflowDefinition.key.asc())
+            .all()
+        )
+    except Exception:
+        rows = []
+
+    if rows:
+        workflows = []
+        for row in rows:
+            try:
+                parameters = json.loads(row.parameters_json) if row.parameters_json else []
+            except Exception:
+                parameters = []
+            workflows.append({
+                "key": row.key,
+                "label": row.label or row.key,
+                "description": row.description or "",
+                "requires_image": bool(row.requires_image),
+                "parameters": parameters,
+            })
+        return {
+            "workflows": workflows,
+            "default_workflow": service.get_current_workflow()
+        }
+
     from utils.config_loader import get_config
     config = get_config()
     

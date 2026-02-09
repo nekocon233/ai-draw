@@ -30,17 +30,17 @@ class WebSocketManager {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Use /api/ws path to match proxy configuration if needed, 
-    // but typically /ws is proxied directly.
-    // Ensure we are using the correct path.
-    // If running in dev mode with vite proxy:
-    // /ws -> ws://localhost:14600/ws
-    
-    // In dev, use current host which goes through Vite proxy
-    // In prod, use current host as well (assuming served from same origin)
-    // or use environment variable if backend is elsewhere.
-    
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const envBackendUrl = (import.meta as any)?.env?.VITE_BACKEND_URL as string | undefined;
+
+    let wsUrl: string;
+    if (envBackendUrl) {
+      const normalized = envBackendUrl.replace(/\/+$/, '');
+      wsUrl = `${normalized.replace(/^http/, 'ws')}/ws`;
+    } else if (window.location.port === '5173') {
+      wsUrl = `${protocol}//${window.location.hostname}:14600/ws`;
+    } else {
+      wsUrl = `${protocol}//${window.location.host}/ws`;
+    }
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -62,7 +62,7 @@ class WebSocketManager {
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket 错误:', error);
+        console.warn('WebSocket 错误:', error);
       };
 
       this.ws.onclose = () => {

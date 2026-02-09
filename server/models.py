@@ -119,3 +119,27 @@ class GeneratedImage(Base):
     
     # 关系
     message = relationship("ChatMessage", back_populates="images")
+
+
+class WorkflowDefinition(Base):
+    """工作流定义表"""
+    __tablename__ = "workflow_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(64), unique=True, nullable=False, index=True)
+    label = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    enabled = Column(Boolean, default=True)
+    requires_image = Column(Boolean, default=False)
+    generator_type = Column(String(16), nullable=True)
+
+    parameters_json = Column(Text, nullable=True)
+    bindings_json = Column(Text, nullable=True)
+    workflow_json = Column(Text, nullable=False)
+    output_node_title = Column(String(255), nullable=True)
+
+    is_custom = Column(Boolean, default=False, index=True)
+    builtin_version = Column(String(64), nullable=True)
+    content_hash = Column(String(128), nullable=True, index=True)
+
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)

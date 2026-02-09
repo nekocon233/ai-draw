@@ -1,4 +1,5 @@
 from abc import abstractmethod, ABCMeta
+from typing import Optional
 
 from comfyui.structures.comfyui_request_result import ComfyUIRequestResult
 from comfyui.structures.comfyui_request_state import ComfyUIRequestState
@@ -24,13 +25,25 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed) -> ComfyUIRequestResult:
+    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed, output_node_title: str = "保存图像") -> ComfyUIRequestResult:
         """
         文生图（Text-to-Image）推理请求，由子类实现
         """
 
     @abstractmethod
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None) -> ComfyUIRequestResult:
+    async def generate_i2i(
+        self,
+        workflow,
+        image_b64,
+        prompt_text,
+        denoise_value,
+        lora_prompt,
+        seed,
+        width=None,
+        height=None,
+        output_node_title: str = "保存图像",
+        image_binding: Optional[dict] = None,
+    ) -> ComfyUIRequestResult:
         """
         图生图（Image-to-Image）推理请求，由子类实现
         width: 图像宽度（可选）

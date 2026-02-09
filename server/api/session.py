@@ -90,16 +90,20 @@ def create_session(
     # 创建会话（从 workflow_metadata 读取默认配置）
     from utils.config_loader import get_config
     cfg = get_config()
+
+    def get_default_param(name: str, fallback):
+        value = cfg.workflow_defaults.get_workflow_parameter_default('t2i', name)
+        return fallback if value is None else value
     
     session = ChatSession(
         session_id=request.session_id,
         user_id=current_user.id,
         title=request.title or "新对话",
         config_workflow="t2i",
-        config_prompt=None,
-        config_lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-        config_strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-        config_count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+        config_prompt="",
+        config_lora_prompt=get_default_param('lora_prompt', ""),
+        config_strength=get_default_param('strength', 0.5),
+        config_count=get_default_param('count', 1),
         config_images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(session)

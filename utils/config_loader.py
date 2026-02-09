@@ -40,6 +40,13 @@ class ComfyUIConfig(BaseSettings):
     cloud: ComfyUICloudConfig = Field(default_factory=ComfyUICloudConfig)
 
 
+class ComfyOrgConfig(BaseSettings):
+    api_key: str = Field(default="", validation_alias="COMFY_ORG_API_KEY")
+    auth_token: str = Field(default="", validation_alias="COMFY_ORG_AUTH_TOKEN")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class AIPromptConfig(BaseSettings):
     """AI Prompt 生成配置"""
     provider: str = Field(validation_alias="AI_PROMPT_PROVIDER")
@@ -143,6 +150,7 @@ class Config(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
+    comfy_org: ComfyOrgConfig = Field(default_factory=ComfyOrgConfig)
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -227,6 +235,10 @@ def get_config() -> Config:
 def get_comfyui_config() -> ComfyUIConfig:
     """获取 ComfyUI 配置"""
     return get_config().comfyui
+
+
+def get_comfy_org_config() -> ComfyOrgConfig:
+    return get_config().comfy_org
 
 
 def get_ai_prompt_config() -> AIPromptConfig:

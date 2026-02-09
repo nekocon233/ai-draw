@@ -34,6 +34,7 @@ async def generate_image(
             images=images
         )
     except ValueError as e:
+        print(f"[ImageAPI] 400 Bad Request: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
