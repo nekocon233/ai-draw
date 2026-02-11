@@ -1,7 +1,7 @@
 """
 图像生成相关 API
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 import base64
 from io import BytesIO
 from PIL import Image
@@ -14,29 +14,37 @@ router = APIRouter(prefix="/image", tags=["图像生成"])
 
 @router.post("/generate", response_model=GenerateImageResponse)
 async def generate_image(
-    request: GenerateImageRequest,
+    payload: GenerateImageRequest,
+    request: Request,
     service: AIDrawService = Depends(get_ai_draw_service)
 ) -> GenerateImageResponse:
     """生成图像 - 使用用户选择的工作流"""
+    request_id = getattr(getattr(request, "state", None), "request_id", "") or ""
+    print(
+        f"[ImageAPI] request_id={request_id} workflow={payload.workflow} "
+        f"count={payload.count} checkpoint={payload.checkpoint or ''}"
+    )
     try:
         images = await service.generate_image(
-            prompt=request.prompt,
-            workflow=request.workflow,
-            strength=request.strength,
-            lora_prompt=request.lora_prompt,
-            count=request.count,
-            reference_image=request.reference_image,
-            width=request.width,
-            height=request.height,
+            prompt=payload.prompt,
+            workflow=payload.workflow,
+            strength=payload.strength,
+            lora_prompt=payload.lora_prompt,
+            checkpoint=payload.checkpoint,
+            count=payload.count,
+            reference_image=payload.reference_image,
+            width=payload.width,
+            height=payload.height,
         )
         return GenerateImageResponse(
             count=len(images),
             images=images
         )
     except ValueError as e:
-        print(f"[ImageAPI] 400 Bad Request: {str(e)}")
+        print(f"[ImageAPI] request_id={request_id} 400 Bad Request: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        print(f"[ImageAPI] request_id={request_id} 500 Internal Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

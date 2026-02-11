@@ -10,7 +10,6 @@ import {
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
-import { wsManager } from '../api/websocket';
 import SettingsModal from './SettingsModal';
 import AIPromptModal from './AIPromptModal';
 import './ChatInput.css';
@@ -24,6 +23,7 @@ export default function ChatInput() {
     strength,
     count,
     loraPrompt,
+    checkpoint,
     currentWorkflow,
     availableWorkflows,
     referenceImage,
@@ -108,26 +108,34 @@ export default function ChatInput() {
     const messageId = await useAppStore.getState().addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
 
     try {
+      if (import.meta.env.DEV) {
+        console.debug('[ChatInput] generateImage', {
+          workflow: currentWorkflow,
+          checkpoint,
+          count,
+        });
+      }
       const res = await apiService.generateImage({
         prompt,
         workflow: currentWorkflow,
         strength,
         count,
         lora_prompt: loraPrompt || undefined,
+        checkpoint: checkpoint || undefined,
         reference_image: referenceImage || undefined,
         width: useAppStore.getState().width || undefined,
         height: useAppStore.getState().height || undefined,
       });
 
       // 图片通过 WebSocket 实时推送，这里只等待生成完成
-      if (!wsManager.isConnected) {
-        useAppStore.getState().updateChatImages(messageId, res.images);
-      }
+      useAppStore.getState().updateChatImages(messageId, res.images);
+      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       message.success(`成功生成 ${res.count} 张图片!`);
       // loading 状态由后端通过 WebSocket 自动设置为 false
     } catch (err: any) {
       // 生成失败，清除加载状态
       useAppStore.getState().updateChatImages(messageId, []);
+      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       setError(err.message);
       message.error('生成失败: ' + err.message);
       // loading 状态由后端通过 WebSocket 自动设置为 false

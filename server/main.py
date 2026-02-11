@@ -16,7 +16,7 @@ from server.websocket import router as ws_router
 from server.ai_draw_service import get_ai_draw_service
 from server.database import init_db
 from server.middleware import register_exception_handlers
-from server.workflow_sync import sync_workflows_from_directory
+from server.middleware.request_id import RequestIdMiddleware
 
 
 @asynccontextmanager
@@ -24,12 +24,6 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     print("[FastAPI] 正在初始化数据库...")
     init_db()
-
-    try:
-        result = sync_workflows_from_directory()
-        print(f"[FastAPI] 已同步工作流目录: 新增 {result.get('imported', 0)}，更新 {result.get('updated', 0)}，跳过冲突 {result.get('skipped_conflict', 0)}")
-    except Exception as e:
-        print(f"[FastAPI] 同步工作流目录失败: {e}")
     
     print("[FastAPI] 正在初始化文件存储...")
     file_storage = get_file_storage()
@@ -75,6 +69,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 请求 ID 中间件
+app.add_middleware(RequestIdMiddleware)
 
 # 注册异常处理器
 register_exception_handlers(app)

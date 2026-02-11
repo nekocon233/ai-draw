@@ -20,18 +20,25 @@ import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
 import type { WorkflowMetadata } from '../types/api';
 
+type ImageItem =
+  | string
+  | { loading: true }
+  | { storage: 'indexeddb'; index: number }
+  | { error: true; message: string };
+
 interface ChatMessage {
   id: string;
   session_id: string; // 关联会话ID
   type: 'user' | 'assistant';
   content: string; // 用户输入的提示词
-  images?: (string | { loading: true })[]; // 生成的图片或加载状态
+  images?: ImageItem[]; // 生成的图片或占位状态
   timestamp: number;
   params?: {
     workflow: string;
     strength: number;
     count: number;
     loraPrompt?: string; // LoRA 提示词
+    checkpoint?: string | null;
   };
 }
 
@@ -52,6 +59,10 @@ interface AppState {
   currentWorkflow: string;
   availableWorkflows: WorkflowMetadata[]; // 可用工作流列表（动态从后端获取）
   
+  // 模型选择
+  modelOptions: { checkpoints: string[]; loras: string[]; unets: string[] };
+  checkpoint: string | null;
+
   // Prompt
   prompt: string;
   loraPrompt: string;
@@ -72,6 +83,8 @@ interface AppState {
   sidebarCollapsed: boolean;
   
   // Actions
+  loadModelOptions: () => Promise<void>;
+  setCheckpoint: (checkpoint: string | null) => void;
   setServiceStatus: (status: { available: boolean; is_generating: boolean; is_generating_prompt: boolean }) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setCurrentWorkflow: (workflow: string) => void;
@@ -92,6 +105,7 @@ interface AppState {
   clearError: () => void;
   reset: () => void;
   stopGeneration: () => void;
+  cleanupStaleMessages: (reason?: string) => void;
   loadDefaultConfig: () => Promise<void>;
   loadAvailableWorkflows: () => Promise<void>;
   loadUserConfig: () => Promise<void>;
@@ -120,12 +134,14 @@ const defaultConfig = {
   count: DEFAULT_CONFIG.COUNT,
   imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
   referenceImage: null,
+  checkpoint: null,
 };
 // 确保 currentWorkflow 始终有有效值
 const initialConfig = guestConfig ? {
   ...defaultConfig,
   ...guestConfig,
   currentWorkflow: guestConfig.currentWorkflow || defaultConfig.currentWorkflow,
+  checkpoint: guestConfig.checkpoint || defaultConfig.checkpoint,
 } : defaultConfig;
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -138,6 +154,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentGeneratingMessageId: null,
   currentWorkflow: initialConfig.currentWorkflow,
   availableWorkflows: [], // 初始为空，从后端动态获取
+  modelOptions: { checkpoints: [], loras: [], unets: [] },
+  checkpoint: initialConfig.checkpoint,
   prompt: initialConfig.prompt,
   loraPrompt: initialConfig.loraPrompt,
   strength: initialConfig.strength,
@@ -152,6 +170,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true' || (!isLoggedIn() && localStorage.getItem('sidebarCollapsed') === null),
   
   // Actions
+  loadModelOptions: async () => {
+    try {
+      const options = await apiService.getModelOptions();
+      set({
+        modelOptions: {
+          checkpoints: options.checkpoints || [],
+          loras: options.loras || [],
+          unets: options.unets || [],
+        },
+      });
+      if (import.meta.env.DEV) {
+        console.debug('[AppStore] model-options', {
+          source: options.source,
+          counts: options.counts,
+        });
+      }
+    } catch (error) {
+      console.error('加载模型选项失败:', error);
+    }
+  },
+
+  setCheckpoint: (checkpoint) => {
+    set({ checkpoint });
+    const state = get();
+    state.saveSessionConfig();
+  },
+
   setServiceStatus: (status) => set({
     isServiceAvailable: status.available,
     isGenerating: status.is_generating,
@@ -410,6 +455,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           
           // 直接根据 index 替换对应位置的图片
           if (index >= 0 && index < totalCount) {
+            if (typeof newImages[index] === 'string') {
+              return msg;
+            }
             newImages[index] = image;
           }
           
@@ -447,8 +495,73 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('sidebarCollapsed', String(collapsed));
   },
   stopGeneration: () => {
-    // TODO: 实现停止生成的逻辑
-    set({ loading: false, isGenerating: false });
+    const { currentGeneratingMessageId, currentSessionId } = get();
+    set({ loading: false, isGenerating: false, currentGeneratingMessageId: null });
+    if (currentGeneratingMessageId) {
+      set((state) => {
+        const newHistory = state.chatHistory.map((msg) => {
+          if (msg.id !== currentGeneratingMessageId) {
+            return msg;
+          }
+          if (!msg.images) {
+            return msg;
+          }
+          const newImages = msg.images.map((img: ImageItem) => {
+            if (typeof img === 'string') {
+              return img;
+            }
+            return { error: true as const, message: '已取消' };
+          });
+          return { ...msg, images: newImages };
+        });
+        if (!isLoggedIn() && currentSessionId) {
+          saveGuestSessionHistory(currentSessionId, newHistory);
+        }
+        return { chatHistory: newHistory };
+      });
+    }
+    apiService.stopGeneration().catch(() => {});
+  },
+  cleanupStaleMessages: (reason) => {
+    const { currentGeneratingMessageId, currentSessionId, isGenerating } = get();
+    if (isGenerating) {
+      return;
+    }
+    const now = Date.now();
+    const staleMs = 60000;
+    const messageText = reason || '生成失败';
+    set((state) => {
+      let changed = false;
+      const newHistory = state.chatHistory.map((msg) => {
+        if (msg.type !== 'assistant' || !msg.images || msg.id === currentGeneratingMessageId) {
+          return msg;
+        }
+        if (now - msg.timestamp < staleMs) {
+          return msg;
+        }
+        const hasLoading = msg.images.some((img) => typeof img === 'object' && !!img && (img as any).loading === true);
+        if (!hasLoading) {
+          return msg;
+        }
+        changed = true;
+        return {
+          ...msg,
+          images: msg.images.map((img) => {
+            if (typeof img === 'string') {
+              return img;
+            }
+            if ((img as any).loading === true) {
+              return { error: true as const, message: messageText };
+            }
+            return img;
+          }),
+        };
+      });
+      if (changed && !isLoggedIn() && currentSessionId) {
+        saveGuestSessionHistory(currentSessionId, newHistory);
+      }
+      return changed ? { chatHistory: newHistory } : state;
+    });
   },
   reset: () => set({
     prompt: '',
@@ -851,6 +964,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
         
         set({ chatHistory });
+        get().cleanupStaleMessages();
       } catch (error) {
         console.error('加载会话历史失败:', error);
       }
@@ -863,14 +977,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         try {
           const chatHistory = await restoreSessionImages(sessionId, historyWithoutImages);
           set({ chatHistory });
+          get().cleanupStaleMessages();
         } catch (error) {
           console.error('恢复图片数据失败:', error);
           set({ chatHistory: historyWithoutImages }); // 失败时使用原始数据
+          get().cleanupStaleMessages();
         }
       });
       
       // 先设置不带图片的数据，避免界面空白
       set({ chatHistory: historyWithoutImages });
+      get().cleanupStaleMessages();
     }
   },
   
@@ -909,6 +1026,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       count: state.count,
       images_per_row: state.imagesPerRow,
       reference_image: state.referenceImage,
+      checkpoint: state.checkpoint,
     };
     
     if (isLoggedIn()) {
@@ -925,6 +1043,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         count: config.count,
         imagesPerRow: config.images_per_row,
         referenceImage: config.reference_image,
+        checkpoint: config.checkpoint,
       });
     }
   },
@@ -943,6 +1062,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count !== undefined ? config.count : DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.images_per_row !== undefined ? config.images_per_row : DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.reference_image || null,
+          checkpoint: null, // 后端暂未持久化
         });
       } catch (error) {
         console.error('加载会话配置失败:', error);
@@ -955,6 +1075,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: DEFAULT_CONFIG.COUNT,
           imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: null,
+          checkpoint: null,
         });
       }
     } else {
@@ -969,6 +1090,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count !== undefined ? config.count : DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.imagesPerRow !== undefined ? config.imagesPerRow : DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.referenceImage || null,
+          checkpoint: config.checkpoint || null,
         });
       } else {
         // 如果没有保存的配置，使用当前 store 值（已由 loadDefaultConfig 设置）
@@ -978,6 +1100,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           currentWorkflow: currentState.currentWorkflow || DEFAULT_CONFIG.WORKFLOW,
           // 保持 prompt, loraPrompt, strength, count 等值不变
           referenceImage: null,
+          checkpoint: null,
         });
       }
     }

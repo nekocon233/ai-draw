@@ -25,6 +25,7 @@ export interface GenerateImageRequest {
   workflow?: string;
   strength: number;
   lora_prompt?: string;
+  checkpoint?: string | null;
   count: number;
   reference_image?: string;
   width?: number;
@@ -35,6 +36,14 @@ export interface GenerateImageResponse {
   success: boolean;
   images: string[];
   count: number;
+}
+
+export interface ModelOptionsResponse {
+  checkpoints: string[];
+  loras: string[];
+  unets?: string[];
+  source?: string;
+  counts?: Record<string, number>;
 }
 
 // 上传图片响应
@@ -61,6 +70,7 @@ export interface WorkflowMetadata {
   description: string;
   requires_image: boolean;
   parameters: WorkflowParameter[];
+  model_loader?: 'unet' | 'checkpoint' | 'both' | 'none' | null;
 }
 
 export interface WorkflowsResponse {

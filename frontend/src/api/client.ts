@@ -95,6 +95,15 @@ client.interceptors.response.use(
 
     const status = error.response.status;
     const data: any = error.response.data as any;
+    const requestId = error.response.headers['x-request-id'];
+    if (import.meta.env.DEV) {
+      console.debug('[API] error response', { status, requestId, data });
+    }
+
+    const showError = (msg: string) => {
+      const finalMsg = requestId ? `${msg} (ID: ${requestId})` : msg;
+      getMessage().error(finalMsg);
+    };
     
     // 统一错误消息格式
     let errorMessage = '请求失败';
@@ -109,15 +118,15 @@ client.interceptors.response.use(
       switch (errorCode) {
         case 'AUTHENTICATION_ERROR':
           clearAccessToken();
-          getMessage().error('认证失败，请重新登录');
+          showError('认证失败，请重新登录');
           break;
           
         case 'AUTHORIZATION_ERROR':
-          getMessage().error('权限不足');
+          showError('权限不足');
           break;
           
         case 'RESOURCE_NOT_FOUND':
-          getMessage().error('资源不存在');
+          showError('资源不存在');
           break;
           
         case 'VALIDATION_ERROR':
@@ -128,54 +137,54 @@ client.interceptors.response.use(
               message: string;
             }>;
             const firstError = validationErrors[0];
-            getMessage().error(`${firstError.field}: ${firstError.message}`);
+            showError(`${firstError.field}: ${firstError.message}`);
           } else {
-            getMessage().error(errorMessage);
+            showError(errorMessage);
           }
           break;
           
         case 'DATABASE_ERROR':
-          getMessage().error('数据库操作失败，请稍后重试');
+          showError('数据库操作失败，请稍后重试');
           break;
           
         case 'EXTERNAL_SERVICE_ERROR':
-          getMessage().error('外部服务暂时不可用，请稍后重试');
+          showError('外部服务暂时不可用，请稍后重试');
           break;
           
         default:
-          getMessage().error(errorMessage);
+          showError(errorMessage);
       }
     } else {
       // 兼容旧版错误格式
       if (typeof data === 'string' && data.trim()) {
         errorMessage = data.trim();
       } else {
-        errorMessage = (data as any)?.detail || error.message || '请求失败';
+        errorMessage = (data as any)?.detail || (error.response.statusText ? `HTTP ${status} ${error.response.statusText}` : '') || error.message || '请求失败';
       }
       
       // HTTP 状态码处理
       switch (status) {
         case 400:
-          getMessage().error(`请求参数错误: ${errorMessage}`);
+          showError(`请求参数错误: ${errorMessage}`);
           break;
         case 401:
           clearAccessToken();
-          getMessage().error('认证失败，请重新登录');
+          showError('认证失败，请重新登录');
           break;
         case 403:
-          getMessage().error('权限不足');
+          showError('权限不足');
           break;
         case 404:
-          getMessage().error('资源不存在');
+          showError('资源不存在');
           break;
         case 500:
-          getMessage().error((data as any)?.detail || '服务器内部错误');
+          showError((data as any)?.detail || '服务器内部错误');
           break;
         case 503:
-          getMessage().error('服务暂时不可用');
+          showError('服务暂时不可用');
           break;
         default:
-          getMessage().error(errorMessage);
+          showError(errorMessage);
       }
     }
     
@@ -184,6 +193,7 @@ client.interceptors.response.use(
     (apiError as any).code = errorCode;
     (apiError as any).status = status;
     (apiError as any).details = data?.error?.details;
+    (apiError as any).requestId = requestId;
     (apiError as any).raw = data;
     
     return Promise.reject(apiError);

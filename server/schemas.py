@@ -25,6 +25,7 @@ class GenerateImageRequest(BaseModel):
     workflow: str = "t2i"  # 工作流类型：t2i, i2i, reference, reference_zimage
     strength: float = 0.5
     lora_prompt: str = ""
+    checkpoint: Optional[str] = None  # 指定底模
     count: int = 1
     reference_image: Optional[str] = None
     width: Optional[int] = None  # 图像宽度（部分工作流支持）

@@ -56,8 +56,24 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         if extra_data:
             payload["extra_data"] = extra_data
         url = f"{self.api.url.rstrip('/')}/prompt"
-        resp = requests.post(url, data=json.dumps(payload).encode("utf-8"), auth=self.api.auth)
+        resp = requests.post(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            auth=self.api.auth,
+        )
         if resp.status_code != 200:
+            detail = ""
+            try:
+                text = (resp.text or "").strip()
+                if text:
+                    detail = text
+            except Exception:
+                detail = ""
+            if detail and len(detail) > 800:
+                detail = detail[:800] + "...(truncated)"
+            if detail:
+                raise Exception(f"Request failed with status code {resp.status_code}: {resp.reason} | {detail}")
             raise Exception(f"Request failed with status code {resp.status_code}: {resp.reason}")
         return resp.json()["prompt_id"]
 

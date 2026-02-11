@@ -106,7 +106,21 @@ export function saveGuestSessions(sessions: any[]): void {
 export function loadGuestSessionHistory(sessionId: string): any[] {
   try {
     const saved = localStorage.getItem(`guestSession_${sessionId}`);
-    return saved ? JSON.parse(saved) : [];
+    const messages = saved ? JSON.parse(saved) : [];
+    return messages.map((msg: any) => {
+      if (msg?.type === 'assistant' && Array.isArray(msg.images)) {
+        return {
+          ...msg,
+          images: msg.images.map((img: any, idx: number) => {
+            if (typeof img === 'string' && img.startsWith('indexeddb://')) {
+              return { storage: 'indexeddb', index: idx };
+            }
+            return img;
+          }),
+        };
+      }
+      return msg;
+    });
   } catch (error) {
     console.error('加载游客会话聊天记录失败:', error);
     return [];
@@ -132,7 +146,8 @@ export async function restoreSessionImages(sessionId: string, messages: any[]): 
         }
         // 没有找到图片数据，检查是否是占位符
         const hasPlaceholders = msg.images.some((img: any) => 
-          typeof img === 'string' && img.startsWith('indexeddb://')
+          (typeof img === 'string' && img.startsWith('indexeddb://')) ||
+          (typeof img === 'object' && img && img.storage === 'indexeddb')
         );
         if (hasPlaceholders) {
           // 有占位符但没找到数据，移除占位符避免显示错误
@@ -148,7 +163,10 @@ export async function restoreSessionImages(sessionId: string, messages: any[]): 
     return messages.map(msg => {
       if (msg.type === 'assistant' && msg.images) {
         const filteredImages = msg.images.filter((img: any) => 
-          !(typeof img === 'string' && img.startsWith('indexeddb://'))
+          !(
+            (typeof img === 'string' && img.startsWith('indexeddb://')) ||
+            (typeof img === 'object' && img && img.storage === 'indexeddb')
+          )
         );
         return { ...msg, images: filteredImages };
       }
@@ -189,7 +207,7 @@ export function saveGuestSessionHistory(sessionId: string, messages: any[]): voi
           images: msg.images.map((img: any, idx: number) => {
             // 如果是字符串（实际图片数据），替换为占位符
             if (typeof img === 'string') {
-              return `indexeddb://${msg.id}_${idx}`;
+              return { storage: 'indexeddb', index: idx };
             }
             // 保留加载状态对象
             return img;
@@ -215,7 +233,7 @@ export function saveGuestSessionHistory(sessionId: string, messages: any[]): voi
               ...msg,
               images: msg.images.map((img: any, idx: number) => {
                 if (typeof img === 'string') {
-                  return `indexeddb://${msg.id}_${idx}`;
+                  return { storage: 'indexeddb', index: idx };
                 }
                 return img;
               })

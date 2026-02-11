@@ -1,4 +1,6 @@
-import { Slider, InputNumber, Row, Col, Typography, Input } from 'antd';
+import { useEffect } from 'react';
+import { Slider, InputNumber, Row, Col, Typography, Input, Select, Button } from 'antd';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 
 const { Title, Text } = Typography;
@@ -12,12 +14,52 @@ export default function ParametersPanel() {
     loraPrompt,
     width,
     height,
+    checkpoint,
+    modelOptions,
     setStrength, 
     setCount,
     setLoraPrompt,
     setWidth,
-    setHeight
+    setHeight,
+    setCheckpoint,
+    loadModelOptions
   } = useAppStore();
+
+  useEffect(() => {
+    loadModelOptions();
+  }, []);
+
+  // 解析 LoRA 字符串
+  const parseLoras = (str: string) => {
+    if (!str) return [];
+    const regex = /<lora:([^:]+):([0-9.]+)>/g;
+    const matches = [...str.matchAll(regex)];
+    return matches.map(m => ({ name: m[1], strength: parseFloat(m[2]) }));
+  };
+
+  const loras = parseLoras(loraPrompt || '');
+
+  const handleUpdateLora = (index: number, field: 'name' | 'strength', value: any) => {
+    const newLoras = [...loras];
+    if (field === 'name') newLoras[index].name = value;
+    if (field === 'strength') newLoras[index].strength = value;
+    
+    const str = newLoras.map(l => `<lora:${l.name}:${l.strength}>`).join('');
+    setLoraPrompt(str);
+  };
+
+  const handleAddLora = () => {
+    const defaultName = modelOptions.loras[0];
+    if (!defaultName) return;
+    const str = (loraPrompt || '') + `<lora:${defaultName}:0.8>`;
+    setLoraPrompt(str);
+  };
+
+  const handleRemoveLora = (index: number) => {
+    const newLoras = loras.filter((_, i) => i !== index);
+    const str = newLoras.map(l => `<lora:${l.name}:${l.strength}>`).join('');
+    setLoraPrompt(str);
+  };
 
   // 获取当前工作流的参数配置
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
@@ -36,6 +78,20 @@ export default function ParametersPanel() {
     <div>
       <Title level={5} style={{ marginBottom: 16 }}>参数设置</Title>
       
+      {/* 底模选择 */}
+      <div style={{ marginBottom: 24 }}>
+        <Text strong style={{ fontSize: 13 }}>底模 (Checkpoint)</Text>
+        <Select
+          style={{ width: '100%', marginTop: 8 }}
+          placeholder="使用默认底模"
+          allowClear
+          value={checkpoint}
+          onChange={setCheckpoint}
+          options={modelOptions.checkpoints.map(c => ({ label: c, value: c }))}
+          showSearch
+        />
+      </div>
+
       {hasStrength && (
         <div style={{ marginBottom: 24 }}>
           <Text strong style={{ fontSize: 13 }}>
@@ -99,14 +155,73 @@ export default function ParametersPanel() {
 
       {hasLoraPrompt && (
         <div style={{ marginBottom: 24 }}>
-          <Text strong style={{ fontSize: 13 }}>
-            {workflowMeta.parameters.find(p => p.name === 'lora_prompt')?.label || 'LoRA 提示词'}
-          </Text>
-          <Input
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text strong style={{ fontSize: 13 }}>
+              {workflowMeta.parameters.find(p => p.name === 'lora_prompt')?.label || 'LoRA 模型'}
+            </Text>
+            <Button 
+              type="link" 
+              size="small" 
+              icon={<PlusOutlined />} 
+              onClick={handleAddLora}
+              disabled={modelOptions.loras.length === 0}
+            >
+              添加
+            </Button>
+          </div>
+          
+          {/* LoRA 列表 */}
+          <div style={{ marginTop: 8, marginBottom: 12 }}>
+            {loras.map((lora, index) => (
+              <div key={index} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                  <Select
+                    style={{ flex: 1 }}
+                    size="small"
+                    value={lora.name}
+                    onChange={(val) => handleUpdateLora(index, 'name', val)}
+                    options={modelOptions.loras.map(l => ({ label: l, value: l }))}
+                    showSearch
+                  />
+                  <Button 
+                    type="text" 
+                    size="small" 
+                    icon={<DeleteOutlined />} 
+                    danger 
+                    onClick={() => handleRemoveLora(index)}
+                  />
+                </div>
+                <Row gutter={8} align="middle">
+                  <Col span={6}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>强度: {lora.strength}</Text>
+                  </Col>
+                  <Col span={18}>
+                    <Slider
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      value={lora.strength}
+                      onChange={(val) => handleUpdateLora(index, 'strength', val)}
+                      tooltip={{ formatter: (value) => value }}
+                    />
+                  </Col>
+                </Row>
+              </div>
+            ))}
+            {loras.length === 0 && (
+              <div style={{ textAlign: 'center', color: '#999', fontSize: 12, padding: '8px 0' }}>
+                暂无 LoRA，点击右上角添加
+              </div>
+            )}
+          </div>
+
+          <Text type="secondary" style={{ fontSize: 12 }}>高级设置 (LoRA Prompt)</Text>
+          <Input.TextArea
             value={loraPrompt}
             onChange={(e) => setLoraPrompt(e.target.value)}
             placeholder="<lora:模型名:权重>"
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 4, fontSize: 12 }}
+            autoSize={{ minRows: 1, maxRows: 3 }}
           />
         </div>
       )}

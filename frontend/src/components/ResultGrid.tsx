@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/appStore';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow, currentSessionId } = useAppStore();
+  const { chatHistory, imagesPerRow, currentSessionId, currentGeneratingMessageId, isGenerating } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -118,8 +118,27 @@ export default function ResultGrid() {
                         </div>
                       ) : (
                         <div className="chat-image-loading">
-                          <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
-                          <div className="chat-loading-text">生成中...</div>
+                          {'error' in image ? (
+                            <>
+                              <div className="chat-loading-text" style={{ color: '#ff4d4f' }}>{image.message}</div>
+                            </>
+                          ) : 'storage' in image ? (
+                            <>
+                              <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
+                              <div className="chat-loading-text">恢复中...</div>
+                            </>
+                          ) : (
+                            <>
+                              {isGenerating && message.id === currentGeneratingMessageId ? (
+                                <>
+                                  <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
+                                  <div className="chat-loading-text">生成中...</div>
+                                </>
+                              ) : (
+                                <div className="chat-loading-text" style={{ color: '#ff4d4f' }}>生成失败</div>
+                              )}
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

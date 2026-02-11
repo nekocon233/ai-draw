@@ -15,6 +15,7 @@ from server.database import get_db
 from server.models import WorkflowDefinition, User
 from server.schemas import ServiceStatusResponse
 from server.workflow_sync import sync_workflows_from_directory
+from server.utils.model_options import get_model_options, get_model_options_meta
 
 router = APIRouter(prefix="/service", tags=["服务管理"])
 
@@ -101,6 +102,29 @@ def _is_api_format_workflow(workflow_dict: dict) -> bool:
     return False
 
 
+def _detect_model_loader_from_workflow_dict(workflow_dict: dict) -> str | None:
+    try:
+        has_unet = False
+        has_checkpoint = False
+        for node in workflow_dict.values():
+            if not isinstance(node, dict):
+                continue
+            class_type = node.get("class_type")
+            if class_type == "UNETLoader":
+                has_unet = True
+            elif class_type in ("CheckpointLoaderSimple", "CheckpointLoader"):
+                has_checkpoint = True
+        if has_unet and has_checkpoint:
+            return "both"
+        if has_unet:
+            return "unet"
+        if has_checkpoint:
+            return "checkpoint"
+        return "none"
+    except Exception:
+        return None
+
+
 def _ensure_output_node_title(workflow_dict: dict, requested: Optional[str]) -> tuple[dict, str]:
     if requested:
         return workflow_dict, requested
@@ -174,12 +198,20 @@ async def get_available_workflows(
                 parameters = json.loads(row.parameters_json) if row.parameters_json else []
             except Exception:
                 parameters = []
+            model_loader = None
+            try:
+                workflow_dict = json.loads(row.workflow_json) if row.workflow_json else None
+                if isinstance(workflow_dict, dict):
+                    model_loader = _detect_model_loader_from_workflow_dict(workflow_dict)
+            except Exception:
+                model_loader = None
             workflows.append({
                 "key": row.key,
                 "label": row.label or row.key,
                 "description": row.description or "",
                 "requires_image": bool(row.requires_image),
                 "parameters": parameters,
+                "model_loader": model_loader,
             })
         return {
             "workflows": workflows,
@@ -193,17 +225,38 @@ async def get_available_workflows(
     workflows = []
     for workflow_key in service.get_available_workflows():
         metadata = config.workflow_defaults.workflow_metadata.get(workflow_key, {})
+        model_loader = None
+        try:
+            template = await service.comfyui.get_workflow_template_dict(workflow_key)
+            if isinstance(template, dict):
+                model_loader = _detect_model_loader_from_workflow_dict(template)
+        except Exception:
+            model_loader = None
         workflows.append({
             "key": workflow_key,
             "label": metadata.get("label", workflow_key),
             "description": metadata.get("description", ""),
             "requires_image": metadata.get("requires_image", False),
-            "parameters": metadata.get("parameters", [])  # 添加参数配置
+            "parameters": metadata.get("parameters", []),
+            "model_loader": model_loader,
         })
     
     return {
         "workflows": workflows,
         "default_workflow": service.get_current_workflow()
+    }
+
+
+@router.get("/model-options")
+async def get_model_options_api() -> dict:
+    options = get_model_options()
+    meta = get_model_options_meta()
+    return {
+        "checkpoints": options.checkpoints,
+        "loras": options.loras,
+        "unets": options.unets,
+        "source": meta.get("source", "unknown"),
+        "counts": meta.get("counts", {}),
     }
 
 

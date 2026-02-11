@@ -125,6 +125,13 @@ function AppLayout({ isDark }: { isDark: boolean }) {
     };
   }, [setServiceStatus, setError, loadUserConfig, loadSessions]);
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      useAppStore.getState().cleanupStaleMessages();
+    }, 15000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
       {/* 顶部状态栏 */}

@@ -8,6 +8,7 @@ import type {
   GeneratePromptResponse,
   GenerateImageRequest,
   GenerateImageResponse,
+  ModelOptionsResponse,
   UploadImageResponse,
   WorkflowsResponse,
   InspectWorkflowResponse,
@@ -120,6 +121,9 @@ export const apiService = {
     client.post('/image/generate', data, {
       timeout: 300000 // 5 分钟，因为生成多张图片耗时较长
     }),
+
+  stopGeneration: (): Promise<{ success: boolean; message?: string }> =>
+    client.get('/image/stop'),
   
   // 图片上传
   uploadImage: (file: File): Promise<UploadImageResponse> => {
@@ -133,6 +137,9 @@ export const apiService = {
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),
+
+  getModelOptions: (): Promise<ModelOptionsResponse> =>
+    client.get('/service/model-options'),
 
   inspectWorkflow: (file: File): Promise<InspectWorkflowResponse> => {
     const formData = new FormData();

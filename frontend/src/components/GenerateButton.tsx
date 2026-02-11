@@ -2,7 +2,6 @@ import { Button, App } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
-import { wsManager } from '../api/websocket';
 import './GenerateButton.css';
 
 export default function GenerateButton() {
@@ -52,11 +51,11 @@ export default function GenerateButton() {
       });
 
       // 图片通过 WebSocket 实时推送，生成完成时自动保存
-      if (!wsManager.isConnected) {
-        useAppStore.getState().updateChatImages(messageId, res.images);
-      }
+      useAppStore.getState().updateChatImages(messageId, res.images);
+      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       message.success(`成功生成 ${res.count} 张图片!`);
     } catch (err: any) {
+      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       setError(err.message);
       message.error('生成失败: ' + err.message);
     }

@@ -7,12 +7,14 @@ import asyncio
 from typing import Optional, Dict, Any
 import json
 import os
+from comfy_api_simplified import ComfyWorkflowWrapper
 from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
 from server.database import SessionLocal
 from server.models import WorkflowDefinition
+from server.utils.model_options import get_model_options, get_model_options_meta
 
 
 class AIDrawService:
@@ -35,6 +37,13 @@ class AIDrawService:
         
         # 状态变化回调
         self.on_state_change = None
+        self._cancel_generation = False
+
+    def stop_generation(self):
+        self._cancel_generation = True
+        self.is_generating = False
+        self._notify_state_change('generation_progress', '已停止生成')
+        self._notify_state_change('is_generating', False)
     
     async def start_service(self):
         """启动 ComfyUI 服务（如果配置了路径和 Python 解释器）"""
@@ -112,6 +121,7 @@ class AIDrawService:
         workflow: str = "t2i",
         strength: float = 0.5,
         lora_prompt: str = "",
+        checkpoint: Optional[str] = None,
         count: int = 1,
         reference_image: Optional[str] = None,
         width: Optional[int] = None,
@@ -119,6 +129,7 @@ class AIDrawService:
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
+            self._cancel_generation = False
             self.is_generating = True
             self._notify_state_change('is_generating', True)
             self._notify_state_change('generation_progress', '正在生成图像...')
@@ -126,7 +137,14 @@ class AIDrawService:
             # 使用用户选择的工作流
             workflow_type = workflow
             print(f"[AIDrawService] 使用工作流: {workflow_type}")
-            
+            requested_model = checkpoint or None
+            resolved_checkpoint = None
+            resolved_unet = None
+            if requested_model:
+                meta = get_model_options_meta()
+                print(f"[AIDrawService] model-options source={meta.get('source','unknown')} requested='{requested_model}'")
+                requested_model = str(requested_model).strip()
+
             # 处理参考图（如果有）
             image_base64 = None
             if reference_image:
@@ -174,6 +192,8 @@ class AIDrawService:
             # 生成多张图片
             images = []
             for i in range(count):
+                if self._cancel_generation:
+                    raise ValueError("已取消")
                 seed = None  # 让方法自动生成
                 
                 # 存储结果
@@ -194,6 +214,83 @@ class AIDrawService:
                     })
 
                 workflow_snapshot, temp_path = await self.comfyui.create_workflow_snapshot(workflow_type)
+                
+                # 注入 checkpoint
+                if requested_model:
+                    try:
+                        with open(temp_path, "r", encoding="utf-8") as f:
+                            snapshot_dict = json.load(f)
+                        
+                        modified = False
+                        ckpt_nodes = 0
+                        unet_nodes = 0
+                        if isinstance(snapshot_dict, dict):
+                            for node in snapshot_dict.values():
+                                if not isinstance(node, dict):
+                                    continue
+                                class_type = node.get("class_type")
+                                if class_type in ("CheckpointLoaderSimple", "CheckpointLoader"):
+                                    ckpt_nodes += 1
+                                elif class_type in ("UNETLoader",):
+                                    unet_nodes += 1
+
+                        if resolved_checkpoint is None or resolved_unet is None:
+                            options = get_model_options()
+
+                            def _resolve(name: str, candidates: list[str]) -> str | None:
+                                name_norm = str(name).strip()
+                                name_key = name_norm.replace("\\", "/").lower()
+                                for cand in candidates:
+                                    cand_s = str(cand).strip()
+                                    if cand_s == name_norm:
+                                        return cand_s
+                                    if cand_s.replace("\\", "/").lower() == name_key:
+                                        return cand_s
+                                base = os.path.basename(name_norm).lower()
+                                for cand in candidates:
+                                    cand_base = os.path.basename(str(cand)).lower()
+                                    if cand_base == base:
+                                        return cand
+                                return None
+
+                            resolved_checkpoint = _resolve(requested_model, options.checkpoints)
+                            resolved_unet = _resolve(requested_model, options.unets)
+
+                        if ckpt_nodes > 0 and unet_nodes == 0 and not resolved_checkpoint:
+                            raise ValueError(f"该工作流使用 CheckpointLoaderSimple，需要 checkpoint 模型: {requested_model}")
+                        if unet_nodes > 0 and ckpt_nodes == 0 and not resolved_unet:
+                            raise ValueError(f"该工作流使用 UNETLoader，需要 UNet 模型: {requested_model}")
+                        if ckpt_nodes == 0 and unet_nodes == 0:
+                            raise ValueError(f"该工作流不支持底模注入: {workflow_type}")
+
+                        if isinstance(snapshot_dict, dict):
+                            for node in snapshot_dict.values():
+                                if not isinstance(node, dict):
+                                    continue
+                                class_type = node.get("class_type")
+                                inputs = node.get("inputs")
+                                if not isinstance(inputs, dict):
+                                    continue
+                                if class_type in ("CheckpointLoaderSimple", "CheckpointLoader") and resolved_checkpoint:
+                                    inputs["ckpt_name"] = resolved_checkpoint
+                                    modified = True
+                                elif class_type in ("UNETLoader",) and resolved_unet:
+                                    inputs["unet_name"] = resolved_unet
+                                    modified = True
+                        
+                        print(
+                            f"[AIDrawService] 底模注入: requested='{requested_model}', "
+                            f"CheckpointLoader*={ckpt_nodes}, UNETLoader={unet_nodes}, modified={modified}"
+                        )
+
+                        if modified:
+                            with open(temp_path, "w", encoding="utf-8") as f:
+                                json.dump(snapshot_dict, f, indent=2, ensure_ascii=False)
+                            workflow_snapshot = ComfyWorkflowWrapper(temp_path)
+                    except Exception as e:
+                        print(f"[AIDrawService] 注入底模失败: {e}")
+                        raise
+
                 if requires_image and not image_binding:
                     try:
                         with open(temp_path, "r", encoding="utf-8") as f:
@@ -272,6 +369,7 @@ class AIDrawService:
             raise
         finally:
             self.is_generating = False
+            self._cancel_generation = False
             self._notify_state_change('is_generating', False)
     
     def clear_previews(self):
