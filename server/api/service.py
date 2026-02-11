@@ -125,6 +125,40 @@ def _detect_model_loader_from_workflow_dict(workflow_dict: dict) -> str | None:
         return None
 
 
+def _detect_supports_lora_from_workflow_dict(workflow_dict: dict) -> bool:
+    try:
+        lora_nodes = {
+            "LoraLoader",
+            "LoraLoaderModelOnly",
+            "LoRALoader",
+            "LoRALoaderModelOnly",
+            "PCLazyLoraLoader",
+        }
+        for node in workflow_dict.values():
+            if not isinstance(node, dict):
+                continue
+            class_type = node.get("class_type")
+            if class_type in lora_nodes:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _filter_parameters(parameters: list[dict], *, supports_lora: bool) -> list[dict]:
+    if supports_lora:
+        return parameters
+    out: list[dict] = []
+    for p in parameters or []:
+        try:
+            if isinstance(p, dict) and p.get("name") == "lora_prompt":
+                continue
+        except Exception:
+            pass
+        out.append(p)
+    return out
+
+
 def _ensure_output_node_title(workflow_dict: dict, requested: Optional[str]) -> tuple[dict, str]:
     if requested:
         return workflow_dict, requested
@@ -199,12 +233,16 @@ async def get_available_workflows(
             except Exception:
                 parameters = []
             model_loader = None
+            supports_lora = False
             try:
                 workflow_dict = json.loads(row.workflow_json) if row.workflow_json else None
                 if isinstance(workflow_dict, dict):
                     model_loader = _detect_model_loader_from_workflow_dict(workflow_dict)
+                    supports_lora = _detect_supports_lora_from_workflow_dict(workflow_dict)
             except Exception:
                 model_loader = None
+                supports_lora = False
+            parameters = _filter_parameters(parameters, supports_lora=supports_lora)
             workflows.append({
                 "key": row.key,
                 "label": row.label or row.key,
@@ -212,6 +250,7 @@ async def get_available_workflows(
                 "requires_image": bool(row.requires_image),
                 "parameters": parameters,
                 "model_loader": model_loader,
+                "supports_lora": supports_lora,
             })
         return {
             "workflows": workflows,
@@ -226,19 +265,24 @@ async def get_available_workflows(
     for workflow_key in service.get_available_workflows():
         metadata = config.workflow_defaults.workflow_metadata.get(workflow_key, {})
         model_loader = None
+        supports_lora = False
         try:
             template = await service.comfyui.get_workflow_template_dict(workflow_key)
             if isinstance(template, dict):
                 model_loader = _detect_model_loader_from_workflow_dict(template)
+                supports_lora = _detect_supports_lora_from_workflow_dict(template)
         except Exception:
             model_loader = None
+            supports_lora = False
+        parameters = _filter_parameters(metadata.get("parameters", []), supports_lora=supports_lora)
         workflows.append({
             "key": workflow_key,
             "label": metadata.get("label", workflow_key),
             "description": metadata.get("description", ""),
             "requires_image": metadata.get("requires_image", False),
-            "parameters": metadata.get("parameters", []),
+            "parameters": parameters,
             "model_loader": model_loader,
+            "supports_lora": supports_lora,
         })
     
     return {

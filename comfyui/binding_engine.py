@@ -3,6 +3,20 @@ from typing import Any, Optional
 
 class BindingEngine:
     @staticmethod
+    def _is_safe_overwrite(existing: Any, value: Any) -> bool:
+        if existing is None:
+            return True
+        if isinstance(existing, (list, dict)) and not isinstance(value, (list, dict)):
+            return False
+        if isinstance(existing, (int, float)) and isinstance(value, (int, float)):
+            return True
+        if isinstance(existing, bool) and isinstance(value, bool):
+            return True
+        if isinstance(existing, str) and isinstance(value, str):
+            return True
+        return True
+
+    @staticmethod
     def find_binding(bindings: list[dict], value_from: str) -> Optional[dict]:
         for b in bindings or []:
             if b.get("value_from") == value_from:
@@ -49,9 +63,31 @@ class BindingEngine:
                     if not isinstance(inputs, dict):
                         inputs = {}
                         node["inputs"] = inputs
+                    existing = inputs.get(input_name)
+                    if not BindingEngine._is_safe_overwrite(existing, value):
+                        continue
                     inputs[input_name] = value
                 else:
-                    workflow.set_node_param(node_title, input_name, value)
+                    changed = False
+                    if hasattr(workflow, "values"):
+                        for node in workflow.values():
+                            if not isinstance(node, dict):
+                                continue
+                            meta = node.get("_meta") or {}
+                            title = meta.get("title")
+                            if title != node_title:
+                                continue
+                            inputs = node.get("inputs")
+                            if not isinstance(inputs, dict):
+                                inputs = {}
+                                node["inputs"] = inputs
+                            existing = inputs.get(input_name)
+                            if not BindingEngine._is_safe_overwrite(existing, value):
+                                continue
+                            inputs[input_name] = value
+                            changed = True
+                    if not changed:
+                        raise ValueError(f"Node '{node_title}' not found.")
                 applied_counts[value_from] = applied_counts.get(value_from, 0) + 1
             except Exception:
                 continue

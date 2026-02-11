@@ -214,6 +214,28 @@ class AIDrawService:
                     })
 
                 workflow_snapshot, temp_path = await self.comfyui.create_workflow_snapshot(workflow_type)
+
+                if lora_prompt:
+                    supports_lora = False
+                    try:
+                        for node in workflow_snapshot.values():
+                            if not isinstance(node, dict):
+                                continue
+                            class_type = node.get("class_type")
+                            if class_type in (
+                                "LoraLoader",
+                                "LoraLoaderModelOnly",
+                                "LoRALoader",
+                                "LoRALoaderModelOnly",
+                                "PCLazyLoraLoader",
+                            ):
+                                supports_lora = True
+                                break
+                    except Exception:
+                        supports_lora = False
+                    if not supports_lora:
+                        print(f"[AIDrawService] 工作流不支持 LoRA，已忽略 lora_prompt: workflow={workflow_type}")
+                        lora_prompt = ""
                 
                 # 注入 checkpoint
                 if requested_model:
