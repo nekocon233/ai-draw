@@ -215,14 +215,6 @@ export default function ParametersPanel() {
             )}
           </div>
 
-          <Text type="secondary" style={{ fontSize: 12 }}>高级设置 (LoRA Prompt)</Text>
-          <Input.TextArea
-            value={loraPrompt}
-            onChange={(e) => setLoraPrompt(e.target.value)}
-            placeholder="<lora:模型名:权重>"
-            style={{ marginTop: 4, fontSize: 12 }}
-            autoSize={{ minRows: 1, maxRows: 3 }}
-          />
         </div>
       )}
 

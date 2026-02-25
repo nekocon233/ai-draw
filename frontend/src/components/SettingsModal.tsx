@@ -313,16 +313,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               </div>
             </Form.Item>
 
-            <Form.Item label="高级设置 (LoRA Prompt)" name="loraPrompt">
-              <Input.TextArea
-                placeholder="例如: <lora:style_name:0.8>"
-                allowClear
-                autoSize={{ minRows: 2, maxRows: 5 }}
-                onChange={(e) => {
-                  const text = e.target.value;
-                  setLoraItems(parseLoras(text));
-                }}
-              />
+            <Form.Item name="loraPrompt" hidden>
+              <Input />
             </Form.Item>
           </>
         )}

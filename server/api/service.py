@@ -133,6 +133,7 @@ def _detect_supports_lora_from_workflow_dict(workflow_dict: dict) -> bool:
             "LoRALoader",
             "LoRALoaderModelOnly",
             "PCLazyLoraLoader",
+            "easy loraStack",
         }
         for node in workflow_dict.values():
             if not isinstance(node, dict):

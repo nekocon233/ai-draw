@@ -121,6 +121,7 @@ def _bindings_miss_critical_nodes(workflow_dict: dict, bindings: list[dict]) -> 
     required: set[str] = {"prompt"}
     has_sampler_seed = False
     has_latent_size = False
+    has_easy_lora_stack = False
     for node in workflow_dict.values():
         if not isinstance(node, dict):
             continue
@@ -128,6 +129,8 @@ def _bindings_miss_critical_nodes(workflow_dict: dict, bindings: list[dict]) -> 
         if not isinstance(inputs, dict):
             continue
         class_type = node.get("class_type")
+        if class_type == "easy loraStack":
+            has_easy_lora_stack = True
         if isinstance(class_type, str) and class_type.startswith("KSampler") and "noise_seed" in inputs:
             has_sampler_seed = True
         if class_type == "EmptyLatentImage" and ("width" in inputs or "height" in inputs):
@@ -136,6 +139,8 @@ def _bindings_miss_critical_nodes(workflow_dict: dict, bindings: list[dict]) -> 
         required.add("seed")
     if has_latent_size:
         required.update({"width", "height"})
+    if has_easy_lora_stack:
+        required.add("lora_prompt")
     ok: set[str] = set()
     for b in bindings or []:
         value_from = b.get("value_from")
@@ -162,6 +167,7 @@ def _auto_generate_bindings(workflow_dict: dict, requires_image: bool) -> list[d
     latent_ids: list[str] = []
     denoise_ids: list[str] = []
     load_image_titles: list[str] = []
+    easy_lora_stack_titles: list[str] = []
 
     for node_id, node in workflow_dict.items():
         if not isinstance(node, dict):
@@ -193,6 +199,11 @@ def _auto_generate_bindings(workflow_dict: dict, requires_image: bool) -> list[d
             title = meta.get("title")
             if title:
                 load_image_titles.append(str(title))
+        if class_type == "easy loraStack":
+            meta = node.get("_meta") or {}
+            title = meta.get("title")
+            if title:
+                easy_lora_stack_titles.append(str(title))
 
     for nid, input_name in prompt_input_ids:
         bindings.append({"value_from": "prompt", "node_id": nid, "input_name": input_name, "value_type": "str"})
@@ -215,6 +226,14 @@ def _auto_generate_bindings(workflow_dict: dict, requires_image: bool) -> list[d
             bindings.append({"value_from": "strength", "node_id": nid, "input_name": "denoise", "value_type": "float"})
         image_node_title = load_image_titles[0] if load_image_titles else "main_image"
         bindings.append({"value_from": "uploaded_image_path", "node_title": image_node_title, "input_name": "image", "value_type": "str"})
+
+    if easy_lora_stack_titles:
+        bindings.append({
+            "value_from": "lora_prompt",
+            "node_title": easy_lora_stack_titles[0],
+            "input_name": "toggle",
+            "transform": "easy_lorastack_from_lora_prompt",
+        })
 
     return bindings
 

@@ -182,12 +182,15 @@ class ComfyUIService:
                 {"value_from": "prompt", "node_title": "positive_prompt", "input_name": "positive", "value_type": "str"},
                 {"value_from": "lora_prompt", "node_title": "lora_prompt", "input_name": "positive", "value_type": "str"},
                 {"value_from": "seed", "node_title": "seed", "input_name": "value", "value_type": "int"},
+                # Width and Height bindings (optional, trying multiple possible targets)
+                {"value_from": "width", "node_title": "width", "input_name": "value", "value_type": "int", "optional": True},
+                {"value_from": "height", "node_title": "height", "input_name": "value", "value_type": "int", "optional": True},
+                {"value_from": "width", "node_title": "Empty Latent Image", "input_name": "width", "value_type": "int", "optional": True},
+                {"value_from": "height", "node_title": "Empty Latent Image", "input_name": "height", "value_type": "int", "optional": True},
             ]
             if requires_image:
                 bindings.extend([
                     {"value_from": "strength", "node_title": "denoise", "input_name": "value", "value_type": "float"},
-                    {"value_from": "width", "node_title": "width", "input_name": "value", "value_type": "int"},
-                    {"value_from": "height", "node_title": "height", "input_name": "value", "value_type": "int"},
                     {"value_from": "uploaded_image_path", "node_title": "main_image", "input_name": "image", "value_type": "str"},
                 ])
 
@@ -482,7 +485,7 @@ class ComfyUIService:
         else:
             print(f"[ComfyUIService] I2I生成失败: {result.error}")
 
-    async def generate_t2i_snapshot(self, workflow: ComfyWorkflowWrapper, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None, bindings: Optional[list[dict]] = None, output_node_title: str = "保存图像"):
+    async def generate_t2i_snapshot(self, workflow: ComfyWorkflowWrapper, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None, width=None, height=None, bindings: Optional[list[dict]] = None, output_node_title: str = "保存图像"):
         if seed is None:
             seed = random.randrange(0, 2**63)
         if bindings:
@@ -491,6 +494,8 @@ class ComfyUIService:
                 "lora_prompt": lora_prompt or "",
                 "seed": seed,
                 "strength": denoise_value,
+                "width": width,
+                "height": height,
             })
             if applied.get("prompt", 0) == 0:
                 raise ValueError("工作流绑定未命中：prompt（提示词未写入工作流）")

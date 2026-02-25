@@ -228,6 +228,7 @@ class AIDrawService:
                                 "LoRALoader",
                                 "LoRALoaderModelOnly",
                                 "PCLazyLoraLoader",
+                                "easy loraStack",
                             ):
                                 supports_lora = True
                                 break
@@ -354,6 +355,8 @@ class AIDrawService:
                             denoise_value=strength,
                             lora_prompt=lora_prompt or "",
                             seed=seed,
+                            width=width,
+                            height=height,
                             bindings=bindings,
                             output_node_title=output_node_title,
                         )
