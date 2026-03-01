@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, message, Select } from 'antd';
+import { Input, Button, message, Select, Image } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -40,6 +40,7 @@ export default function ChatInput() {
   } = useAppStore();
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   const isFlf2v = workflowMeta?.requires_end_image === true;
+  const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
@@ -106,13 +107,27 @@ export default function ChatInput() {
       return;
     }
 
+    if (isRequiresImage && !referenceImage) {
+      message.warning('请上传参考图片');
+      return;
+    }
+
     clearError();
 
     // 添加聊天消息（用户输入 + 加载占位符）
     // 使用用户选择的工作流
     const hasStrength = workflowMeta?.parameters?.some(p => p.name === 'strength') ?? false;
     const effectiveStrength = hasStrength ? strength : undefined;
-    const messageId = await useAppStore.getState().addChatMessage(prompt, currentWorkflow, effectiveStrength, count, loraPrompt, isFlf2v ? promptEnd : undefined);
+    const messageId = await useAppStore.getState().addChatMessage({
+      prompt,
+      workflow: currentWorkflow,
+      strength: effectiveStrength,
+      count,
+      loraPrompt,
+      promptEnd: isFlf2v ? promptEnd : undefined,
+      referenceImage,
+      referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
+    });
 
     try {
       const state = useAppStore.getState();
@@ -126,7 +141,7 @@ export default function ChatInput() {
         reference_image: referenceImage || undefined,
         width: state.width || undefined,
         height: state.height || undefined,
-        prompt_end: isFlf2v ? (promptEnd || prompt) : undefined,
+        prompt_end: isFlf2v ? (promptEnd || undefined) : undefined,
         reference_image_end: isFlf2v ? (referenceImageEnd || undefined) : undefined,
         use_original_size: state.useOriginalSize,
       });
@@ -329,7 +344,15 @@ export default function ChatInput() {
               >
                 {referenceImage ? (
                   <>
-                    <img src={referenceImage} alt="开始帧" />
+                    <Image
+                      src={referenceImage}
+                      alt="开始帧"
+                      width={76}
+                      height={76}
+                      style={{ objectFit: 'cover', display: 'block' }}
+                      preview={{ mask: '预览' }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
                     <div
                       className="flf2v-frame-card-remove"
                       onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
@@ -356,7 +379,15 @@ export default function ChatInput() {
               >
                 {referenceImageEnd ? (
                   <>
-                    <img src={referenceImageEnd} alt="结束帧" />
+                    <Image
+                      src={referenceImageEnd}
+                      alt="结束帧"
+                      width={76}
+                      height={76}
+                      style={{ objectFit: 'cover', display: 'block' }}
+                      preview={{ mask: '预览' }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
                     <div
                       className="flf2v-frame-card-remove"
                       onClick={(e) => { e.stopPropagation(); setReferenceImageEnd(null); }}
@@ -398,7 +429,7 @@ export default function ChatInput() {
                 <TextArea
                   value={promptEnd}
                   onChange={(e) => setPromptEnd(e.target.value)}
-                  placeholder="描述结束帧画面内容（留空则同首帧）..."
+                  placeholder="描述结束帧画面内容..."
                   className="chat-textarea"
                   autoSize={{ minRows: 2, maxRows: 4 }}
                 />
@@ -407,11 +438,16 @@ export default function ChatInput() {
           </div>
         ) : (
           <>
-            {/* 普通模式图片预览 */}
-            {referenceImage && (
+            {/* 普通模式图片预览（非 requires_image 时） */}
+            {!isRequiresImage && referenceImage && (
               <div className="chat-image-preview">
                 <div className="chat-image-preview-item">
-                  <img src={referenceImage} alt="参考图" />
+                  <Image
+                    src={referenceImage}
+                    alt="参考图"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    preview={{ mask: '预览' }}
+                  />
                   <div
                     className="chat-image-preview-remove"
                     onClick={() => setReferenceImage(null)}
@@ -422,8 +458,41 @@ export default function ChatInput() {
               </div>
             )}
 
-            {/* 普通模式输入框 */}
+            {/* 输入框行（requires_image 时包含帧卡片） */}
             <div className="chat-input-row">
+              {isRequiresImage && (
+                <div
+                  className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
+                  onClick={() => !referenceImage && fileInputRef.current?.click()}
+                  title="上传参考图"
+                  style={{ flexShrink: 0 }}
+                >
+                  {referenceImage ? (
+                    <>
+                      <Image
+                        src={referenceImage}
+                        alt="参考图"
+                        width={76}
+                        height={76}
+                        style={{ objectFit: 'cover', display: 'block' }}
+                        preview={{ mask: '预览' }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <div
+                        className="flf2v-frame-card-remove"
+                        onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
+                      >
+                        <CloseOutlined />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flf2v-frame-placeholder">
+                      <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                      <span className="flf2v-frame-placeholder-label">参考图</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="chat-textarea-wrapper">
                 <TextArea
                   ref={textAreaRef}
@@ -431,7 +500,7 @@ export default function ChatInput() {
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="描述你想要生成的图片..."
                   className="chat-textarea"
-                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  autoSize={{ minRows: isRequiresImage ? 1 : 2, maxRows: 6 }}
                   onPressEnter={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -475,7 +544,7 @@ export default function ChatInput() {
                 }
               }}
             />
-            {!isFlf2v && (
+            {!isFlf2v && !isRequiresImage && (
               <button
                 className="chat-input-icon-button"
                 onClick={() => fileInputRef.current?.click()}
@@ -521,7 +590,7 @@ export default function ChatInput() {
             type="primary"
             icon={isGenerating ? <StopOutlined /> : <SendOutlined />}
             onClick={handleSend}
-            disabled={!isGenerating && isFlf2v && !referenceImage}
+            disabled={!isGenerating && !!(isFlf2v || isRequiresImage) && !referenceImage}
             className="chat-send-button"
             danger={isGenerating}
           />

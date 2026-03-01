@@ -86,6 +86,8 @@ export const apiService = {
     count?: number;
     lora_prompt?: string;
     images?: string[];
+    reference_image?: string;
+    reference_image_end?: string;
   }): Promise<{ message: string }> =>
     client.post('/chat/save', data),
   

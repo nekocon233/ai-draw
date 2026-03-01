@@ -31,8 +31,10 @@ interface ChatMessage {
     workflow: string;
     strength?: number;
     count: number;
-    loraPrompt?: string; // LoRA 提示词
-    promptEnd?: string;  // flf2v 结束帧提示词
+    loraPrompt?: string;       // LoRA 提示词
+    promptEnd?: string;        // 结束帧提示词
+    referenceImage?: string;   // 参考图 base64
+    referenceImageEnd?: string; // 尾帧参考图 base64
   }
 }
 
@@ -90,7 +92,7 @@ interface AppState {
   setUseOriginalSize: (v: boolean) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImageEnd: (image: string | null) => void;
-  addChatMessage: (prompt: string, workflow: string, strength: number | undefined, count: number, loraPrompt?: string, promptEnd?: string) => Promise<string>;
+  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImageEnd?: string | null }) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   clearChatHistory: () => void;
@@ -213,9 +215,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!hasHeight) {
         updates.height = null;
       }
-      // 切换工作流时重置首尾帧状态
-      (updates as any).promptEnd = '';
-      (updates as any).referenceImageEnd = null;
       (updates as any).useOriginalSize = true;
       
       set(updates);
@@ -278,7 +277,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setUseOriginalSize: (v) => {
     set({ useOriginalSize: v });
   },
-  addChatMessage: async (prompt, workflow, strength, count, loraPrompt, promptEnd) => {
+  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImageEnd }) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -336,7 +335,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       type: 'user',
       content: prompt,
       timestamp: Date.now(),
-      params: { workflow, strength, count, loraPrompt, promptEnd: promptEnd || undefined }
+      params: {
+        workflow, strength, count, loraPrompt,
+        promptEnd: promptEnd || undefined,
+        referenceImage: referenceImage || undefined,
+        referenceImageEnd: referenceImageEnd || undefined,
+      }
     };
     const assistantMessage: ChatMessage = {
       id: `${messageId}-reply`,
@@ -379,6 +383,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         strength,
         count,
         lora_prompt: loraPrompt,
+        reference_image: referenceImage || undefined,
+        reference_image_end: referenceImageEnd || undefined,
       }).catch(err => console.error('保存用户消息失败:', err));
     }
     

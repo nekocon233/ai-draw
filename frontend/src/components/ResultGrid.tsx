@@ -62,6 +62,31 @@ export default function ResultGrid() {
               // 用户消息（右侧）
               <div className="chat-message-content user-message">
                 <div className="chat-message-bubble">
+                  {/* 参考图缩略图（可点击预览） */}
+                  {(message.params?.referenceImage || message.params?.referenceImageEnd) && (
+                    <div className="user-reference-images">
+                      {message.params.referenceImage && (
+                        <Image
+                          src={message.params.referenceImage}
+                          alt="参考图"
+                          width={80}
+                          height={80}
+                          style={{ objectFit: 'cover', borderRadius: 6, cursor: 'pointer', display: 'block' }}
+                          preview={{ mask: '预览' }}
+                        />
+                      )}
+                      {message.params.referenceImageEnd && (
+                        <Image
+                          src={message.params.referenceImageEnd}
+                          alt="尾帧参考图"
+                          width={80}
+                          height={80}
+                          style={{ objectFit: 'cover', borderRadius: 6, cursor: 'pointer', display: 'block' }}
+                          preview={{ mask: '预览' }}
+                        />
+                      )}
+                    </div>
+                  )}
                   <div className="chat-message-text">{message.content}</div>
                   {message.params?.promptEnd && (
                     <div className="chat-message-text chat-message-text-end">{message.params.promptEnd}</div>

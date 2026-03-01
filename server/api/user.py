@@ -227,12 +227,17 @@ def get_chat_history(
         }
         
         if msg.type == "user" and msg.workflow:
-            msg_dict["params"] = {
+            params = {
                 "workflow": msg.workflow,
                 "strength": msg.strength,
                 "count": msg.count,
                 "loraPrompt": msg.lora_prompt
             }
+            if msg.reference_image:
+                params["referenceImage"] = msg.reference_image
+            if msg.reference_image_end:
+                params["referenceImageEnd"] = msg.reference_image_end
+            msg_dict["params"] = params
         elif msg.type == "assistant":
             # 加载关联的图片
             images = db.query(GeneratedImage)\
@@ -412,6 +417,8 @@ def save_chat_message(
             strength=message.get("strength"),
             count=message.get("count"),
             lora_prompt=message.get("lora_prompt"),
+            reference_image=message.get("reference_image"),
+            reference_image_end=message.get("reference_image_end"),
         )
         db.add(chat_msg)
         

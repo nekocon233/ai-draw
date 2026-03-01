@@ -29,7 +29,7 @@ export default function GenerateButton() {
     const effectiveStrength = hasStrength ? strength : undefined;
 
     // 添加用户消息到聊天历史（包含加载占位符）
-    await addChatMessage(prompt, currentWorkflow, effectiveStrength, count, loraPrompt);
+    await addChatMessage({ prompt, workflow: currentWorkflow, strength: effectiveStrength, count, loraPrompt, referenceImage });
 
     try {
       const res = await apiService.generateMedia({

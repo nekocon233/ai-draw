@@ -81,6 +81,14 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* 参考图缩略图容器 */
+.user-reference-images {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
 .chat-message-text {
   font-size: 15px;
   line-height: 1.5;

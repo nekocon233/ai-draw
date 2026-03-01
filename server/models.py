@@ -101,6 +101,8 @@ class ChatMessage(Base):
     strength = Column(Float)
     count = Column(Integer)
     lora_prompt = Column(String(255))
+    reference_image = Column(Text, nullable=True)
+    reference_image_end = Column(Text, nullable=True)
     
     created_at = Column(DateTime, default=datetime.now, index=True)
     

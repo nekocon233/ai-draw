@@ -222,7 +222,7 @@ class AIDrawService:
                     start_image_base64=image_base64,
                     end_image_base64=image_end_base64,
                     prompt_start=prompt,
-                    prompt_end=prompt_end or prompt,
+                    prompt_end=prompt_end or "",
                     seed=seed,
                 )
                 

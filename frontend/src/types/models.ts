@@ -84,6 +84,8 @@ export interface ChatMessage {
     count: number;
     loraPrompt?: string;
     promptEnd?: string;
+    referenceImage?: string;
+    referenceImageEnd?: string;
   };
 }
 
