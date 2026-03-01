@@ -1,4 +1,4 @@
-import { Slider, InputNumber, Row, Col, Typography, Input } from 'antd';
+import { Slider, InputNumber, Row, Col, Typography, Input, Switch } from 'antd';
 import { useAppStore } from '../stores/appStore';
 
 const { Title, Text } = Typography;
@@ -12,11 +12,13 @@ export default function ParametersPanel() {
     loraPrompt,
     width,
     height,
+    useOriginalSize,
     setStrength, 
     setCount,
     setLoraPrompt,
     setWidth,
-    setHeight
+    setHeight,
+    setUseOriginalSize,
   } = useAppStore();
 
   // 获取当前工作流的参数配置
@@ -31,6 +33,7 @@ export default function ParametersPanel() {
   const hasLoraPrompt = workflowMeta.parameters.some(p => p.name === 'lora_prompt');
   const hasWidth = workflowMeta.parameters.some(p => p.name === 'width');
   const hasHeight = workflowMeta.parameters.some(p => p.name === 'height');
+  const supportsOriginalSize = workflowMeta.supports_original_size === true;
 
   return (
     <div>
@@ -112,36 +115,50 @@ export default function ParametersPanel() {
       )}
 
       {hasWidth && (
-        <div style={{ marginBottom: 24 }}>
-          <Text strong style={{ fontSize: 13 }}>
-            {workflowMeta.parameters.find(p => p.name === 'width')?.label || '图像宽度'}
-          </Text>
-          <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
-            <Col flex="auto">
-              <Slider
-                min={workflowMeta.parameters.find(p => p.name === 'width')?.min || 512}
-                max={workflowMeta.parameters.find(p => p.name === 'width')?.max || 2048}
-                step={workflowMeta.parameters.find(p => p.name === 'width')?.step || 64}
-                value={width ?? (workflowMeta.parameters.find(p => p.name === 'width')?.default as number) ?? 1024}
-                onChange={setWidth}
-              />
-            </Col>
-            <Col>
-              <InputNumber
-                min={workflowMeta.parameters.find(p => p.name === 'width')?.min || 512}
-                max={workflowMeta.parameters.find(p => p.name === 'width')?.max || 2048}
-                step={workflowMeta.parameters.find(p => p.name === 'width')?.step || 64}
-                value={width ?? (workflowMeta.parameters.find(p => p.name === 'width')?.default as number) ?? 1024}
-                onChange={(val) => setWidth(val || 1024)}
+        <div style={{ marginBottom: useOriginalSize && supportsOriginalSize ? 8 : 24 }}>
+          {supportsOriginalSize && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 13 }}>使用原图尺寸</Text>
+              <Switch
                 size="small"
-                style={{ width: 80 }}
+                checked={useOriginalSize}
+                onChange={setUseOriginalSize}
               />
-            </Col>
-          </Row>
+            </div>
+          )}
+          {(!useOriginalSize || !supportsOriginalSize) && (
+            <>
+              <Text strong style={{ fontSize: 13 }}>
+                {workflowMeta.parameters.find(p => p.name === 'width')?.label || '图像宽度'}
+              </Text>
+              <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
+                <Col flex="auto">
+                  <Slider
+                    min={workflowMeta.parameters.find(p => p.name === 'width')?.min || 512}
+                    max={workflowMeta.parameters.find(p => p.name === 'width')?.max || 2048}
+                    step={workflowMeta.parameters.find(p => p.name === 'width')?.step || 64}
+                    value={width ?? (workflowMeta.parameters.find(p => p.name === 'width')?.default as number) ?? 1024}
+                    onChange={setWidth}
+                  />
+                </Col>
+                <Col>
+                  <InputNumber
+                    min={workflowMeta.parameters.find(p => p.name === 'width')?.min || 512}
+                    max={workflowMeta.parameters.find(p => p.name === 'width')?.max || 2048}
+                    step={workflowMeta.parameters.find(p => p.name === 'width')?.step || 64}
+                    value={width ?? (workflowMeta.parameters.find(p => p.name === 'width')?.default as number) ?? 1024}
+                    onChange={(val) => setWidth(val || 1024)}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </Col>
+              </Row>
+            </>
+          )}
         </div>
       )}
 
-      {hasHeight && (
+      {hasHeight && (!useOriginalSize || !supportsOriginalSize) && (
         <div>
           <Text strong style={{ fontSize: 13 }}>
             {workflowMeta.parameters.find(p => p.name === 'height')?.label || '图像高度'}

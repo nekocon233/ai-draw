@@ -29,10 +29,11 @@ interface ChatMessage {
   timestamp: number;
   params?: {
     workflow: string;
-    strength: number;
+    strength?: number;
     count: number;
     loraPrompt?: string; // LoRA 提示词
-  };
+    promptEnd?: string;  // flf2v 结束帧提示词
+  }
 }
 
 interface AppState {
@@ -55,6 +56,7 @@ interface AppState {
   // Prompt
   prompt: string;
   loraPrompt: string;
+  promptEnd: string; // flf2v 结束帧提示词
   
   // 参数
   strength: number;
@@ -62,9 +64,11 @@ interface AppState {
   imagesPerRow: number; // 每行显示图片数量
   width: number | null;  // 图像宽度（部分工作流支持）
   height: number | null; // 图像高度（部分工作流支持）
+  useOriginalSize: boolean; // 是否使用原图尺寸（默认开启）
   
   // 参考图片
   referenceImage: string | null;
+  referenceImageEnd: string | null; // flf2v 结束帧
   
   // UI 状态
   loading: boolean;
@@ -77,15 +81,18 @@ interface AppState {
   setCurrentWorkflow: (workflow: string) => void;
   setPrompt: (prompt: string) => void;
   setLoraPrompt: (prompt: string) => void;
+  setPromptEnd: (prompt: string) => void;
   setStrength: (strength: number) => void;
   setCount: (count: number) => void;
   setImagesPerRow: (count: number) => void;
   setWidth: (width: number | null) => void;
   setHeight: (height: number | null) => void;
+  setUseOriginalSize: (v: boolean) => void;
   setReferenceImage: (image: string | null) => void;
-  addChatMessage: (prompt: string, workflow: string, strength: number, count: number, loraPrompt?: string) => Promise<string>;
+  setReferenceImageEnd: (image: string | null) => void;
+  addChatMessage: (prompt: string, workflow: string, strength: number | undefined, count: number, loraPrompt?: string, promptEnd?: string) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
-  appendChatImage: (messageId: string, image: string, index: number) => void;
+  appendChatMedia: (messageId: string, image: string, index: number) => void;
   clearChatHistory: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -140,12 +147,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   availableWorkflows: [], // 初始为空，从后端动态获取
   prompt: initialConfig.prompt,
   loraPrompt: initialConfig.loraPrompt,
+  promptEnd: '',
   strength: initialConfig.strength,
   count: initialConfig.count,
   imagesPerRow: initialConfig.imagesPerRow,
   width: null,  // 图像宽度，默认为 null 表示使用工作流默认值
   height: null, // 图像高度，默认为 null 表示使用工作流默认值
+  useOriginalSize: true,  // 默认使用原图尺寸
   referenceImage: initialConfig.referenceImage,
+  referenceImageEnd: null,
   chatHistory: [],
   loading: false,
   error: null,
@@ -203,6 +213,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!hasHeight) {
         updates.height = null;
       }
+      // 切换工作流时重置首尾帧状态
+      (updates as any).promptEnd = '';
+      (updates as any).referenceImageEnd = null;
+      (updates as any).useOriginalSize = true;
       
       set(updates);
     } else {
@@ -218,6 +232,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setLoraPrompt: async (prompt) => {
     set({ loraPrompt: prompt });
+    const state = get();
+    state.saveSessionConfig();
+  },
+  setPromptEnd: async (prompt) => {
+    set({ promptEnd: prompt });
     const state = get();
     state.saveSessionConfig();
   },
@@ -251,7 +270,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
-  addChatMessage: async (prompt, workflow, strength, count, loraPrompt) => {
+  setReferenceImageEnd: async (image) => {
+    set({ referenceImageEnd: image });
+    const state = get();
+    state.saveSessionConfig();
+  },
+  setUseOriginalSize: (v) => {
+    set({ useOriginalSize: v });
+  },
+  addChatMessage: async (prompt, workflow, strength, count, loraPrompt, promptEnd) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -309,7 +336,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       type: 'user',
       content: prompt,
       timestamp: Date.now(),
-      params: { workflow, strength, count, loraPrompt }
+      params: { workflow, strength, count, loraPrompt, promptEnd: promptEnd || undefined }
     };
     const assistantMessage: ChatMessage = {
       id: `${messageId}-reply`,
@@ -368,10 +395,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!isLoggedIn() && state.currentSessionId) {
         const message = newHistory.find(m => m.id === messageId);
         if (message && message.session_id) {
-          // 保存图片到 IndexedDB
-          const validImages = images.filter(img => typeof img === 'string') as string[];
-          if (validImages.length > 0) {
-            saveImages(message.session_id, messageId, validImages)
+          // 保存图片到 IndexedDB（跳过视频，游客模式仅临时展示）
+          const validMediaItems = images.filter(img => typeof img === 'string' && !img.startsWith('data:video/') && !img.includes('/video/')) as string[];
+          if (validMediaItems.length > 0) {
+            saveImages(message.session_id, messageId, validMediaItems)
               .catch(err => console.error('保存图片到 IndexedDB 失败:', err));
           }
         }
@@ -396,7 +423,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
   },
-  appendChatImage: (messageId: string, image: string, index: number) => {
+  appendChatMedia: (messageId: string, image: string, index: number) => {
     set((state) => {
       const newHistory = state.chatHistory.map((msg) => {
         if (msg.id === messageId && msg.images) {
@@ -424,10 +451,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (state.currentSessionId) {
           const message = newHistory.find(m => m.id === messageId);
           if (message && message.session_id) {
-            // 保存单张图片到 IndexedDB
+            // 保存单张图片到 IndexedDB（跳过视频，游客模式仅临时展示）
             import('../utils/indexedDB').then(({ saveImage }) => {
-              saveImage(message.session_id, messageId, image, index)
-                .catch(err => console.error('保存图片到 IndexedDB 失败:', err));
+              if (!image.startsWith('data:video/') && !image.includes('/video/')) {
+                saveImage(message.session_id, messageId, image, index)
+                  .catch(err => console.error('保存图片到 IndexedDB 失败:', err));
+              }
             });
           }
           // 保存消息元数据到 localStorage
@@ -909,6 +938,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       count: state.count,
       images_per_row: state.imagesPerRow,
       reference_image: state.referenceImage,
+      prompt_end: state.promptEnd || undefined,
+      reference_image_end: state.referenceImageEnd || undefined,
     };
     
     if (isLoggedIn()) {
@@ -925,6 +956,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         count: config.count,
         imagesPerRow: config.images_per_row,
         referenceImage: config.reference_image,
+        promptEnd: config.prompt_end,
+        referenceImageEnd: config.reference_image_end,
       });
     }
   },
@@ -943,6 +976,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count !== undefined ? config.count : DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.images_per_row !== undefined ? config.images_per_row : DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.reference_image || null,
+          promptEnd: config.prompt_end || '',
+          referenceImageEnd: config.reference_image_end || null,
         });
       } catch (error) {
         console.error('加载会话配置失败:', error);
@@ -955,6 +990,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: DEFAULT_CONFIG.COUNT,
           imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: null,
+          promptEnd: '',
+          referenceImageEnd: null,
         });
       }
     } else {
@@ -969,6 +1006,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count !== undefined ? config.count : DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.imagesPerRow !== undefined ? config.imagesPerRow : DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.referenceImage || null,
+          promptEnd: config.promptEnd || '',
+          referenceImageEnd: config.referenceImageEnd || null,
         });
       } else {
         // 如果没有保存的配置，使用当前 store 值（已由 loadDefaultConfig 设置）

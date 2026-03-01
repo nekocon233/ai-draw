@@ -6,8 +6,8 @@ import type {
   ServiceStatus,
   GeneratePromptRequest,
   GeneratePromptResponse,
-  GenerateImageRequest,
-  GenerateImageResponse,
+  GenerateMediaRequest,
+  GenerateMediaResponse,
   UploadImageResponse,
   WorkflowsResponse,
 } from '../types/api';
@@ -54,6 +54,8 @@ export const apiService = {
     count: number;
     images_per_row: number;
     reference_image: string | null;
+    prompt_end?: string | null;
+    reference_image_end?: string | null;
   }> =>
     client.get(`/chat/sessions/${sessionId}/config`),
   
@@ -65,6 +67,8 @@ export const apiService = {
     count?: number;
     images_per_row?: number;
     reference_image?: string | null;
+    prompt_end?: string | null;
+    reference_image_end?: string | null;
   }): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}/config`, config),
   
@@ -112,17 +116,17 @@ export const apiService = {
   generatePrompt: (data: GeneratePromptRequest): Promise<GeneratePromptResponse> =>
     client.post('/prompt/generate', data),
   
-  // 图像生成
-  generateImage: (data: GenerateImageRequest): Promise<GenerateImageResponse> =>
-    client.post('/image/generate', data, {
+  // 媒体生成
+  generateMedia: (data: GenerateMediaRequest): Promise<GenerateMediaResponse> =>
+    client.post('/media/generate', data, {
       timeout: 300000 // 5 分钟，因为生成多张图片耗时较长
     }),
   
-  // 图片上传
+  // 媒体上传
   uploadImage: (file: File): Promise<UploadImageResponse> => {
     const formData = new FormData();
     formData.append('file', file);
-    return client.post('/image/upload', formData, {
+    return client.post('/media/upload-reference', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
@@ -132,11 +136,10 @@ export const apiService = {
     client.get('/service/workflows'),
 
   getWorkflowDefaults: (): Promise<{ success: boolean; defaults: any }> =>
-    client.get('/workflow/defaults'),
-  
+    client.get('/service/workflow/defaults'),
+
   switchWorkflow: (workflow_type: string): Promise<{ message: string }> =>
-    client.post('/workflow/switch', null, { params: { workflow_type } }),
-  
+    client.post('/service/workflow/switch', null, { params: { workflow_type } }),
   // 预览
   getPreviews: (): Promise<{ previews: any[] }> =>
     client.get('/previews'),

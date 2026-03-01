@@ -35,10 +35,10 @@ export const API_ENDPOINTS = {
   // Prompt 生成
   PROMPT_GENERATE: '/prompt/generate',
   
-  // 图像生成
-  IMAGE_GENERATE: '/image/generate',
-  IMAGE_UPLOAD: '/image/upload-reference',
-  IMAGE_STOP: '/image/stop',
+  // 媒体生成
+  MEDIA_GENERATE: '/media/generate',
+  MEDIA_UPLOAD: '/media/upload-reference',
+  MEDIA_STOP: '/media/stop',
 } as const;
 
 // ============ WebSocket ============
@@ -77,9 +77,10 @@ export const WS_MESSAGE_TYPES = {
 // ============ 状态字段 ============
 export const STATE_FIELDS = {
   IS_GENERATING: 'is_generating',
-  IMAGE_GENERATED: 'image_generated',
+  MEDIA_GENERATED: 'media_generated',
   PREVIEW_UPDATE: 'preview_update',
   GENERATION_PROGRESS: 'generation_progress',
+  ERROR: 'error',
 } as const;
 
 // ============ UI 配置 ============

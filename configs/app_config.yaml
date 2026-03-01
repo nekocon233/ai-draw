@@ -17,6 +17,7 @@ workflow_defaults:
     i2i: "qwen_image_edit_workflow_api.json"
     reference: "reference_workflow_api.json"
     reference_zimage: "reference_zimage_workflow_api.json"
+    flf2v: "flf2v_workflow_api.json"
   
   # 工作流元数据
   workflow_metadata:
@@ -40,6 +41,7 @@ workflow_defaults:
       label: "图生图（Q-Image）"
       description: "基于参考图重绘"
       requires_image: true
+      supports_original_size: true
       parameters:
         - name: "strength"
           label: "重绘强度"
@@ -47,7 +49,7 @@ workflow_defaults:
           min: 0
           max: 1
           step: 0.01
-          default: 0.8
+          default: 1
         - name: "count"
           label: "生成数量"
           type: "number"
@@ -115,3 +117,25 @@ workflow_defaults:
           label: "LoRA 提示词"
           type: "text"
           default: "<lora:AmeniwaZ:0.8>"
+    flf2v:
+      label: "首尾帧生视频"
+      description: "基于首尾帧生成过渡视频"
+      requires_image: true
+      requires_end_image: true
+      supports_original_size: true
+      output_type: "video"
+      parameters:
+        - name: "width"
+          label: "视频宽度"
+          type: "number"
+          min: 256
+          max: 1280
+          step: 64
+          default: 1024
+        - name: "height"
+          label: "视频高度"
+          type: "number"
+          min: 256
+          max: 1280
+          step: 64
+          default: 1024

@@ -78,6 +78,8 @@ class ChatSession(Base):
     config_count = Column(Integer, nullable=True)
     config_images_per_row = Column(Integer, default=4)
     config_reference_image = Column(Text, nullable=True)  # base64 编码的参考图
+    config_prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
+    config_reference_image_end = Column(Text, nullable=True)  # flf2v 结束帧图片
     
     # 关系
     user = relationship("User", back_populates="sessions")

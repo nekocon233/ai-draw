@@ -8,6 +8,7 @@ export default function GenerateButton() {
   const {
     prompt,
     currentWorkflow,
+    availableWorkflows,
     strength,
     count,
     loraPrompt,
@@ -19,22 +20,22 @@ export default function GenerateButton() {
   } = useAppStore();
 
   const handleGenerate = async () => {
-    if (!prompt.trim()) {
-      message.warning('请先输入提示词');
-      return;
-    }
+    const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
 
     clearError();
 
+    // 当前工作流是否有 strength 参数
+    const hasStrength = workflowMeta?.parameters.some(p => p.name === 'strength') ?? true;
+    const effectiveStrength = hasStrength ? strength : undefined;
+
     // 添加用户消息到聊天历史（包含加载占位符）
-    // 使用用户选择的工作流
-    await addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
+    await addChatMessage(prompt, currentWorkflow, effectiveStrength, count, loraPrompt);
 
     try {
-      const res = await apiService.generateImage({
+      const res = await apiService.generateMedia({
         prompt,
         workflow: currentWorkflow,
-        strength,
+        strength: effectiveStrength,
         count,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,

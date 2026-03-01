@@ -42,14 +42,15 @@ export interface AppState {
   addChatMessage: (
     prompt: string,
     workflow: string,
-    strength: number,
+    strength: number | undefined,
     count: number,
-    loraPrompt: string
-  ) => string; // 返回助手消息 ID
+    loraPrompt?: string,
+    promptEnd?: string
+  ) => Promise<string>; // 返回助手消息 ID
   
   updateChatImages: (messageId: string, images: string[]) => void;
   
-  appendChatImage: (messageId: string, image: string, index: number) => void;
+  appendChatMedia: (messageId: string, image: string, index: number) => void;
   
   clearChatHistory: () => void;
   

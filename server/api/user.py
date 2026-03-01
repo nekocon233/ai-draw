@@ -241,12 +241,13 @@ def get_chat_history(
                 .all()
             # 转换为 URL（如果是文件路径）或直接返回 base64
             file_storage = get_file_storage()
-            msg_dict["images"] = [
-                file_storage.get_file_url(img.file_path) 
-                if not img.file_path.startswith('data:image') 
-                else img.file_path 
-                for img in images
-            ]
+            def _to_url(path: str) -> str:
+                if path.startswith('data:image'):
+                    return path  # base64 直接返回
+                if path.startswith('/'):
+                    return path  # 已是绝对 URL，直接返回（如视频路径 /uploads/video/...）
+                return file_storage.get_file_url(path)  # 相对路径加前缀
+            msg_dict["images"] = [_to_url(img.file_path) for img in images]
         
         result.append(msg_dict)
     
@@ -369,7 +370,7 @@ def save_chat_message(
             if message["type"] == "assistant" and "images" in message:
                 file_storage = get_file_storage()
                 for idx, img_data in enumerate(message["images"]):
-                    if isinstance(img_data, str):  # base64 图片数据
+                    if isinstance(img_data, str):  # base64 图片数据或文件路径
                         try:
                             # 检查该图片是否已存在
                             existing_img = db.query(GeneratedImage).filter(
@@ -378,15 +379,19 @@ def save_chat_message(
                             ).first()
                             
                             if not existing_img:
-                                relative_path = file_storage.save_generated_image(
-                                    base64_data=img_data,
-                                    user_id=current_user.id,
-                                    message_id=msg_id,
-                                    index=idx
-                                )
+                                # 如果已是文件路径（视频等），直接存储，不走 base64 解码
+                                if img_data.startswith('/'):
+                                    file_path = img_data
+                                else:
+                                    file_path = file_storage.save_generated_image(
+                                        base64_data=img_data,
+                                        user_id=current_user.id,
+                                        message_id=msg_id,
+                                        index=idx
+                                    )
                                 gen_img = GeneratedImage(
                                     message_id=msg_id,
-                                    file_path=relative_path,
+                                    file_path=file_path,
                                     image_index=idx
                                 )
                                 db.add(gen_img)
@@ -414,19 +419,23 @@ def save_chat_message(
         if message["type"] == "assistant" and "images" in message:
             file_storage = get_file_storage()
             for idx, img_data in enumerate(message["images"]):
-                if isinstance(img_data, str):  # base64 图片数据
+                if isinstance(img_data, str):  # base64 图片数据或文件路径
                     try:
-                        # 保存到文件系统
-                        relative_path = file_storage.save_generated_image(
-                            base64_data=img_data,
-                            user_id=current_user.id,
-                            message_id=msg_id,
-                            index=idx
-                        )
+                        # 如果已是文件路径（视频等以 / 开头），直接存储，不走 base64 解码
+                        if img_data.startswith('/'):
+                            file_path = img_data
+                        else:
+                            # 保存到文件系统
+                            file_path = file_storage.save_generated_image(
+                                base64_data=img_data,
+                                user_id=current_user.id,
+                                message_id=msg_id,
+                                index=idx
+                            )
                         gen_img = GeneratedImage(
                             message_id=msg_id,
                             image_index=idx,
-                            file_path=relative_path  # 存储相对路径
+                            file_path=file_path
                         )
                         db.add(gen_img)
                     except Exception as e:

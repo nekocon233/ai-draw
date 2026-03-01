@@ -117,7 +117,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "is_generating": service.is_generating,
                 "is_generating_prompt": service.is_generating_prompt,
                 "is_service_available": service.is_service_available,
-                "preview_images": service.preview_images,
+                "preview_items": service.preview_items,
             }
         }
         await websocket.send_json(initial_state)

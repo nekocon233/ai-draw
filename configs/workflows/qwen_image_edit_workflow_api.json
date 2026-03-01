@@ -245,14 +245,8 @@
   },
   "93": {
     "inputs": {
-      "width": [
-        "95",
-        0
-      ],
-      "height": [
-        "96",
-        0
-      ],
+      "width": 1024,
+      "height": 1024,
       "upscale_method": "nearest-exact",
       "keep_proportion": "pad_edge",
       "pad_color": "0, 0, 0",
@@ -267,24 +261,6 @@
     "class_type": "ImageResizeKJv2",
     "_meta": {
       "title": "Resize Image v2"
-    }
-  },
-  "95": {
-    "inputs": {
-      "value": 1024
-    },
-    "class_type": "INTConstant",
-    "_meta": {
-      "title": "width"
-    }
-  },
-  "96": {
-    "inputs": {
-      "value": 1024
-    },
-    "class_type": "INTConstant",
-    "_meta": {
-      "title": "height"
     }
   }
 }

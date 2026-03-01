@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Modal, Form, Slider, InputNumber, Input, Row, Col } from 'antd';
+import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch } from 'antd';
 import { useAppStore } from '../stores/appStore';
 
 interface SettingsModalProps {
@@ -17,12 +17,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     imagesPerRow,
     width,
     height,
+    useOriginalSize,
     setStrength,
     setCount,
     setLoraPrompt,
     setImagesPerRow,
     setWidth,
     setHeight,
+    setUseOriginalSize,
   } = useAppStore();
 
   const [form] = Form.useForm();
@@ -34,6 +36,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasLoraPrompt = workflowMeta?.parameters.some(p => p.name === 'lora_prompt') || false;
   const hasWidth = workflowMeta?.parameters.some(p => p.name === 'width') || false;
   const hasHeight = workflowMeta?.parameters.some(p => p.name === 'height') || false;
+  const supportsOriginalSize = workflowMeta?.supports_original_size === true;
 
   // 获取 width 和 height 的参数配置
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
@@ -157,32 +160,44 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasWidth && (
           <Form.Item label={widthParam?.label || "图像宽度"}>
-            <Row gutter={12} align="middle">
-              <Col flex="auto">
-                <Form.Item name="width" noStyle>
-                  <Slider
-                    min={widthParam?.min || 512}
-                    max={widthParam?.max || 2048}
-                    step={widthParam?.step || 64}
-                  />
-                </Form.Item>
-              </Col>
-              <Col>
-                <Form.Item name="width" noStyle>
-                  <InputNumber
-                    min={widthParam?.min || 512}
-                    max={widthParam?.max || 2048}
-                    step={widthParam?.step || 64}
-                    size="small"
-                    style={{ width: 80 }}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
+            {supportsOriginalSize && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 13 }}>使用原图尺寸</span>
+                <Switch
+                  size="small"
+                  checked={useOriginalSize}
+                  onChange={setUseOriginalSize}
+                />
+              </div>
+            )}
+            {(!useOriginalSize || !supportsOriginalSize) && (
+              <Row gutter={12} align="middle">
+                <Col flex="auto">
+                  <Form.Item name="width" noStyle>
+                    <Slider
+                      min={widthParam?.min || 512}
+                      max={widthParam?.max || 2048}
+                      step={widthParam?.step || 64}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col>
+                  <Form.Item name="width" noStyle>
+                    <InputNumber
+                      min={widthParam?.min || 512}
+                      max={widthParam?.max || 2048}
+                      step={widthParam?.step || 64}
+                      size="small"
+                      style={{ width: 80 }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            )}
           </Form.Item>
         )}
 
-        {hasHeight && (
+        {hasHeight && (!useOriginalSize || !supportsOriginalSize) && (
           <Form.Item label={heightParam?.label || "图像高度"}>
             <Row gutter={12} align="middle">
               <Col flex="auto">

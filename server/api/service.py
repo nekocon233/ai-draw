@@ -47,6 +47,9 @@ async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_s
             "label": metadata.get("label", workflow_key),
             "description": metadata.get("description", ""),
             "requires_image": metadata.get("requires_image", False),
+            "requires_end_image": metadata.get("requires_end_image", False),
+            "supports_original_size": metadata.get("supports_original_size", False),
+            "output_type": metadata.get("output_type", "image"),
             "parameters": metadata.get("parameters", [])  # 添加参数配置
         })
     
@@ -54,3 +57,24 @@ async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_s
         "workflows": workflows,
         "default_workflow": service.get_current_workflow()
     }
+
+
+@router.get("/workflow/defaults")
+async def get_workflow_defaults() -> dict:
+    """获取工作流默认配置"""
+    from utils.config_loader import get_config
+    config = get_config()
+    return {
+        "success": True,
+        "defaults": config.workflow_defaults.model_dump()
+    }
+
+
+@router.post("/workflow/switch")
+async def switch_workflow(
+    workflow_type: str,
+    service: AIDrawService = Depends(get_ai_draw_service)
+) -> dict:
+    """切换工作流"""
+    service.switch_workflow(workflow_type)
+    return {"success": True, "workflow": workflow_type}

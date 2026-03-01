@@ -6,7 +6,8 @@ import {
   PictureOutlined, 
   ThunderboltOutlined,
   CloseOutlined,
-  StopOutlined
+  StopOutlined,
+  PlusOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
@@ -19,25 +20,32 @@ const { TextArea } = Input;
 export default function ChatInput() {
   const {
     prompt,
+    promptEnd,
     strength,
     count,
     loraPrompt,
     currentWorkflow,
     availableWorkflows,
     referenceImage,
+    referenceImageEnd,
     isGenerating,
     currentSessionId,
     setPrompt,
+    setPromptEnd,
     setCurrentWorkflow,
     setReferenceImage,
+    setReferenceImageEnd,
     setError,
     clearError,
   } = useAppStore();
+  const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+  const isFlf2v = workflowMeta?.requires_end_image === true;
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputEndRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<any>(null);
 
@@ -88,8 +96,13 @@ export default function ChatInput() {
       return;
     }
 
-    if (!prompt.trim()) {
-      message.warning('请先输入提示词');
+    if (isFlf2v && !referenceImage) {
+      message.warning('请上传开始帧图片');
+      return;
+    }
+
+    if (isFlf2v && !referenceImageEnd) {
+      message.warning('请上传结束帧图片');
       return;
     }
 
@@ -97,30 +110,33 @@ export default function ChatInput() {
 
     // 添加聊天消息（用户输入 + 加载占位符）
     // 使用用户选择的工作流
-    const messageId = await useAppStore.getState().addChatMessage(prompt, currentWorkflow, strength, count, loraPrompt);
+    const hasStrength = workflowMeta?.parameters?.some(p => p.name === 'strength') ?? false;
+    const effectiveStrength = hasStrength ? strength : undefined;
+    const messageId = await useAppStore.getState().addChatMessage(prompt, currentWorkflow, effectiveStrength, count, loraPrompt, isFlf2v ? promptEnd : undefined);
 
     try {
-      const res = await apiService.generateImage({
+      const state = useAppStore.getState();
+      // 接口立即返回，生成在后台执行，结果和错误通过 WebSocket 推送
+      await apiService.generateMedia({
         prompt,
         workflow: currentWorkflow,
         strength,
         count,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
-        width: useAppStore.getState().width || undefined,
-        height: useAppStore.getState().height || undefined,
+        width: state.width || undefined,
+        height: state.height || undefined,
+        prompt_end: isFlf2v ? (promptEnd || prompt) : undefined,
+        reference_image_end: isFlf2v ? (referenceImageEnd || undefined) : undefined,
+        use_original_size: state.useOriginalSize,
       });
-
-      // 图片通过 WebSocket 实时推送，这里只等待生成完成
-      // useAppStore.getState().updateChatImages(messageId, res.images);
-      message.success(`成功生成 ${res.count} 张图片!`);
-      // loading 状态由后端通过 WebSocket 自动设置为 false
+      // 任务已提交，无需在此处理结果
     } catch (err: any) {
-      // 生成失败，清除加载状态
+      // HTTP 层面失败（任务未能提交到后台）
       useAppStore.getState().updateChatImages(messageId, []);
+      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       setError(err.message);
-      message.error('生成失败: ' + err.message);
-      // loading 状态由后端通过 WebSocket 自动设置为 false
+      message.error('提交失败: ' + err.message);
     }
   };
 
@@ -162,6 +178,7 @@ export default function ChatInput() {
     setIsDragging(false);
 
     // 辅助函数：上传文件
+    // flf2v 模式下：首帧已有图时自动填充尾帧
     const uploadFile = async (file: File) => {
       const isImage = file.type.startsWith('image/');
       if (!isImage) {
@@ -175,13 +192,35 @@ export default function ChatInput() {
         return;
       }
 
+      // 判断要填充首帧还是尾帧
+      const currentState = useAppStore.getState();
+      const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
+
       try {
         const res = await apiService.uploadImage(file);
-        setReferenceImage(res.image);
-        message.success('上传成功!');
+        if (fillEnd) {
+          setReferenceImageEnd(res.image);
+          message.success('尾帧上传成功!');
+        } else {
+          setReferenceImage(res.image);
+          message.success('上传成功!');
+        }
       } catch (err: any) {
         setError(err.message);
         message.error('上传失败: ' + err.message);
+      }
+    };
+
+    // URL 直接设置的辅助函数（拖放 URL 时的 fallback）
+    const setImageUrl = (url: string) => {
+      const currentState = useAppStore.getState();
+      const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
+      if (fillEnd) {
+        setReferenceImageEnd(url);
+        message.success('尾帧已设置!');
+      } else {
+        setReferenceImage(url);
+        message.success('图片已设置!');
       }
     };
 
@@ -249,11 +288,9 @@ export default function ChatInput() {
         // 如果 fetch 失败，尝试直接使用 URL 作为参考图
         if (imageUrl.startsWith('/')) {
           // 相对路径，构建完整 URL 后设置
-          setReferenceImage(window.location.origin + imageUrl);
-          message.success('图片已设置!');
+          setImageUrl(window.location.origin + imageUrl);
         } else if (imageUrl.startsWith(window.location.origin)) {
-          setReferenceImage(imageUrl);
-          message.success('图片已设置!');
+          setImageUrl(imageUrl);
         } else {
           message.error('无法获取跨域图片，请尝试先保存到本地再上传');
         }
@@ -279,40 +316,133 @@ export default function ChatInput() {
           </div>
         )}
 
-        {/* 图片预览 */}
-        {referenceImage && (
-          <div className="chat-image-preview">
-            <div className="chat-image-preview-item">
-              <img src={referenceImage} alt="参考图" />
-              <div 
-                className="chat-image-preview-remove"
-                onClick={() => setReferenceImage(null)}
+        {/* flf2v 双帧输入布局 / 普通图文输入布局 */}
+        {isFlf2v ? (
+          <div className="flf2v-input-area">
+            {/* 双帧卡片 */}
+            <div className="flf2v-frames">
+              {/* 开始帧 */}
+              <div
+                className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
+                onClick={() => !referenceImage && fileInputRef.current?.click()}
+                title="上传开始帧"
               >
-                <CloseOutlined />
+                {referenceImage ? (
+                  <>
+                    <img src={referenceImage} alt="开始帧" />
+                    <div
+                      className="flf2v-frame-card-remove"
+                      onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
+                    >
+                      <CloseOutlined />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flf2v-frame-placeholder">
+                    <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                    <span className="flf2v-frame-placeholder-label">首帧</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 分隔符 */}
+              <span className="flf2v-frame-separator">⇄</span>
+
+              {/* 结束帧 */}
+              <div
+                className={`flf2v-frame-card ${referenceImageEnd ? 'has-image' : ''}`}
+                onClick={() => !referenceImageEnd && fileInputEndRef.current?.click()}
+                title="上传结束帧"
+              >
+                {referenceImageEnd ? (
+                  <>
+                    <img src={referenceImageEnd} alt="结束帧" />
+                    <div
+                      className="flf2v-frame-card-remove"
+                      onClick={(e) => { e.stopPropagation(); setReferenceImageEnd(null); }}
+                    >
+                      <CloseOutlined />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flf2v-frame-placeholder">
+                    <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                    <span className="flf2v-frame-placeholder-label">尾帧</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 文本输入：首帧 + 尾帧描述 */}
+            <div className="flf2v-prompts">
+              <div className="flf2v-prompt-item">
+                <span className="flf2v-prompt-label">首帧描述</span>
+                <TextArea
+                  ref={textAreaRef}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="描述开始帧画面内容..."
+                  className="chat-textarea"
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  onPressEnter={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                />
+              </div>
+              <div className="flf2v-prompt-divider" />
+              <div className="flf2v-prompt-item">
+                <span className="flf2v-prompt-label">尾帧描述</span>
+                <TextArea
+                  value={promptEnd}
+                  onChange={(e) => setPromptEnd(e.target.value)}
+                  placeholder="描述结束帧画面内容（留空则同首帧）..."
+                  className="chat-textarea"
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
               </div>
             </div>
           </div>
-        )}
+        ) : (
+          <>
+            {/* 普通模式图片预览 */}
+            {referenceImage && (
+              <div className="chat-image-preview">
+                <div className="chat-image-preview-item">
+                  <img src={referenceImage} alt="参考图" />
+                  <div
+                    className="chat-image-preview-remove"
+                    onClick={() => setReferenceImage(null)}
+                  >
+                    <CloseOutlined />
+                  </div>
+                </div>
+              </div>
+            )}
 
-        {/* 第一行：输入框 */}
-        <div className="chat-input-row">
-          <div className="chat-textarea-wrapper">
-            <TextArea
-              ref={textAreaRef}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="描述你想要生成的图片..."
-              className="chat-textarea"
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              onPressEnter={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-            />
-          </div>
-        </div>
+            {/* 普通模式输入框 */}
+            <div className="chat-input-row">
+              <div className="chat-textarea-wrapper">
+                <TextArea
+                  ref={textAreaRef}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="描述你想要生成的图片..."
+                  className="chat-textarea"
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  onPressEnter={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         {/* 第二行：功能按钮 */}
         <div className="chat-input-buttons">
@@ -325,13 +455,35 @@ export default function ChatInput() {
               style={{ display: 'none' }}
               onChange={handleImageUpload}
             />
-            <button
-              className="chat-input-icon-button"
-              onClick={() => fileInputRef.current?.click()}
-              title="上传图片"
-            >
-              <PictureOutlined />
-            </button>
+            {/* flf2v 结束帧上传 */}
+            <input
+              ref={fileInputEndRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (!file.type.startsWith('image/')) { message.error('只能上传图片文件!'); return; }
+                if (file.size / 1024 / 1024 >= 10) { message.error('图片大小不能超过 10MB!'); return; }
+                try {
+                  const res = await apiService.uploadImage(file);
+                  setReferenceImageEnd(res.image);
+                  message.success('结束帧上传成功!');
+                } catch (err: any) {
+                  message.error('上传失败: ' + err.message);
+                }
+              }}
+            />
+            {!isFlf2v && (
+              <button
+                className="chat-input-icon-button"
+                onClick={() => fileInputRef.current?.click()}
+                title="上传图片"
+              >
+                <PictureOutlined />
+              </button>
+            )}
 
             {/* 参数设置 */}
             <button 
@@ -369,7 +521,7 @@ export default function ChatInput() {
             type="primary"
             icon={isGenerating ? <StopOutlined /> : <SendOutlined />}
             onClick={handleSend}
-            disabled={!isGenerating && !prompt.trim()}
+            disabled={!isGenerating && isFlf2v && !referenceImage}
             className="chat-send-button"
             danger={isGenerating}
           />

@@ -87,6 +87,13 @@
   word-break: break-word;
 }
 
+.chat-message-text-end {
+  font-size: 14px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+}
+
 .chat-message-params {
   display: flex;
   gap: 6px;

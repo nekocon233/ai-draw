@@ -4,11 +4,17 @@ AI 绘画服务核心模块
 直接管理 ComfyUI 调用和状态
 """
 import asyncio
-from typing import Optional, Dict, Any
+import base64
+import uuid
+from io import BytesIO
+from pathlib import Path
+from typing import Optional, Any
+from PIL import Image
 from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
+from utils.media_processor import resize_image_base64, resize_video_bytes
 
 
 class AIDrawService:
@@ -26,8 +32,8 @@ class AIDrawService:
         self.is_generating_prompt = False
         self.is_service_available = False
         
-        # 预览图片列表
-        self.preview_images = []
+        # 预览列表
+        self.preview_items = []
         
         # 状态变化回调
         self.on_state_change = None
@@ -102,7 +108,7 @@ class AIDrawService:
             self.is_generating_prompt = False
             self._notify_state_change('is_generating_prompt', False)
     
-    async def generate_image(
+    async def generate_media(
         self,
         prompt: str,
         workflow: str = "t2i",
@@ -111,13 +117,16 @@ class AIDrawService:
         count: int = 1,
         reference_image: Optional[str] = None,
         width: Optional[int] = None,
-        height: Optional[int] = None
+        height: Optional[int] = None,
+        prompt_end: Optional[str] = None,
+        reference_image_end: Optional[str] = None,
+        use_original_size: bool = True,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
             self.is_generating = True
             self._notify_state_change('is_generating', True)
-            self._notify_state_change('generation_progress', '正在生成图像...')
+            self._notify_state_change('generation_progress', '正在生成...')
             
             # 使用用户选择的工作流
             workflow_type = workflow
@@ -127,7 +136,7 @@ class AIDrawService:
             if workflow_type != self.comfyui.get_current_workflow_type():
                 self.comfyui.switch_workflow(workflow_type)
             
-            # 处理参考图（如果有）
+            # 处理开始帧参考图（如果有）
             image_base64 = None
             if reference_image:
                 # 去除 data URL 前缀（如果有）
@@ -137,84 +146,186 @@ class AIDrawService:
                 else:
                     image_base64 = reference_image
             
-            # 生成多张图片
-            images = []
-            for i in range(count):
-                seed = None  # 让方法自动生成
+            # 处理结束帧参考图（如果有，flf2v 专用）
+            image_end_base64 = None
+            if reference_image_end:
+                if reference_image_end.startswith('data:image'):
+                    image_end_base64 = reference_image_end.split(',', 1)[1]
+                else:
+                    image_end_base64 = reference_image_end
+            
+            # 从配置中获取工作流元数据
+            config = get_config()
+            workflow_meta = config.workflow_defaults.workflow_metadata.get(workflow_type, {})
+            requires_image = workflow_meta.get('requires_image', False)
+
+            # 确定后处理 resize 目标尺寸（仅 supports_original_size 工作流生效）
+            target_width: Optional[int] = None
+            target_height: Optional[int] = None
+            if workflow_meta.get('supports_original_size', False):
+                if use_original_size and image_base64:
+                    try:
+                        img_bytes = base64.b64decode(image_base64)
+                        pil_img = Image.open(BytesIO(img_bytes))
+                        target_width, target_height = pil_img.size
+                        print(f"[AIDrawService] use_original_size: 读取原图尺寸 {target_width}x{target_height}")
+                    except Exception as e:
+                        print(f"[AIDrawService] 读取原图尺寸失败: {e}")
+                elif not use_original_size and width is not None and height is not None:
+                    target_width, target_height = width, height
+                    print(f"[AIDrawService] 目标输出尺寸: {target_width}x{target_height}")
+            
+            # ── flf2v：首尾帧生视频 ──────────────────────────────────────────
+            if workflow_type == 'flf2v':
+                if not image_base64:
+                    raise ValueError("flf2v 工作流需要提供开始帧图片")
+                if not image_end_base64:
+                    raise ValueError("flf2v 工作流需要提供结束帧图片")
                 
-                # 存储结果
-                result_images = []
+                seed = None
+                result_video = None
                 
-                # 定义回调函数
-                def finish_callback(base64_content):
-                    # 添加 data URL 前缀，让前端可以直接显示
-                    if base64_content and not base64_content.startswith('data:'):
-                        base64_content = f"data:image/png;base64,{base64_content}"
-                    result_images.append(base64_content)
-                    
-                    # 实时推送单张图片
-                    self._notify_state_change('image_generated', {
-                        'image': base64_content,
-                        'index': i,
-                        'total': count
+                def video_finish_callback(data):
+                    nonlocal result_video
+                    if data:
+                        try:
+                            # 解码 base64 视频数据并保存到文件，避免超大响应体
+                            raw = data.split(',', 1)[1] if data.startswith('data:') else data
+                            video_bytes = base64.b64decode(raw)
+                            # 后处理 resize（如有目标尺寸）
+                            if target_width is not None and target_height is not None:
+                                try:
+                                    video_bytes = resize_video_bytes(video_bytes, target_width, target_height)
+                                    print(f"[AIDrawService] 视频已 resize 至 {target_width}x{target_height}")
+                                except Exception as e:
+                                    print(f"[AIDrawService] 视频 resize 失败，使用原始视频: {e}")
+                            save_dir = Path("uploads/video")
+                            save_dir.mkdir(parents=True, exist_ok=True)
+                            filename = f"video_{uuid.uuid4().hex}.mp4"
+                            filepath = save_dir / filename
+                            with open(filepath, "wb") as vf:
+                                vf.write(video_bytes)
+                            result_video = f"/uploads/video/{filename}"
+                        except Exception as e:
+                            print(f"[AIDrawService] 保存视频文件失败: {e}")
+                            result_video = None
+                    else:
+                        result_video = None
+                    self._notify_state_change('media_generated', {
+                        'image': result_video,
+                        'index': 0,
+                        'total': 1
                     })
                 
-                # 根据工作流类型调用不同的方法
-                # 从配置中获取工作流元数据判断是否需要参考图
-                from utils.config_loader import get_config
-                config = get_config()
-                workflow_meta = config.workflow_defaults.workflow_metadata.get(workflow_type, {})
-                requires_image = workflow_meta.get('requires_image', False)
+                await self.comfyui.generate_flf2v(
+                    finish_callback=video_finish_callback,
+                    start_image_base64=image_base64,
+                    end_image_base64=image_end_base64,
+                    prompt_start=prompt,
+                    prompt_end=prompt_end or prompt,
+                    seed=seed,
+                )
                 
-                if requires_image:
-                    # 需要参考图的工作流
-                    if not image_base64:
-                        workflow_label = workflow_meta.get('label', workflow_type)
-                        raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
+                if result_video is None:
+                    raise Exception("视频生成失败：未收到有效视频数据")
+                
+                images = [result_video]
+                print(f"[AIDrawService] flf2v 视频生成成功")
+            
+            # ── 图像类工作流 ────────────────────────────────────────────────
+            else:
+                images = []
+                for i in range(count):
+                    seed = None  # 让方法自动生成
                     
-                    await self.comfyui.generate_i2i(
-                        finish_callback=finish_callback,
-                        image_base64=image_base64,
-                        prompt_text=prompt,
-                        denoise_value=strength,
-                        lora_prompt=lora_prompt or "",
-                        seed=seed,
-                        width=width,
-                        height=height
-                    )
-                else:
-                    # 文生图工作流
-                    await self.comfyui.generate_t2i(
-                        finish_callback=finish_callback,
-                        prompt_text=prompt,
-                        denoise_value=strength,
-                        lora_prompt=lora_prompt or "",
-                        seed=seed
-                    )
-                
-                if result_images and result_images[0] is not None:
-                    images.extend(result_images)
-                    print(f"[AIDrawService] 第 {i+1}/{count} 张生成成功")
-                else:
-                    error_msg = f"第 {i+1}/{count} 张生成失败：未收到有效图像数据"
-                    print(f"[AIDrawService] {error_msg}")
-                    raise Exception(error_msg)
+                    # 存储结果
+                    result_images = []
+                    
+                    # 定义回调函数（保存图片到文件后推送 URL，避免大 base64 撑爆 WebSocket）
+                    def finish_callback(base64_content, _i=i):
+                        if not base64_content:
+                            result_images.append(None)
+                            self._notify_state_change('media_generated', {
+                                'image': None, 'index': _i, 'total': count
+                            })
+                            return
+                        # 去除 data URL 前缀
+                        raw = base64_content.split(',', 1)[1] if base64_content.startswith('data:') else base64_content
+                        # 后处理 resize（如有目标尺寸）
+                        if target_width is not None and target_height is not None:
+                            try:
+                                raw = resize_image_base64(raw, target_width, target_height)
+                                print(f"[AIDrawService] 图像已 resize 至 {target_width}x{target_height}")
+                            except Exception as e:
+                                print(f"[AIDrawService] resize 失败，使用原始图像: {e}")
+                        # 保存到文件
+                        save_dir = Path("uploads/generated")
+                        save_dir.mkdir(parents=True, exist_ok=True)
+                        filename = f"img_{uuid.uuid4().hex}.png"
+                        filepath = save_dir / filename
+                        try:
+                            with open(filepath, "wb") as _f:
+                                _f.write(base64.b64decode(raw))
+                            image_url = f"/uploads/generated/{filename}"
+                        except Exception as e:
+                            print(f"[AIDrawService] 保存图片文件失败: {e}")
+                            # 降级：发送 base64（小图片时可用）
+                            image_url = f"data:image/png;base64,{raw}"
+                        result_images.append(image_url)
+                        # 推送文件 URL（轻量），不再推送完整 base64
+                        self._notify_state_change('media_generated', {
+                            'image': image_url,
+                            'index': _i,
+                            'total': count
+                        })
+                    
+                    if requires_image:
+                        # 需要参考图的工作流
+                        if not image_base64:
+                            workflow_label = workflow_meta.get('label', workflow_type)
+                            raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
+                        
+                        await self.comfyui.generate_i2i(
+                            finish_callback=finish_callback,
+                            image_base64=image_base64,
+                            prompt_text=prompt,
+                            denoise_value=strength,
+                            lora_prompt=lora_prompt or "",
+                            seed=seed,
+                        )
+                    else:
+                        # 文生图工作流
+                        await self.comfyui.generate_t2i(
+                            finish_callback=finish_callback,
+                            prompt_text=prompt,
+                            denoise_value=strength,
+                            lora_prompt=lora_prompt or "",
+                            seed=seed
+                        )
+                    
+                    if result_images and result_images[0] is not None:
+                        images.extend(result_images)
+                        print(f"[AIDrawService] 第 {i+1}/{count} 张生成成功")
+                    else:
+                        error_msg = f"第 {i+1}/{count} 张生成失败：未收到有效图像数据"
+                        print(f"[AIDrawService] {error_msg}")
+                        raise Exception(error_msg)
             
             # 添加到预览列表
             if images:
                 for img in images:
                     preview_data = {
-                        'id': len(self.preview_images) + 1,
+                        'id': len(self.preview_items) + 1,
                         'image': img,
                         'workflow': workflow_type
                     }
-                    self.preview_images.append(preview_data)
+                    self.preview_items.append(preview_data)
                     self._notify_state_change('preview_update', {
                         'action': 'add',
                         'data': preview_data
                     })
             
-            self._notify_state_change('generation_progress', '图像生成完成')
+            self._notify_state_change('generation_progress', '生成完成')
             return images
             
         except Exception as e:
@@ -227,7 +338,7 @@ class AIDrawService:
     
     def clear_previews(self):
         """清空预览图片"""
-        self.preview_images = []
+        self.preview_items = []
         self._notify_state_change('preview_update', {'action': 'clear'})
     
     def switch_workflow(self, workflow_type: str):

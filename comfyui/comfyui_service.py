@@ -5,7 +5,6 @@ import tempfile
 from comfy_api_simplified import ComfyWorkflowWrapper
 
 from comfyui.structures.comfyui_request_state import ComfyUIRequestState
-from utils.image_processor import ImageProcessor
 from utils.thread_runner import ThreadRunner
 from utils.config_loader import get_config
 
@@ -18,7 +17,6 @@ class ComfyUIService:
     def __init__(self, request):
 
         self.request = request
-        self.image_processor = ImageProcessor()
 
         self.workflow = None
         self.temp_workflow_file = None  # 存储临时工作流文件路径
@@ -189,8 +187,9 @@ class ComfyUIService:
             finish_callback(result.data)
         else:
             print(f"[ComfyUIService] T2I生成失败: {result.error}")
+            finish_callback(None)
 
-    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None, width=None, height=None):
+    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None):
         """
         图生图（Image-to-Image）
         image_base64: 原始图片base64
@@ -198,24 +197,56 @@ class ComfyUIService:
         denoise_value: 去噪强度
         lora_prompt: lora提示词
         seed: 随机种子
-        width: 图像宽度（可选，部分工作流支持）
-        height: 图像高度（可选，部分工作流支持）
         finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
         """
         if seed is None:
             # 限制为有符号 64 位整数范围，避免 ComfyUI 返回 400 错误
             seed = random.randrange(0, 2**63)
 
-        img, orig_size = self.image_processor.convert_to_base64(image_base64)
-        image_b64, valid_region = self.image_processor.prepare_image_base64(img)
-
         # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_i2i(self.workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width, height)
+        result = await self.request.generate_i2i(self.workflow, image_base64, prompt_text, denoise_value, lora_prompt, seed)
         if result.is_success:
             print(f"[ComfyUIService] I2I生成成功")
             finish_callback(result.data)
         else:
             print(f"[ComfyUIService] I2I生成失败: {result.error}")
+            finish_callback(None)
+
+    async def generate_flf2v(
+        self,
+        finish_callback,
+        start_image_base64: str,
+        end_image_base64: str,
+        prompt_start: str,
+        prompt_end: str,
+        seed=None,
+    ):
+        """
+        首尾帧生视频（First-Last-Frame to Video）
+        start_image_base64: 开始帧图片 base64
+        end_image_base64:   结束帧图片 base64
+        prompt_start:       开始帧描述
+        prompt_end:         结束帧描述
+        seed:               随机种子
+        finish_callback:    完成回调，参数为 base64 视频内容（失败为 None）
+        """
+        if seed is None:
+            seed = random.randrange(0, 2**63)
+
+        result = await self.request.generate_flf2v(
+            self.workflow,
+            start_image_base64,
+            end_image_base64,
+            prompt_start,
+            prompt_end,
+            seed,
+        )
+        if result.is_success:
+            print("[ComfyUIService] FLF2V 视频生成成功")
+            finish_callback(result.data)
+        else:
+            print(f"[ComfyUIService] FLF2V 视频生成失败: {result.error}")
+            finish_callback(None)  # 确保回调被调用，触发 image_generated 事件
 
     async def get_state(self) -> ComfyUIRequestState:
         """

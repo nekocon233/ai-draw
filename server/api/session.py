@@ -40,6 +40,8 @@ class SessionConfigRequest(BaseModel):
     count: Optional[int] = None
     images_per_row: Optional[int] = None
     reference_image: Optional[str] = None
+    prompt_end: Optional[str] = None
+    reference_image_end: Optional[str] = None
 
 # ============ 会话管理 API ============
 
@@ -205,6 +207,10 @@ def update_session_config(
         session.config_images_per_row = update_data['images_per_row']
     if 'reference_image' in update_data:
         session.config_reference_image = update_data['reference_image']
+    if 'prompt_end' in update_data:
+        session.config_prompt_end = update_data['prompt_end']
+    if 'reference_image_end' in update_data:
+        session.config_reference_image_end = update_data['reference_image_end']
     
     session.updated_at = datetime.now()
     db.commit()
@@ -239,4 +245,6 @@ def get_session_config(
         "count": session.config_count,
         "images_per_row": session.config_images_per_row,
         "reference_image": session.config_reference_image,
+        "prompt_end": session.config_prompt_end,
+        "reference_image_end": session.config_reference_image_end,
     }

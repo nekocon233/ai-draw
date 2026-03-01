@@ -30,10 +30,12 @@ export default function ResultGrid() {
     }
   }, [chatHistory, currentSessionId]);
 
+  const isVideo = (url: string) => url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url) || url.includes('/video/');
+
   const downloadImage = (imageUrl: string, index: number) => {
     const link = document.createElement('a');
     link.href = imageUrl;
-    link.download = `ai-draw-${Date.now()}-${index + 1}.png`;
+    link.download = `ai-draw-${Date.now()}-${index + 1}.${isVideo(imageUrl) ? 'mp4' : 'png'}`;
     link.click();
   };
 
@@ -61,10 +63,15 @@ export default function ResultGrid() {
               <div className="chat-message-content user-message">
                 <div className="chat-message-bubble">
                   <div className="chat-message-text">{message.content}</div>
+                  {message.params?.promptEnd && (
+                    <div className="chat-message-text chat-message-text-end">{message.params.promptEnd}</div>
+                  )}
                   {message.params && (
                     <div className="chat-message-params">
                       <Tag>{message.params.workflow}</Tag>
-                      <Tag>强度: {message.params.strength}</Tag>
+                      {message.params.strength !== undefined && (
+                        <Tag>强度: {message.params.strength}</Tag>
+                      )}
                       <Tag>数量: {message.params.count}</Tag>
                       {message.params.loraPrompt && (
                         <Tag>LoRA: {message.params.loraPrompt}</Tag>
@@ -85,26 +92,48 @@ export default function ResultGrid() {
                       {typeof image === 'string' ? (
                         <div 
                           className="chat-image-wrapper"
-                          draggable={true}
+                          draggable={!isVideo(image)}
                           onDragStart={(e) => {
+                            if (isVideo(image)) return;
                             // 设置拖放数据，确保目标可以接收到图片 URL
                             e.dataTransfer.setData('text/uri-list', image);
                             e.dataTransfer.setData('text/plain', image);
                             e.dataTransfer.effectAllowed = 'copy';
                             
-                            // 创建拖放时的预览图
-                            const img = new window.Image();
-                            img.src = image;
-                            e.dataTransfer.setDragImage(img, 50, 50);
+                            // 用已渲染的 img 元素同步绘制缩略图，避免显示原图大尺寸
+                            const PREVIEW_SIZE = 120;
+                            const imgEl = (e.currentTarget as HTMLElement).querySelector('img');
+                            const canvas = document.createElement('canvas');
+                            canvas.width = PREVIEW_SIZE;
+                            canvas.height = PREVIEW_SIZE;
+                            canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+                            document.body.appendChild(canvas);
+                            if (imgEl) {
+                              const ctx = canvas.getContext('2d');
+                              const scale = Math.min(PREVIEW_SIZE / imgEl.naturalWidth, PREVIEW_SIZE / imgEl.naturalHeight);
+                              const w = imgEl.naturalWidth * scale;
+                              const h = imgEl.naturalHeight * scale;
+                              ctx?.drawImage(imgEl, (PREVIEW_SIZE - w) / 2, (PREVIEW_SIZE - h) / 2, w, h);
+                            }
+                            e.dataTransfer.setDragImage(canvas, PREVIEW_SIZE / 2, PREVIEW_SIZE / 2);
+                            setTimeout(() => document.body.removeChild(canvas), 0);
                           }}
-                          style={{ cursor: 'grab' }}
+                          style={{ cursor: isVideo(image) ? 'default' : 'grab' }}
                         >
-                          <Image
-                            src={image}
-                            alt={`生成图片 ${imgIndex + 1}`}
-                            className="chat-image"
-                            preview={{ mask: '预览' }}
-                          />
+                          {isVideo(image) ? (
+                            <video
+                              src={image}
+                              controls
+                              style={{ width: '100%', maxHeight: 400, borderRadius: 4, display: 'block' }}
+                            />
+                          ) : (
+                            <Image
+                              src={image}
+                              alt={`生成图片 ${imgIndex + 1}`}
+                              className="chat-image"
+                              preview={{ mask: '预览' }}
+                            />
+                          )}
                           <div className="chat-image-overlay">
                             <Button
                               type="primary"

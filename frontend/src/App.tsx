@@ -82,6 +82,23 @@ function AppContent() {
 
     // 订阅 WebSocket 消息
     const unsubscribe = wsManager.subscribe((message) => {
+      // 处理初始状态（连接/重连时服务端推送）
+      if (message.type === 'initial_state' && message.data) {
+        // 若服务端未在生成，但前端仍认为在生成（服务重启/断线场景），立即重置
+        if (!message.data.is_generating) {
+          const { currentGeneratingMessageId, isGenerating } = useAppStore.getState();
+          if (isGenerating || currentGeneratingMessageId) {
+            // 清除 loading 占位符，避免消息气泡一直显示"生成中"
+            if (currentGeneratingMessageId) {
+              useAppStore.getState().updateChatImages(currentGeneratingMessageId, []);
+            }
+            useAppStore.setState({ isGenerating: false, currentGeneratingMessageId: null });
+            messageApi.warning('连接已恢复，生成任务状态已重置');
+          }
+        }
+        return;
+      }
+
       if (message.type === WS_MESSAGE_TYPES.STATE_CHANGE) {
         // 监听生成状态变化（仅当前设备有生成任务时才更新）
         if (message.field === STATE_FIELDS.IS_GENERATING) {
@@ -95,25 +112,36 @@ function AppContent() {
             if (wasGenerating && !message.value) {
               const currentHistory = useAppStore.getState().chatHistory;
               const msg = currentHistory.find(m => m.id === currentGeneratingMessageId);
-              if (msg && msg.images) {
-                useAppStore.getState().updateChatImages(
-                  currentGeneratingMessageId, 
-                  msg.images.filter(img => typeof img === 'string') as string[]
-                );
+              const images = (msg?.images?.filter(img => typeof img === 'string') ?? []) as string[];
+              // 无论是否有图片，都必须调用 updateChatImages 清除 loading 占位符
+              useAppStore.getState().updateChatImages(currentGeneratingMessageId, images);
+              if (images.length > 0) {
+                const isVideo = images.some(u => /\.(mp4|webm)$/i.test(u) || u.includes('/video/'));
+                messageApi.success(`生成完成！共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
               }
               // 清除当前生成任务ID
               useAppStore.setState({ currentGeneratingMessageId: null });
             }
           }
         }
+
+        // 监听生成错误（WebSocket 推送错误信息）
+        if (message.field === STATE_FIELDS.ERROR && message.value) {
+          const { currentGeneratingMessageId } = useAppStore.getState();
+          if (currentGeneratingMessageId) {
+            useAppStore.getState().updateChatImages(currentGeneratingMessageId, []);
+            useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
+          }
+          messageApi.error('生成失败: ' + message.value);
+        }
         
         // 监听单张图片生成完成
-        if (message.field === STATE_FIELDS.IMAGE_GENERATED && message.value) {
+        if (message.field === STATE_FIELDS.MEDIA_GENERATED && message.value) {
           const { image, index } = message.value;
           // 只处理当前设备正在生成的消息
           const { currentGeneratingMessageId } = useAppStore.getState();
           if (currentGeneratingMessageId) {
-            useAppStore.getState().appendChatImage(currentGeneratingMessageId, image, index);
+            useAppStore.getState().appendChatMedia(currentGeneratingMessageId, image, index);
           }
         }
       }

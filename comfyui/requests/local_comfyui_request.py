@@ -113,6 +113,37 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         #     self.log_thread.join(timeout=1)
         #     self.log_thread = None
 
+    async def _queue_and_poll(self, workflow, timeout: int = 3600, poll_interval: float = 3.0) -> str:
+        """
+        提交工作流并轮询历史 API 等待完成，避免 WebSocket 超时导致挂死。
+        返回 prompt_id，超时或失败时抛出异常。
+        """
+        # queue_prompt 返回 {"prompt_id": "...", "number": ..., "node_errors": {}}
+        resp = await asyncio.to_thread(self.api.queue_prompt, workflow)
+        prompt_id = resp["prompt_id"]
+        print(f"[LocalComfyUIRequest] 任务已提交 prompt_id={prompt_id}，开始轮询...")
+
+        elapsed = 0.0
+        while elapsed < timeout:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            try:
+                history = await asyncio.to_thread(self.api.get_history, prompt_id)
+                if prompt_id in history:
+                    status_str = history[prompt_id].get("status", {}).get("status_str", "")
+                    if status_str == "success":
+                        print(f"[LocalComfyUIRequest] 任务完成 (耗时 {elapsed:.0f}s)")
+                        return prompt_id
+                    if status_str in ("error", "failed"):
+                        msgs = history[prompt_id].get("status", {}).get("messages", [])
+                        raise RuntimeError(f"ComfyUI 执行失败: {msgs}")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 轮询出错（继续重试）: {e}")
+
+        raise TimeoutError(f"ComfyUI 执行超时（{timeout}s）")
+
     async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed):
         """
         异步发送T2I生成请求，返回ComfyRequestResult对象
@@ -138,10 +169,10 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
 
         print("[LocalComfyUIRequest] T2I workflow参数设置完成")
 
-        # 执行工作流
-        prompt_id = await self.api.queue_prompt_and_wait(workflow)
+        # 执行工作流（使用 HTTP 轮询，避免 WebSocket 超时）
+        prompt_id = await self._queue_and_poll(workflow)
         image_node_id = workflow.get_node_id("保存图像")
-        history = self.api.get_history(prompt_id)
+        history = await asyncio.to_thread(self.api.get_history, prompt_id)
         results = history[prompt_id]["outputs"][image_node_id]["images"]
 
         if results:
@@ -151,11 +182,9 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
         return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
 
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None):
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed):
         """
         异步发送I2I生成请求，返回ComfyRequestResult对象
-        width: 图像宽度（可选）
-        height: 图像高度（可选）
         """
         # 先在系统tmp目录下根据image_b64创建临时图片
         input_filename = os.path.join(tempfile.gettempdir(), "input_image.png")
@@ -173,7 +202,12 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
 
         # 设置workflow参数
         try:
-            workflow.set_node_param("main_image", "image", f"{image_metadata['subfolder']}/{image_metadata['name']}")
+            img_path = (
+                f"{image_metadata['subfolder']}/{image_metadata['name']}"
+                if image_metadata.get('subfolder')
+                else image_metadata['name']
+            )
+            workflow.set_node_param("main_image", "image", img_path)
             print("[LocalComfyUIRequest] main_image参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置main_image参数失败: {str(e)}")
@@ -202,27 +236,12 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置seed参数失败: {str(e)}")
 
-        # 设置可选的 width 和 height 参数
-        if width is not None:
-            try:
-                workflow.set_node_param("width", "value", width)
-                print(f"[LocalComfyUIRequest] width参数设置成功: {width}")
-            except Exception as e:
-                print(f"[LocalComfyUIRequest] 设置width参数失败（工作流可能不支持）: {str(e)}")
-
-        if height is not None:
-            try:
-                workflow.set_node_param("height", "value", height)
-                print(f"[LocalComfyUIRequest] height参数设置成功: {height}")
-            except Exception as e:
-                print(f"[LocalComfyUIRequest] 设置height参数失败（工作流可能不支持）: {str(e)}")
-
         print("[LocalComfyUIRequest] I2I workflow参数设置完成")
 
-        # 执行工作流
-        prompt_id = await self.api.queue_prompt_and_wait(workflow)
+        # 执行工作流（使用 HTTP 轮询，避免 WebSocket 超时）
+        prompt_id = await self._queue_and_poll(workflow)
         image_node_id = workflow.get_node_id("保存图像")
-        history = self.api.get_history(prompt_id)
+        history = await asyncio.to_thread(self.api.get_history, prompt_id)
         results = history[prompt_id]["outputs"][image_node_id]["images"]
 
         if results:
@@ -231,6 +250,97 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                                                 first_result["type"])
             return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
         return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
+
+    async def generate_flf2v(
+        self,
+        workflow,
+        start_image_base64: str,
+        end_image_base64: str,
+        prompt_start: str,
+        prompt_end: str,
+        seed: int,
+    ):
+        """
+        首尾帧生视频（FLF2V）请求
+        """
+        # 写入并上传开始帧图片
+        start_filename = os.path.join(tempfile.gettempdir(), "flf2v_start.png")
+        end_filename = os.path.join(tempfile.gettempdir(), "flf2v_end.png")
+        try:
+            async with aiofiles.open(start_filename, "wb") as f:
+                await f.write(base64.b64decode(start_image_base64))
+            async with aiofiles.open(end_filename, "wb") as f:
+                await f.write(base64.b64decode(end_image_base64))
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"写入临时图片失败: {str(e)}")
+
+        try:
+            start_meta = self.api.upload_image(start_filename)
+            end_meta = self.api.upload_image(end_filename)
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"上传图片失败: {str(e)}")
+
+        # 设置开始帧图片
+        try:
+            workflow.set_node_param("main_image_start", "image",
+                f"{start_meta['subfolder']}/{start_meta['name']}" if start_meta.get('subfolder') else start_meta['name'])
+            print("[LocalComfyUIRequest] main_image_start 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 main_image_start 失败: {e}")
+
+        # 设置结束帧图片
+        try:
+            workflow.set_node_param("main_image_end", "image",
+                f"{end_meta['subfolder']}/{end_meta['name']}" if end_meta.get('subfolder') else end_meta['name'])
+            print("[LocalComfyUIRequest] main_image_end 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 main_image_end 失败: {e}")
+
+        # 设置开始帧提示词
+        try:
+            workflow.set_node_param("positive_prompt_start", "positive", prompt_start)
+            print("[LocalComfyUIRequest] positive_prompt_start 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 positive_prompt_start 失败: {e}")
+
+        # 设置结束帧提示词
+        try:
+            workflow.set_node_param("positive_prompt_end", "positive", prompt_end)
+            print("[LocalComfyUIRequest] positive_prompt_end 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 positive_prompt_end 失败: {e}")
+
+        # 设置 seed
+        try:
+            workflow.set_node_param("seed", "value", seed)
+            print(f"[LocalComfyUIRequest] seed 设置成功: {seed}")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 seed 失败: {e}")
+
+        print("[LocalComfyUIRequest] FLF2V workflow 参数设置完成")
+
+        # 执行工作流 - 使用轮询替代 WebSocket 等待，避免长时间生成超时卡死
+        prompt_id = await self._queue_and_poll(workflow, timeout=3600)
+        video_node_id = workflow.get_node_id("保存视频")
+        history = await asyncio.to_thread(self.api.get_history, prompt_id)
+        node_output = history[prompt_id]["outputs"].get(video_node_id, {})
+        print(f"[LocalComfyUIRequest] FLF2V 视频节点输出 keys: {list(node_output.keys())}")
+
+        # SaveVideo 节点可能用 'videos'、'gifs' 或 'images'（mp4）作为字段
+        results = node_output.get("videos") or node_output.get("gifs") or node_output.get("images") or []
+        if results:
+            first_result = results[0]
+            video_bytes = self.api.get_image(
+                first_result["filename"],
+                first_result.get("subfolder", ""),
+                first_result.get("type", "output"),
+            )
+            return ComfyUIRequestResult(
+                success=True,
+                data=base64.b64encode(video_bytes).decode('utf-8'),
+                error="",
+            )
+        return ComfyUIRequestResult(success=False, data=None, error="FLF2V 未获得有效视频结果")
 
     async def get_state(self) -> ComfyUIRequestState:
         """异步检查本地ComfyUI服务状态"""

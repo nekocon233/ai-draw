@@ -80,9 +80,10 @@ export interface ChatMessage {
   timestamp: number;
   params?: {
     workflow: string;
-    strength: number;
+    strength?: number;
     count: number;
     loraPrompt?: string;
+    promptEnd?: string;
   };
 }
 
@@ -166,7 +167,7 @@ export interface ServiceStatus {
  */
 export interface WSStateChangeMessage {
   type: 'state_change';
-  field: 'is_generating' | 'image_generated' | 'preview_update' | 'generation_progress';
+  field: 'is_generating' | 'media_generated' | 'preview_update' | 'generation_progress';
   value: any;
 }
 
@@ -208,9 +209,9 @@ export interface AuthResponse {
 }
 
 /**
- * 图片生成响应
+ * 媒体生成响应
  */
-export interface GenerateImageResponse {
+export interface GenerateMediaResponse {
   count: number;
   images: string[];
 }

@@ -70,44 +70,24 @@
       "title": "Math Expression"
     }
   },
-  "70:43": {
+  "83": {
     "inputs": {
-      "samples": [
-        "70:44",
-        0
-      ],
-      "vae": [
-        "70:40",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE解码"
-    }
-  },
-  "70:69": {
-    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "pad_edge",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "gpu",
       "image": [
         "77",
         0
       ]
     },
-    "class_type": "GetImageSize",
+    "class_type": "ImageResizeKJv2",
     "_meta": {
-      "title": "获取图像尺寸"
-    }
-  },
-  "70:42": {
-    "inputs": {
-      "conditioning": [
-        "70:45",
-        0
-      ]
-    },
-    "class_type": "ConditioningZeroOut",
-    "_meta": {
-      "title": "条件零化"
+      "title": "Resize Image v2"
     }
   },
   "70:40": {
@@ -119,23 +99,6 @@
       "title": "加载VAE"
     }
   },
-  "70:41": {
-    "inputs": {
-      "width": [
-        "70:69",
-        0
-      ],
-      "height": [
-        "70:69",
-        1
-      ],
-      "batch_size": 1
-    },
-    "class_type": "EmptySD3LatentImage",
-    "_meta": {
-      "title": "空Latent图像（SD3）"
-    }
-  },
   "70:64": {
     "inputs": {
       "name": "Z-Image-Turbo-Fun-Controlnet-Union.safetensors"
@@ -145,43 +108,56 @@
       "title": "ModelPatchLoader"
     }
   },
-  "70:47": {
+  "70:46": {
     "inputs": {
-      "shift": 3,
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "fp8_e4m3fn"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "70:39": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "70:41": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "70:86": {
+    "inputs": {
+      "text": [
+        "76",
+        0
+      ],
       "model": [
-        "70:74",
+        "70:46",
+        0
+      ],
+      "clip": [
+        "70:39",
         0
       ]
     },
-    "class_type": "ModelSamplingAuraFlow",
+    "class_type": "PCLazyLoraLoader",
     "_meta": {
-      "title": "采样算法（AuraFlow）"
-    }
-  },
-  "70:71": {
-    "inputs": {
-      "preprocessor": "AnimeLineArtPreprocessor",
-      "resolution": 1024,
-      "image": [
-        "77",
-        0
-      ]
-    },
-    "class_type": "AIO_Preprocessor",
-    "_meta": {
-      "title": "AIO Aux Preprocessor"
-    }
-  },
-  "70:84": {
-    "inputs": {
-      "images": [
-        "70:71",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "预览图像"
+      "title": "PC: Schedule LoRAs"
     }
   },
   "70:70": {
@@ -189,13 +165,43 @@
       "preprocessor": "DepthAnythingV2Preprocessor",
       "resolution": 1024,
       "image": [
-        "77",
+        "83",
         0
       ]
     },
     "class_type": "AIO_Preprocessor",
     "_meta": {
       "title": "AIO Aux Preprocessor"
+    }
+  },
+  "70:71": {
+    "inputs": {
+      "preprocessor": "AnimeLineArtPreprocessor",
+      "resolution": 1024,
+      "image": [
+        "83",
+        0
+      ]
+    },
+    "class_type": "AIO_Preprocessor",
+    "_meta": {
+      "title": "AIO Aux Preprocessor"
+    }
+  },
+  "70:45": {
+    "inputs": {
+      "text": [
+        "74",
+        0
+      ],
+      "clip": [
+        "70:86",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
     }
   },
   "70:73": {
@@ -223,20 +229,40 @@
       "title": "QwenImageDiffsynthControlnet"
     }
   },
-  "70:45": {
+  "70:81": {
     "inputs": {
-      "text": [
-        "74",
+      "images": [
+        "70:70",
         0
-      ],
-      "clip": [
-        "70:86",
-        1
       ]
     },
-    "class_type": "CLIPTextEncode",
+    "class_type": "PreviewImage",
     "_meta": {
-      "title": "CLIP文本编码"
+      "title": "预览图像"
+    }
+  },
+  "70:84": {
+    "inputs": {
+      "images": [
+        "70:71",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "70:42": {
+    "inputs": {
+      "conditioning": [
+        "70:45",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
     }
   },
   "70:74": {
@@ -267,26 +293,17 @@
       "title": "QwenImageDiffsynthControlnet"
     }
   },
-  "70:46": {
+  "70:47": {
     "inputs": {
-      "unet_name": "z_image_turbo_bf16.safetensors",
-      "weight_dtype": "fp8_e4m3fn"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "UNet加载器"
-    }
-  },
-  "70:81": {
-    "inputs": {
-      "images": [
-        "70:70",
+      "shift": 3,
+      "model": [
+        "70:74",
         0
       ]
     },
-    "class_type": "PreviewImage",
+    "class_type": "ModelSamplingAuraFlow",
     "_meta": {
-      "title": "预览图像"
+      "title": "采样算法（AuraFlow）"
     }
   },
   "70:44": {
@@ -322,35 +339,20 @@
       "title": "K采样器"
     }
   },
-  "70:39": {
+  "70:43": {
     "inputs": {
-      "clip_name": "qwen_3_4b.safetensors",
-      "type": "lumina2",
-      "device": "default"
-    },
-    "class_type": "CLIPLoader",
-    "_meta": {
-      "title": "加载CLIP"
-    }
-  },
-  "70:86": {
-    "inputs": {
-      "text": [
-        "76",
+      "samples": [
+        "70:44",
         0
       ],
-      "model": [
-        "70:46",
-        0
-      ],
-      "clip": [
-        "70:39",
+      "vae": [
+        "70:40",
         0
       ]
     },
-    "class_type": "PCLazyLoraLoader",
+    "class_type": "VAEDecode",
     "_meta": {
-      "title": "PC: Schedule LoRAs"
+      "title": "VAE解码"
     }
   }
 }

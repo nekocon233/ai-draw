@@ -38,6 +38,20 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    async def generate_flf2v(
+        self,
+        workflow,
+        start_image_base64: str,
+        end_image_base64: str,
+        prompt_start: str,
+        prompt_end: str,
+        seed: int,
+    ) -> ComfyUIRequestResult:
+        """
+        首尾帧生视频（First-Last-Frame to Video）推理请求，由子类实现
+        """
+
+    @abstractmethod
     async def get_state(self) -> ComfyUIRequestState:
         """
         获取ComfyUI服务的当前状态，由子类实现

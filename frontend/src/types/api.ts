@@ -19,19 +19,22 @@ export interface GeneratePromptResponse {
   prompt: string;
 }
 
-// 生成图像请求
-export interface GenerateImageRequest {
+// 生成媒体请求
+export interface GenerateMediaRequest {
   prompt: string;
   workflow?: string;
-  strength: number;
+  strength?: number;
   lora_prompt?: string;
   count: number;
   reference_image?: string;
   width?: number;
   height?: number;
+  prompt_end?: string;
+  reference_image_end?: string;
+  use_original_size?: boolean;
 }
 
-export interface GenerateImageResponse {
+export interface GenerateMediaResponse {
   success: boolean;
   images: string[];
   count: number;
@@ -60,6 +63,9 @@ export interface WorkflowMetadata {
   label: string;
   description: string;
   requires_image: boolean;
+  requires_end_image?: boolean;
+  supports_original_size?: boolean;
+  output_type?: string;   // 'image' | 'video'
   parameters: WorkflowParameter[];
 }
 
@@ -70,7 +76,7 @@ export interface WorkflowsResponse {
 
 // WebSocket 消息类型
 export interface WSMessage {
-  type: 'state_change' | 'progress' | 'error' | 'result';
+  type: 'state_change' | 'progress' | 'error' | 'result' | 'initial_state';
   field?: string;
   value?: any;
   data?: any;
