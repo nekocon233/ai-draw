@@ -235,6 +235,10 @@ def get_chat_history(
             }
             if msg.reference_image:
                 params["referenceImage"] = msg.reference_image
+            if msg.reference_image_2:
+                params["referenceImage2"] = msg.reference_image_2
+            if msg.reference_image_3:
+                params["referenceImage3"] = msg.reference_image_3
             if msg.reference_image_end:
                 params["referenceImageEnd"] = msg.reference_image_end
             if msg.prompt_end:
@@ -426,6 +430,8 @@ def save_chat_message(
             count=message.get("count"),
             lora_prompt=message.get("lora_prompt"),
             reference_image=message.get("reference_image"),
+            reference_image_2=message.get("reference_image_2"),
+            reference_image_3=message.get("reference_image_3"),
             reference_image_end=message.get("reference_image_end"),
             prompt_end=message.get("prompt_end"),
             frame_rate=message.get("frame_rate"),

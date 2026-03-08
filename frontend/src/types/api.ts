@@ -27,6 +27,8 @@ export interface GenerateMediaRequest {
   lora_prompt?: string;
   count: number;
   reference_image?: string;
+  reference_image_2?: string;  // i2i 第 2 张参考图
+  reference_image_3?: string;  // i2i 第 3 张参考图
   width?: number;
   height?: number;
   prompt_end?: string;

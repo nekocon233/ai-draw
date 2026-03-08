@@ -34,6 +34,8 @@ interface ChatMessage {
     loraPrompt?: string;       // LoRA 提示词
     promptEnd?: string;        // 结束帧提示词
     referenceImage?: string;   // 参考图 base64
+    referenceImage2?: string;  // i2i 第 2 张参考图
+    referenceImage3?: string;  // i2i 第 3 张参考图
     referenceImageEnd?: string; // 尾帧参考图 base64
     isLoop?: boolean;          // flf2v 是否循环
     frameRate?: number;        // flf2v 帧率
@@ -78,7 +80,18 @@ interface AppState {
   
   // 参考图片
   referenceImage: string | null;
+  referenceImage2: string | null; // i2i 第 2 张参考图
+  referenceImage3: string | null; // i2i 第 3 张参考图
   referenceImageEnd: string | null; // flf2v 结束帧
+
+  // 工作流图片暂存（切换工作流时保存各工作流的图片，切回时恢复）
+  workflowImageStash: Record<string, {
+    referenceImage: string | null;
+    referenceImage2: string | null;
+    referenceImage3: string | null;
+    referenceImageEnd: string | null;
+    promptEnd: string;
+  }>;
   
   // UI 状态
   loading: boolean;
@@ -103,8 +116,10 @@ interface AppState {
   setEndFrameCount: (v: number | null) => void;
   setFrameRate: (v: number | null) => void;
   setReferenceImage: (image: string | null) => void;
+  setReferenceImage2: (image: string | null) => void;
+  setReferenceImage3: (image: string | null) => void;
   setReferenceImageEnd: (image: string | null) => void;
-  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null }) => Promise<string>;
+  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null }) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   clearChatHistory: () => void;
@@ -173,7 +188,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   endFrameCount: null,
   frameRate: null,
   referenceImage: initialConfig.referenceImage,
+  referenceImage2: null,
+  referenceImage3: null,
   referenceImageEnd: null,
+  workflowImageStash: {},
   chatHistory: [],
   loading: false,
   error: null,
@@ -205,7 +223,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
       
       workflowMeta.parameters.forEach(param => {
-        if (param.name === 'strength') {
+        if (param.name === 'prompt') {
+          updates.prompt = param.default as string;
+        } else if (param.name === 'strength') {
           updates.strength = param.default as number;
         } else if (param.name === 'count') {
           updates.count = param.default as number;
@@ -252,7 +272,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 切换工作流时重置 isLoop
       (updates as any).isLoop = false;
       (updates as any).useOriginalSize = true;
-      
+
+      // 将当前工作流的图片暂存，恢复目标工作流之前保存的图片
+      const currentWorkflow = state.currentWorkflow;
+      const stash = { ...state.workflowImageStash };
+      stash[currentWorkflow] = {
+        referenceImage: state.referenceImage,
+        referenceImage2: state.referenceImage2,
+        referenceImage3: state.referenceImage3,
+        referenceImageEnd: state.referenceImageEnd,
+        promptEnd: state.promptEnd,
+      };
+      const saved = stash[workflow];
+      (updates as any).referenceImage = saved?.referenceImage ?? null;
+      (updates as any).referenceImage2 = saved?.referenceImage2 ?? null;
+      (updates as any).referenceImage3 = saved?.referenceImage3 ?? null;
+      (updates as any).referenceImageEnd = saved?.referenceImageEnd ?? null;
+      (updates as any).promptEnd = saved?.promptEnd ?? '';
+      (updates as any).workflowImageStash = stash;
+
       set(updates);
     } else {
       set({ currentWorkflow: workflow });
@@ -305,6 +343,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
+  setReferenceImage2: async (image) => {
+    set({ referenceImage2: image });
+    const state = get();
+    state.saveSessionConfig();
+  },
+  setReferenceImage3: async (image) => {
+    set({ referenceImage3: image });
+    const state = get();
+    state.saveSessionConfig();
+  },
   setReferenceImageEnd: async (image) => {
     set({ referenceImageEnd: image });
     const state = get();
@@ -333,7 +381,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
-  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount }) => {
+  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount }) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -395,6 +443,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         workflow, strength, count, loraPrompt,
         promptEnd: promptEnd || undefined,
         referenceImage: referenceImage || undefined,
+        referenceImage2: referenceImage2 || undefined,
+        referenceImage3: referenceImage3 || undefined,
         referenceImageEnd: referenceImageEnd || undefined,
         isLoop: isLoop ?? undefined,
         frameRate: frameRate ?? undefined,
@@ -444,6 +494,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         count,
         lora_prompt: loraPrompt,
         reference_image: referenceImage || undefined,
+        reference_image_2: referenceImage2 || undefined,
+        reference_image_3: referenceImage3 || undefined,
         reference_image_end: referenceImageEnd || undefined,
         prompt_end: promptEnd || undefined,
         frame_rate: frameRate ?? undefined,
@@ -554,6 +606,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     strength: 0.5,
     count: 1,
     referenceImage: null,
+    referenceImage2: null,
+    referenceImage3: null,
+    referenceImageEnd: null,
     chatHistory: [],
     loading: false,
     error: null,
@@ -765,15 +820,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     
     // 从 availableWorkflows 获取默认工作流（文生图）的默认参数
     const defaultWorkflow = state.availableWorkflows.find(w => w.key === DEFAULT_CONFIG.WORKFLOW);
+    let defaultPrompt: string = DEFAULT_CONFIG.PROMPT;
     let defaultLoraPrompt: string = DEFAULT_CONFIG.LORA_PROMPT;
     let defaultStrength: number = DEFAULT_CONFIG.STRENGTH;
     let defaultCount: number = DEFAULT_CONFIG.COUNT;
     
     if (defaultWorkflow) {
+      const promptParam = defaultWorkflow.parameters.find(p => p.name === 'prompt');
       const loraParam = defaultWorkflow.parameters.find(p => p.name === 'lora_prompt');
       const strengthParam = defaultWorkflow.parameters.find(p => p.name === 'strength');
       const countParam = defaultWorkflow.parameters.find(p => p.name === 'count');
       
+      if (promptParam && promptParam.default !== undefined) defaultPrompt = promptParam.default as string;
       if (loraParam && loraParam.default !== undefined) defaultLoraPrompt = loraParam.default as string;
       if (strengthParam && strengthParam.default !== undefined) defaultStrength = strengthParam.default as number;
       if (countParam && countParam.default !== undefined) defaultCount = countParam.default as number;
@@ -797,7 +855,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 为新会话初始化配置（使用默认工作流的默认参数）
     const newSessionConfig = {
       workflow: DEFAULT_CONFIG.WORKFLOW,
-      prompt: DEFAULT_CONFIG.PROMPT,
+      prompt: defaultPrompt,
       loraPrompt: defaultLoraPrompt,
       strength: defaultStrength,
       count: defaultCount,
@@ -845,7 +903,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           strength: newSessionConfig.strength,
           count: newSessionConfig.count,
           imagesPerRow: newSessionConfig.imagesPerRow,
-          referenceImage: null
+          referenceImage: null,
+          referenceImage2: null,
+          referenceImage3: null,
+          referenceImageEnd: null,
+          promptEnd: '',
+          workflowImageStash: {},
         });
         
         return realSessionId;
@@ -868,7 +931,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         strength: newSessionConfig.strength,
         count: newSessionConfig.count,
         imagesPerRow: newSessionConfig.imagesPerRow,
-        referenceImage: null
+        referenceImage: null,
+        referenceImage2: null,
+        referenceImage3: null,
+        referenceImageEnd: null,
+        promptEnd: '',
+        workflowImageStash: {},
       });
       
       return sessionId;
@@ -1010,6 +1078,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       count: state.count,
       images_per_row: state.imagesPerRow,
       reference_image: state.referenceImage,
+      reference_image_2: state.referenceImage2 || undefined,
+      reference_image_3: state.referenceImage3 || undefined,
       prompt_end: state.promptEnd || undefined,
       reference_image_end: state.referenceImageEnd || undefined,
       is_loop: state.isLoop,
@@ -1032,6 +1102,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         count: config.count,
         imagesPerRow: config.images_per_row,
         referenceImage: config.reference_image,
+        referenceImage2: config.reference_image_2 || undefined,
+        referenceImage3: config.reference_image_3 || undefined,
         promptEnd: config.prompt_end,
         referenceImageEnd: config.reference_image_end,
         isLoop: config.is_loop,
@@ -1056,12 +1128,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.images_per_row ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.reference_image || null,
+          referenceImage2: (config as any).reference_image_2 || null,
+          referenceImage3: (config as any).reference_image_3 || null,
           promptEnd: config.prompt_end || '',
           referenceImageEnd: config.reference_image_end || null,
           isLoop: (config as any).is_loop ?? false,
           startFrameCount: (config as any).start_frame_count ?? null,
           endFrameCount: (config as any).end_frame_count ?? null,
           frameRate: (config as any).frame_rate ?? null,
+          workflowImageStash: {},
         });
       } catch (error) {
         console.error('加载会话配置失败:', error);
@@ -1074,12 +1149,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: DEFAULT_CONFIG.COUNT,
           imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: null,
+          referenceImage2: null,
+          referenceImage3: null,
           promptEnd: '',
           referenceImageEnd: null,
           isLoop: false,
           startFrameCount: null,
           endFrameCount: null,
           frameRate: null,
+          workflowImageStash: {},
         });
       }
     } else {
@@ -1094,12 +1172,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.imagesPerRow ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.referenceImage || null,
+          referenceImage2: (config as any).referenceImage2 || null,
+          referenceImage3: (config as any).referenceImage3 || null,
           promptEnd: config.promptEnd || '',
           referenceImageEnd: config.referenceImageEnd || null,
           isLoop: (config as any).isLoop ?? false,
           startFrameCount: (config as any).startFrameCount ?? null,
           endFrameCount: (config as any).endFrameCount ?? null,
           frameRate: (config as any).frameRate ?? null,
+          workflowImageStash: {},
         });
       } else {
         // 如果没有保存的配置，使用当前 store 值（已由 loadDefaultConfig 设置）
@@ -1109,6 +1190,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           currentWorkflow: currentState.currentWorkflow || DEFAULT_CONFIG.WORKFLOW,
           // 保持 prompt, loraPrompt, strength, count 等值不变
           referenceImage: null,
+          referenceImage2: null,
+          referenceImage3: null,
         });
       }
     }

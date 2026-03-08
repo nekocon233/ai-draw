@@ -116,6 +116,8 @@ class AIDrawService:
         lora_prompt: str = "",
         count: int = 1,
         reference_image: Optional[str] = None,
+        reference_image_2: Optional[str] = None,
+        reference_image_3: Optional[str] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
         prompt_end: Optional[str] = None,
@@ -149,6 +151,14 @@ class AIDrawService:
                     image_base64 = reference_image.split(',', 1)[1]
                 else:
                     image_base64 = reference_image
+
+            def _strip_data_url(img_str: Optional[str]) -> Optional[str]:
+                if not img_str:
+                    return None
+                return img_str.split(',', 1)[1] if img_str.startswith('data:image') else img_str
+
+            image_base64_2 = _strip_data_url(reference_image_2)
+            image_base64_3 = _strip_data_url(reference_image_3)
             
             # 处理结束帧参考图（如果有，flf2v 专用）
             image_end_base64 = None
@@ -305,6 +315,8 @@ class AIDrawService:
                         await self.comfyui.generate_i2i(
                             finish_callback=finish_callback,
                             image_base64=image_base64,
+                            image_base64_2=image_base64_2,
+                            image_base64_3=image_base64_3,
                             prompt_text=prompt,
                             denoise_value=strength,
                             lora_prompt=lora_prompt or "",

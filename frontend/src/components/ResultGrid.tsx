@@ -63,28 +63,51 @@ export default function ResultGrid() {
               <div className="chat-message-content user-message">
                 <div className="chat-message-bubble">
                   {/* 参考图缩略图（可点击预览） */}
-                  {(message.params?.referenceImage || message.params?.referenceImageEnd) && (
+                  {(message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
                     <div className="user-reference-images">
-                      {message.params.referenceImage && (
-                        <Image
-                          src={message.params.referenceImage}
-                          alt="参考图"
-                          width={80}
-                          height={80}
-                          style={{ objectFit: 'cover', borderRadius: 6, cursor: 'pointer', display: 'block' }}
-                          preview={{ mask: '预览' }}
-                        />
-                      )}
-                      {message.params.referenceImageEnd && (
-                        <Image
-                          src={message.params.referenceImageEnd}
-                          alt="尾帧参考图"
-                          width={80}
-                          height={80}
-                          style={{ objectFit: 'cover', borderRadius: 6, cursor: 'pointer', display: 'block' }}
-                          preview={{ mask: '预览' }}
-                        />
-                      )}
+                      {([
+                        { src: message.params.referenceImage, label: '参考图 1' },
+                        { src: message.params.referenceImage2, label: '参考图 2' },
+                        { src: message.params.referenceImage3, label: '参考图 3' },
+                        { src: message.params.referenceImageEnd, label: '尾帧参考图' },
+                      ] as { src?: string; label: string }[]).filter(item => item.src).map((item) => (
+                        <div
+                          key={item.label}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/uri-list', item.src!);
+                            e.dataTransfer.setData('text/plain', item.src!);
+                            e.dataTransfer.effectAllowed = 'copy';
+                            const PREVIEW_SIZE = 80;
+                            const imgEl = (e.currentTarget as HTMLElement).querySelector('img');
+                            const canvas = document.createElement('canvas');
+                            canvas.width = PREVIEW_SIZE;
+                            canvas.height = PREVIEW_SIZE;
+                            canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+                            document.body.appendChild(canvas);
+                            if (imgEl) {
+                              const ctx = canvas.getContext('2d');
+                              const scale = Math.min(PREVIEW_SIZE / imgEl.naturalWidth, PREVIEW_SIZE / imgEl.naturalHeight);
+                              const w = imgEl.naturalWidth * scale;
+                              const h = imgEl.naturalHeight * scale;
+                              ctx?.drawImage(imgEl, (PREVIEW_SIZE - w) / 2, (PREVIEW_SIZE - h) / 2, w, h);
+                            }
+                            e.dataTransfer.setDragImage(canvas, PREVIEW_SIZE / 2, PREVIEW_SIZE / 2);
+                            setTimeout(() => document.body.removeChild(canvas), 0);
+                          }}
+                          style={{ cursor: 'grab', display: 'inline-block', borderRadius: 6, overflow: 'hidden' }}
+                          title={`拖动${item.label}到输入框`}
+                        >
+                          <Image
+                            src={item.src}
+                            alt={item.label}
+                            width={80}
+                            height={80}
+                            style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }}
+                            preview={{ mask: '预览' }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   )}
                   <div className="chat-message-text">{message.content}</div>

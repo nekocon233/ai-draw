@@ -27,6 +27,8 @@ class GenerateMediaRequest(BaseModel):
     lora_prompt: str = ""
     count: int = 1
     reference_image: Optional[str] = None
+    reference_image_2: Optional[str] = None  # i2i 第 2 张参考图
+    reference_image_3: Optional[str] = None  # i2i 第 3 张参考图
     width: Optional[int] = None  # 图像宽度（部分工作流支持）
     height: Optional[int] = None  # 图像高度（部分工作流支持）
     prompt_end: Optional[str] = None          # flf2v 结束帧提示词

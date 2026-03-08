@@ -6,8 +6,14 @@ import type { UploadProps } from 'antd';
 
 const { Dragger } = Upload;
 
-export default function ImageUploader() {
-  const { referenceImage, setReferenceImage, setError } = useAppStore();
+interface ImageSlotProps {
+  label: string;
+  image: string | null;
+  setImage: (img: string | null) => void;
+}
+
+function ImageSlot({ label, image, setImage }: ImageSlotProps) {
+  const { setError } = useAppStore();
 
   const uploadProps: UploadProps = {
     name: 'file',
@@ -22,35 +28,33 @@ export default function ImageUploader() {
       }
 
       try {
-        // 压缩图片（降低分辨率和质量，避免 413 错误）
         const { compressImage } = await import('../utils/helpers');
         const compressed = await compressImage(file, 1024, 1024, 0.8);
         const compressedFile = new File([compressed], file.name, { type: 'image/jpeg' });
-        
+
         const res = await apiService.uploadImage(compressedFile);
-        setReferenceImage(res.image);
+        setImage(res.image);
         message.success('上传成功!');
       } catch (err: any) {
         setError(err.message);
         message.error('上传失败: ' + err.message);
       }
 
-      return false; // 阻止默认上传行为
+      return false;
     },
   };
 
   return (
     <div>
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>参考图片</span>
-        {referenceImage && (
+      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
+        {image && (
           <Button
             danger
             size="small"
             icon={<DeleteOutlined />}
             onClick={() => {
-              setReferenceImage(null);
-              // 保存配置状态
+              setImage(null);
               setTimeout(() => useAppStore.getState().saveSessionConfig(), 0);
             }}
           >
@@ -58,18 +62,18 @@ export default function ImageUploader() {
           </Button>
         )}
       </div>
-      
-      {referenceImage ? (
-        <div style={{ 
-          border: '1px solid var(--border-color)', 
-          borderRadius: 8, 
+
+      {image ? (
+        <div style={{
+          border: '1px solid var(--border-color)',
+          borderRadius: 8,
           overflow: 'hidden',
           background: 'var(--bg-secondary)'
         }}>
           <Image
-            src={referenceImage}
-            alt="参考图片"
-            style={{ width: '100%', maxHeight: 200, objectFit: 'contain' }}
+            src={image}
+            alt={label}
+            style={{ width: '100%', maxHeight: 180, objectFit: 'contain' }}
             preview={{ mask: '预览' }}
           />
         </div>
@@ -87,3 +91,26 @@ export default function ImageUploader() {
     </div>
   );
 }
+
+export default function ImageUploader() {
+  const {
+    referenceImage, setReferenceImage,
+    referenceImage2, setReferenceImage2,
+    referenceImage3, setReferenceImage3,
+  } = useAppStore();
+
+  const slots = [
+    { label: '参考图片 1', image: referenceImage, setImage: setReferenceImage },
+    { label: '参考图片 2（可选）', image: referenceImage2, setImage: setReferenceImage2 },
+    { label: '参考图片 3（可选）', image: referenceImage3, setImage: setReferenceImage3 },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {slots.map((slot) => (
+        <ImageSlot key={slot.label} {...slot} />
+      ))}
+    </div>
+  );
+}
+

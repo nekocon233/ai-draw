@@ -189,10 +189,12 @@ class ComfyUIService:
             print(f"[ComfyUIService] T2I生成失败: {result.error}")
             finish_callback(None)
 
-    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None):
+    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None, image_base64_2=None, image_base64_3=None):
         """
         图生图（Image-to-Image）
         image_base64: 原始图片base64
+        image_base64_2: 第 2 张参考图 base64（可选）
+        image_base64_3: 第 3 张参考图 base64（可选）
         prompt_text: 文本提示
         denoise_value: 去噪强度
         lora_prompt: lora提示词
@@ -204,7 +206,7 @@ class ComfyUIService:
             seed = random.randrange(0, 2**63)
 
         # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_i2i(self.workflow, image_base64, prompt_text, denoise_value, lora_prompt, seed)
+        result = await self.request.generate_i2i(self.workflow, image_base64, prompt_text, denoise_value, lora_prompt, seed, image_base64_2=image_base64_2, image_base64_3=image_base64_3)
         if result.is_success:
             print(f"[ComfyUIService] I2I生成成功")
             finish_callback(result.data)

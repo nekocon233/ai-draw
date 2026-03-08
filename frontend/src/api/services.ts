@@ -54,6 +54,8 @@ export const apiService = {
     count: number;
     images_per_row: number;
     reference_image: string | null;
+    reference_image_2?: string | null;
+    reference_image_3?: string | null;
     prompt_end?: string | null;
     reference_image_end?: string | null;
   }> =>
@@ -67,6 +69,8 @@ export const apiService = {
     count?: number;
     images_per_row?: number;
     reference_image?: string | null;
+    reference_image_2?: string | null;
+    reference_image_3?: string | null;
     prompt_end?: string | null;
     reference_image_end?: string | null;
   }): Promise<{ message: string }> =>
@@ -87,6 +91,8 @@ export const apiService = {
     lora_prompt?: string;
     images?: string[];
     reference_image?: string;
+    reference_image_2?: string;
+    reference_image_3?: string;
     reference_image_end?: string;
     prompt_end?: string;
     frame_rate?: number;

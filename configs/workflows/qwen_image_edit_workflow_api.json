@@ -137,6 +137,14 @@
       "image1": [
         "93",
         0
+      ],
+      "image2": [
+        "83",
+        0
+      ],
+      "image3": [
+        "87",
+        0
       ]
     },
     "class_type": "TextEncodeQwenImageEditPlus",
@@ -157,6 +165,14 @@
       ],
       "image1": [
         "93",
+        0
+      ],
+      "image2": [
+        "83",
+        0
+      ],
+      "image3": [
+        "87",
         0
       ]
     },
@@ -205,6 +221,24 @@
     "class_type": "VAEEncode",
     "_meta": {
       "title": "VAE编码"
+    }
+  },
+  "83": {
+    "inputs": {
+      "image": "image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image_1"
+    }
+  },
+  "87": {
+    "inputs": {
+      "image": "image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image_2"
     }
   },
   "88": {

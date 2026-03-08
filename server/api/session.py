@@ -40,6 +40,8 @@ class SessionConfigRequest(BaseModel):
     count: Optional[int] = None
     images_per_row: Optional[int] = None
     reference_image: Optional[str] = None
+    reference_image_2: Optional[str] = None
+    reference_image_3: Optional[str] = None
     prompt_end: Optional[str] = None
     reference_image_end: Optional[str] = None
     is_loop: Optional[bool] = None
@@ -211,6 +213,10 @@ def update_session_config(
         session.config_images_per_row = update_data['images_per_row']
     if 'reference_image' in update_data:
         session.config_reference_image = update_data['reference_image']
+    if 'reference_image_2' in update_data:
+        session.config_reference_image_2 = update_data['reference_image_2']
+    if 'reference_image_3' in update_data:
+        session.config_reference_image_3 = update_data['reference_image_3']
     if 'prompt_end' in update_data:
         session.config_prompt_end = update_data['prompt_end']
     if 'reference_image_end' in update_data:
@@ -257,6 +263,8 @@ def get_session_config(
         "count": session.config_count,
         "images_per_row": session.config_images_per_row,
         "reference_image": session.config_reference_image,
+        "reference_image_2": session.config_reference_image_2,
+        "reference_image_3": session.config_reference_image_3,
         "prompt_end": session.config_prompt_end,
         "reference_image_end": session.config_reference_image_end,
         "is_loop": session.config_is_loop,

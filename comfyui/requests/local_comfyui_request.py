@@ -182,7 +182,7 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
         return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
 
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed):
+    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None, image_base64_2=None, image_base64_3=None):
         """
         异步发送I2I生成请求，返回ComfyRequestResult对象
         """
@@ -211,6 +211,40 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print("[LocalComfyUIRequest] main_image参数设置成功")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置main_image参数失败: {str(e)}")
+
+        # 设置第 2 张参考图（可选）
+        if image_base64_2:
+            try:
+                input_filename_2 = os.path.join(tempfile.gettempdir(), "input_image_2.png")
+                async with aiofiles.open(input_filename_2, "wb") as f:
+                    await f.write(base64.b64decode(image_base64_2))
+                image_metadata_2 = self.api.upload_image(input_filename_2)
+                img_path_2 = (
+                    f"{image_metadata_2['subfolder']}/{image_metadata_2['name']}"
+                    if image_metadata_2.get('subfolder')
+                    else image_metadata_2['name']
+                )
+                workflow.set_node_param("main_image_1", "image", img_path_2)
+                print("[LocalComfyUIRequest] main_image_1参数设置成功")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置main_image_1参数失败: {str(e)}")
+
+        # 设置第 3 张参考图（可选）
+        if image_base64_3:
+            try:
+                input_filename_3 = os.path.join(tempfile.gettempdir(), "input_image_3.png")
+                async with aiofiles.open(input_filename_3, "wb") as f:
+                    await f.write(base64.b64decode(image_base64_3))
+                image_metadata_3 = self.api.upload_image(input_filename_3)
+                img_path_3 = (
+                    f"{image_metadata_3['subfolder']}/{image_metadata_3['name']}"
+                    if image_metadata_3.get('subfolder')
+                    else image_metadata_3['name']
+                )
+                workflow.set_node_param("main_image_2", "image", img_path_3)
+                print("[LocalComfyUIRequest] main_image_2参数设置成功")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置main_image_2参数失败: {str(e)}")
 
         try:
             workflow.set_node_param("positive_prompt", "positive", prompt_text)

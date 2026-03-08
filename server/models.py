@@ -78,6 +78,8 @@ class ChatSession(Base):
     config_count = Column(Integer, nullable=True)
     config_images_per_row = Column(Integer, default=4)
     config_reference_image = Column(Text, nullable=True)  # base64 编码的参考图
+    config_reference_image_2 = Column(Text, nullable=True)  # i2i 第 2 张参考图
+    config_reference_image_3 = Column(Text, nullable=True)  # i2i 第 3 张参考图
     config_prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
     config_reference_image_end = Column(Text, nullable=True)  # flf2v 结束帧图片
     config_is_loop = Column(Boolean, default=False, nullable=True)          # flf2v 循环
@@ -106,6 +108,8 @@ class ChatMessage(Base):
     count = Column(Integer)
     lora_prompt = Column(String(255))
     reference_image = Column(Text, nullable=True)
+    reference_image_2 = Column(Text, nullable=True)  # i2i 第 2 张参考图
+    reference_image_3 = Column(Text, nullable=True)  # i2i 第 3 张参考图
     reference_image_end = Column(Text, nullable=True)
     prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
     frame_rate = Column(Float, nullable=True)          # flf2v 帧率

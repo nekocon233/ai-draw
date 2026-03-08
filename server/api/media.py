@@ -29,6 +29,8 @@ async def generate_media(
                 lora_prompt=request.lora_prompt,
                 count=request.count,
                 reference_image=request.reference_image,
+                reference_image_2=request.reference_image_2,
+                reference_image_3=request.reference_image_3,
                 width=request.width,
                 height=request.height,
                 prompt_end=request.prompt_end,

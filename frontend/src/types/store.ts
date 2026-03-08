@@ -37,6 +37,8 @@ export interface AppState {
   setCount: (count: number) => Promise<void>;
   setImagesPerRow: (count: number) => Promise<void>;
   setReferenceImage: (image: string | null) => Promise<void>;
+  setReferenceImage2: (image: string | null) => Promise<void>;
+  setReferenceImage3: (image: string | null) => Promise<void>;
   
   // ============ Actions - 聊天消息 ============
   addChatMessage: (
@@ -84,4 +86,6 @@ export interface GuestConfig {
   count: number;
   imagesPerRow: number;
   referenceImage: string | null;
+  referenceImage2: string | null;
+  referenceImage3: string | null;
 }

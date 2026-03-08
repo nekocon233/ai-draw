@@ -27,6 +27,8 @@ export default function ChatInput() {
     currentWorkflow,
     availableWorkflows,
     referenceImage,
+    referenceImage2,
+    referenceImage3,
     referenceImageEnd,
     isGenerating,
     currentSessionId,
@@ -38,6 +40,8 @@ export default function ChatInput() {
     setPromptEnd,
     setCurrentWorkflow,
     setReferenceImage,
+    setReferenceImage2,
+    setReferenceImage3,
     setReferenceImageEnd,
     setIsLoop,
     setError,
@@ -46,11 +50,15 @@ export default function ChatInput() {
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   const isFlf2v = workflowMeta?.requires_end_image === true;
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
+  const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
+  const isT2I = !isRequiresImage && !isFlf2v; // 文生图：不允许上传图片
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef2 = useRef<HTMLInputElement>(null);
+  const fileInputRef3 = useRef<HTMLInputElement>(null);
   const fileInputEndRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<any>(null);
@@ -85,12 +93,28 @@ export default function ChatInput() {
     try {
       const res = await apiService.uploadImage(file);
       setReferenceImage(res.image);
-      message.success('上传成功!');
+      message.success('\u4e0a\u4f20\u6210\u529f!');
     } catch (err: any) {
       setError(err.message);
-      message.error('上传失败: ' + err.message);
+      message.error('\u4e0a\u4f20\u5931\u8d25: ' + err.message);
     }
   };
+
+  const makeImageUploadHandler = (setter: (img: string | null) => void, label = '\u4e0a\u4f20\u6210\u529f!') =>
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) { message.error('\u53ea\u80fd\u4e0a\u4f20\u56fe\u7247\u6587\u4ef6!'); return; }
+      if (file.size / 1024 / 1024 >= 10) { message.error('\u56fe\u7247\u5927\u5c0f\u4e0d\u80fd\u8d85\u8fc7 10MB!'); return; }
+      try {
+        const res = await apiService.uploadImage(file);
+        setter(res.image);
+        message.success(label);
+      } catch (err: any) {
+        setError(err.message);
+        message.error('\u4e0a\u4f20\u5931\u8d25: ' + err.message);
+      }
+    };
 
   const handleSend = async () => {
     const { isGenerating } = useAppStore.getState();
@@ -131,6 +155,8 @@ export default function ChatInput() {
       loraPrompt,
       promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
       referenceImage,
+      referenceImage2: referenceImage2 || undefined,
+      referenceImage3: referenceImage3 || undefined,
       referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
       isLoop: isFlf2v ? isLoop : undefined,
       frameRate: isFlf2v ? frameRate : undefined,
@@ -148,6 +174,8 @@ export default function ChatInput() {
         count,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
+        reference_image_2: referenceImage2 || undefined,
+        reference_image_3: referenceImage3 || undefined,
         width: state.width || undefined,
         height: state.height || undefined,
         prompt_end: isFlf2v && isLoop ? (promptEnd || undefined) : undefined,
@@ -205,6 +233,9 @@ export default function ChatInput() {
     dragCounterRef.current = 0;
     setIsDragging(false);
 
+    // 文生图不允许拖放图片
+    if (isT2I) return;
+
     // 辅助函数：上传文件
     // flf2v 模式下：首帧已有图时自动填充尾帧
     const uploadFile = async (file: File) => {
@@ -224,14 +255,26 @@ export default function ChatInput() {
       const currentState = useAppStore.getState();
       const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
 
+      // 普通 requires_image 模式：按序填充槽位
+      // Q-Image (i2i)：最多 3 张；参考图工作流：仅 1 张
+      const getNextSlot = () => {
+        if (!currentState.referenceImage) return setReferenceImage;
+        if (isI2I && !currentState.referenceImage2) return setReferenceImage2;
+        if (isI2I && !currentState.referenceImage3) return setReferenceImage3;
+        return setReferenceImage; // 全满时替换第 1 张
+      };
+
       try {
         const res = await apiService.uploadImage(file);
         if (fillEnd) {
           setReferenceImageEnd(res.image);
-          message.success('尾帧上传成功!');
+          message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
+        } else if (isRequiresImage) {
+          getNextSlot()(res.image);
+          message.success('\u4e0a\u4f20\u6210\u529f!');
         } else {
           setReferenceImage(res.image);
-          message.success('上传成功!');
+          message.success('\u4e0a\u4f20\u6210\u529f!');
         }
       } catch (err: any) {
         setError(err.message);
@@ -246,6 +289,12 @@ export default function ChatInput() {
       if (fillEnd) {
         setReferenceImageEnd(url);
         message.success('尾帧已设置!');
+      } else if (isRequiresImage) {
+        if (!currentState.referenceImage) { setReferenceImage(url); }
+        else if (isI2I && !currentState.referenceImage2) { setReferenceImage2(url); }
+        else if (isI2I && !currentState.referenceImage3) { setReferenceImage3(url); }
+        else { setReferenceImage(url); }
+        message.success('图片已设置!');
       } else {
         setReferenceImage(url);
         message.success('图片已设置!');
@@ -336,8 +385,8 @@ export default function ChatInput() {
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        {/* 拖放遮罩层 */}
-        {isDragging && (
+        {/* 拖放遮罩层（文生图不显示） */}
+        {isDragging && !isT2I && (
           <div className="chat-drag-overlay">
             <PictureOutlined className="chat-drag-icon" />
             <span className="chat-drag-text">松开以上传图片</span>
@@ -468,60 +517,111 @@ export default function ChatInput() {
           </div>
         ) : (
           <>
-            {/* 普通模式图片预览（非 requires_image 时） */}
-            {!isRequiresImage && referenceImage && (
-              <div className="chat-image-preview">
-                <div className="chat-image-preview-item">
-                  <Image
-                    src={referenceImage}
-                    alt="参考图"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                    preview={{ mask: '预览' }}
-                  />
-                  <div
-                    className="chat-image-preview-remove"
-                    onClick={() => setReferenceImage(null)}
-                  >
-                    <CloseOutlined />
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* 输入框行（requires_image 时包含帧卡片） */}
             <div className="chat-input-row">
               {isRequiresImage && (
-                <div
-                  className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
-                  onClick={() => !referenceImage && fileInputRef.current?.click()}
-                  title="上传参考图"
-                  style={{ flexShrink: 0 }}
-                >
-                  {referenceImage ? (
+                <>
+                  {/* ── 参考图 1（所有 requires_image 工作流都有） ── */}
+                  <div
+                    className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
+                    onClick={() => !referenceImage && fileInputRef.current?.click()}
+                    title={isI2I ? '上传参考图 1' : '上传参考图'}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {referenceImage ? (
+                      <>
+                        <Image
+                          src={referenceImage}
+                          alt="参考图 1"
+                          width={76}
+                          height={76}
+                          style={{ objectFit: 'cover', display: 'block' }}
+                          preview={{ mask: '预览' }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <div
+                          className="flf2v-frame-card-remove"
+                          onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
+                        >
+                          <CloseOutlined />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flf2v-frame-placeholder">
+                        <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                        <span className="flf2v-frame-placeholder-label">{isI2I ? '图 1' : '参考图'}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── 参考图 2 / 3（仅 Q-Image i2i 工作流） ── */}
+                  {isI2I && (
                     <>
-                      <Image
-                        src={referenceImage}
-                        alt="参考图"
-                        width={76}
-                        height={76}
-                        style={{ objectFit: 'cover', display: 'block' }}
-                        preview={{ mask: '预览' }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
                       <div
-                        className="flf2v-frame-card-remove"
-                        onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
+                        className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
+                        onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
+                        title="上传参考图 2（可选）"
+                        style={{ flexShrink: 0 }}
                       >
-                        <CloseOutlined />
+                        {referenceImage2 ? (
+                          <>
+                            <Image
+                              src={referenceImage2}
+                              alt="参考图 2"
+                              width={76}
+                              height={76}
+                              style={{ objectFit: 'cover', display: 'block' }}
+                              preview={{ mask: '预览' }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div
+                              className="flf2v-frame-card-remove"
+                              onClick={(e) => { e.stopPropagation(); setReferenceImage2(null); }}
+                            >
+                              <CloseOutlined />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flf2v-frame-placeholder">
+                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                            <span className="flf2v-frame-placeholder-label">图 2</span>
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
+                        onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
+                        title="上传参考图 3（可选）"
+                        style={{ flexShrink: 0 }}
+                      >
+                        {referenceImage3 ? (
+                          <>
+                            <Image
+                              src={referenceImage3}
+                              alt="参考图 3"
+                              width={76}
+                              height={76}
+                              style={{ objectFit: 'cover', display: 'block' }}
+                              preview={{ mask: '预览' }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div
+                              className="flf2v-frame-card-remove"
+                              onClick={(e) => { e.stopPropagation(); setReferenceImage3(null); }}
+                            >
+                              <CloseOutlined />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flf2v-frame-placeholder">
+                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                            <span className="flf2v-frame-placeholder-label">图 3</span>
+                          </div>
+                        )}
                       </div>
                     </>
-                  ) : (
-                    <div className="flf2v-frame-placeholder">
-                      <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                      <span className="flf2v-frame-placeholder-label">参考图</span>
-                    </div>
                   )}
-                </div>
+                </>
               )}
               <div className="chat-textarea-wrapper">
                 <TextArea
@@ -554,6 +654,20 @@ export default function ChatInput() {
               style={{ display: 'none' }}
               onChange={handleImageUpload}
             />
+            <input
+              ref={fileInputRef2}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={makeImageUploadHandler(setReferenceImage2)}
+            />
+            <input
+              ref={fileInputRef3}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={makeImageUploadHandler(setReferenceImage3)}
+            />
             {/* flf2v 结束帧上传 */}
             <input
               ref={fileInputEndRef}
@@ -574,15 +688,7 @@ export default function ChatInput() {
                 }
               }}
             />
-            {!isFlf2v && !isRequiresImage && (
-              <button
-                className="chat-input-icon-button"
-                onClick={() => fileInputRef.current?.click()}
-                title="上传图片"
-              >
-                <PictureOutlined />
-              </button>
-            )}
+            {/* 文生图不显示上传按钮；仅非 requires_image 且非 flf2v 且非 t2i 时保留（当前无此场景，预留扩展） */}
 
             {/* 参数设置 */}
             <button 
