@@ -238,15 +238,38 @@
 .flf2v-input-area {
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 0 2px;
 }
+
 
 .flf2v-frames {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* 箭头 + 循环开关纵向列 */
+.flf2v-separator-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.flf2v-loop-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.flf2v-loop-label {
+  font-size: 11px;
+  color: var(--text-secondary, rgba(128,128,128,0.8));
+  white-space: nowrap;
+  user-select: none;
 }
 
 .flf2v-frame-card {
@@ -339,11 +362,15 @@
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  /* 右侧预留与下方发送按钮等宽的空间（按钮 36px + 按钮行 gap 8px） */
+  padding-right: calc(36px + 8px);
 }
 
 .flf2v-prompt-item {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
 }
 
@@ -358,5 +385,24 @@
 .flf2v-prompt-divider {
   height: 1px;
   background: var(--border-color, #e8e8e8);
-  margin: 4px 0;
+  margin: 3px 0;
+}
+
+/* 循环模式：首尾帧描述左右对称 */
+.flf2v-prompts--loop {
+  flex-direction: row;
+  gap: 0;
+  align-items: stretch;
+}
+
+.flf2v-prompts--loop .flf2v-prompt-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.flf2v-prompts--loop .flf2v-prompt-divider {
+  width: 1px;
+  height: auto;
+  margin: 0 8px;
+  align-self: stretch;
 }

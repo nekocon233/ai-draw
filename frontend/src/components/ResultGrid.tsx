@@ -88,18 +88,29 @@ export default function ResultGrid() {
                     </div>
                   )}
                   <div className="chat-message-text">{message.content}</div>
-                  {message.params?.promptEnd && (
+                  {message.params?.isLoop && message.params?.promptEnd && (
                     <div className="chat-message-text chat-message-text-end">{message.params.promptEnd}</div>
                   )}
                   {message.params && (
                     <div className="chat-message-params">
                       <Tag>{message.params.workflow}</Tag>
-                      {message.params.strength !== undefined && (
+                      {message.params.strength != null && (
                         <Tag>强度: {message.params.strength}</Tag>
                       )}
-                      <Tag>数量: {message.params.count}</Tag>
+                      {message.params.count != null && message.params.count > 1 && (
+                        <Tag>数量: {message.params.count}</Tag>
+                      )}
                       {message.params.loraPrompt && (
                         <Tag>LoRA: {message.params.loraPrompt}</Tag>
+                      )}
+                      {message.params.frameRate != null && (
+                        <Tag>帧率: {message.params.frameRate}</Tag>
+                      )}
+                      {message.params.startFrameCount != null && (
+                        <Tag>起始帧: {message.params.startFrameCount}</Tag>
+                      )}
+                      {message.params.isLoop && message.params.endFrameCount != null && (
+                        <Tag>结束帧: {message.params.endFrameCount}</Tag>
                       )}
                     </div>
                   )}

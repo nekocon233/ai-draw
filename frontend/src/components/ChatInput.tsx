@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Input, Button, message, Select, Image } from 'antd';
+import { Input, Button, message, Select, Image, Switch } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -30,11 +30,16 @@ export default function ChatInput() {
     referenceImageEnd,
     isGenerating,
     currentSessionId,
+    isLoop,
+    frameRate,
+    startFrameCount,
+    endFrameCount,
     setPrompt,
     setPromptEnd,
     setCurrentWorkflow,
     setReferenceImage,
     setReferenceImageEnd,
+    setIsLoop,
     setError,
     clearError,
   } = useAppStore();
@@ -124,9 +129,13 @@ export default function ChatInput() {
       strength: effectiveStrength,
       count,
       loraPrompt,
-      promptEnd: isFlf2v ? promptEnd : undefined,
+      promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
       referenceImage,
       referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
+      isLoop: isFlf2v ? isLoop : undefined,
+      frameRate: isFlf2v ? frameRate : undefined,
+      startFrameCount: isFlf2v ? startFrameCount : undefined,
+      endFrameCount: isFlf2v ? endFrameCount : undefined,
     });
 
     try {
@@ -141,9 +150,13 @@ export default function ChatInput() {
         reference_image: referenceImage || undefined,
         width: state.width || undefined,
         height: state.height || undefined,
-        prompt_end: isFlf2v ? (promptEnd || undefined) : undefined,
+        prompt_end: isFlf2v && isLoop ? (promptEnd || undefined) : undefined,
         reference_image_end: isFlf2v ? (referenceImageEnd || undefined) : undefined,
         use_original_size: state.useOriginalSize,
+        is_loop: isFlf2v ? isLoop : undefined,
+        start_frame_count: isFlf2v ? (state.startFrameCount ?? undefined) : undefined,
+        end_frame_count: isFlf2v ? (state.endFrameCount ?? undefined) : undefined,
+        frame_rate: isFlf2v ? (state.frameRate ?? undefined) : undefined,
       });
       // 任务已提交，无需在此处理结果
     } catch (err: any) {
@@ -334,8 +347,9 @@ export default function ChatInput() {
         {/* flf2v 双帧输入布局 / 普通图文输入布局 */}
         {isFlf2v ? (
           <div className="flf2v-input-area">
-            {/* 双帧卡片 */}
+            {/* 双帧卡片区 */}
             <div className="flf2v-frames">
+
               {/* 开始帧 */}
               <div
                 className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
@@ -368,8 +382,22 @@ export default function ChatInput() {
                 )}
               </div>
 
-              {/* 分隔符 */}
-              <span className="flf2v-frame-separator">⇄</span>
+              {/* 中间：箭头 + 循环开关 */}
+              <div className="flf2v-separator-col">
+                <span className="flf2v-frame-separator">⇄</span>
+                {workflowMeta?.supports_loop && (
+                  <div className="flf2v-loop-toggle">
+                    <Switch
+                      size="small"
+                      checked={isLoop}
+                      onChange={setIsLoop}
+                    />
+                    <span className="flf2v-loop-label">
+                      {isLoop ? '循环' : '单程'}
+                    </span>
+                  </div>
+                )}
+              </div>
 
               {/* 结束帧 */}
               <div
@@ -404,8 +432,8 @@ export default function ChatInput() {
               </div>
             </div>
 
-            {/* 文本输入：首帧 + 尾帧描述 */}
-            <div className="flf2v-prompts">
+            {/* 右侧：文字描述 */}
+            <div className={`flf2v-prompts${isLoop ? ' flf2v-prompts--loop' : ''}`}>
               <div className="flf2v-prompt-item">
                 <span className="flf2v-prompt-label">首帧描述</span>
                 <TextArea
@@ -423,17 +451,19 @@ export default function ChatInput() {
                   }}
                 />
               </div>
-              <div className="flf2v-prompt-divider" />
-              <div className="flf2v-prompt-item">
-                <span className="flf2v-prompt-label">尾帧描述</span>
-                <TextArea
-                  value={promptEnd}
-                  onChange={(e) => setPromptEnd(e.target.value)}
-                  placeholder="描述结束帧画面内容..."
-                  className="chat-textarea"
-                  autoSize={{ minRows: 2, maxRows: 4 }}
-                />
-              </div>
+              {isLoop && <div className="flf2v-prompt-divider" />}
+              {isLoop && (
+                <div className="flf2v-prompt-item">
+                  <span className="flf2v-prompt-label">尾帧描述</span>
+                  <TextArea
+                    value={promptEnd}
+                    onChange={(e) => setPromptEnd(e.target.value)}
+                    placeholder="描述结束帧画面内容..."
+                    className="chat-textarea"
+                    autoSize={{ minRows: 2, maxRows: 4 }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -577,7 +607,8 @@ export default function ChatInput() {
               value={currentWorkflow}
               onChange={setCurrentWorkflow}
               size="small"
-              style={{ width: 155 }}
+              style={{ minWidth: 155, width: 'auto', maxWidth: 260 }}
+              popupMatchSelectWidth={false}
               options={availableWorkflows.map(w => ({
                 label: w.label,
                 value: w.key,

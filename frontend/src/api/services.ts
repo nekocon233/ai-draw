@@ -88,6 +88,10 @@ export const apiService = {
     images?: string[];
     reference_image?: string;
     reference_image_end?: string;
+    prompt_end?: string;
+    frame_rate?: number;
+    start_frame_count?: number;
+    end_frame_count?: number;
   }): Promise<{ message: string }> =>
     client.post('/chat/save', data),
   

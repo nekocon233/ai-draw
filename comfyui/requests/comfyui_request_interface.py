@@ -46,6 +46,10 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         prompt_start: str,
         prompt_end: str,
         seed: int,
+        is_loop: bool = False,
+        start_frame_count=None,
+        end_frame_count=None,
+        frame_rate=None,
     ) -> ComfyUIRequestResult:
         """
         首尾帧生视频（First-Last-Frame to Video）推理请求，由子类实现

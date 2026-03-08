@@ -121,6 +121,10 @@ class AIDrawService:
         prompt_end: Optional[str] = None,
         reference_image_end: Optional[str] = None,
         use_original_size: bool = True,
+        is_loop: bool = False,
+        start_frame_count: Optional[int] = None,
+        end_frame_count: Optional[int] = None,
+        frame_rate: Optional[float] = None,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
@@ -183,40 +187,13 @@ class AIDrawService:
                     raise ValueError("flf2v 工作流需要提供结束帧图片")
                 
                 seed = None
-                result_video = None
-                
+                raw_video_b64 = None  # 只在回调中暂存原始 base64，不做任何阻塞操作
+
                 def video_finish_callback(data):
-                    nonlocal result_video
-                    if data:
-                        try:
-                            # 解码 base64 视频数据并保存到文件，避免超大响应体
-                            raw = data.split(',', 1)[1] if data.startswith('data:') else data
-                            video_bytes = base64.b64decode(raw)
-                            # 后处理 resize（如有目标尺寸）
-                            if target_width is not None and target_height is not None:
-                                try:
-                                    video_bytes = resize_video_bytes(video_bytes, target_width, target_height)
-                                    print(f"[AIDrawService] 视频已 resize 至 {target_width}x{target_height}")
-                                except Exception as e:
-                                    print(f"[AIDrawService] 视频 resize 失败，使用原始视频: {e}")
-                            save_dir = Path("uploads/video")
-                            save_dir.mkdir(parents=True, exist_ok=True)
-                            filename = f"video_{uuid.uuid4().hex}.mp4"
-                            filepath = save_dir / filename
-                            with open(filepath, "wb") as vf:
-                                vf.write(video_bytes)
-                            result_video = f"/uploads/video/{filename}"
-                        except Exception as e:
-                            print(f"[AIDrawService] 保存视频文件失败: {e}")
-                            result_video = None
-                    else:
-                        result_video = None
-                    self._notify_state_change('media_generated', {
-                        'image': result_video,
-                        'index': 0,
-                        'total': 1
-                    })
-                
+                    nonlocal raw_video_b64
+                    # 回调仅暂存原始数据，阻塞操作（resize/文件写入）统一在 async 上下文执行
+                    raw_video_b64 = data
+
                 await self.comfyui.generate_flf2v(
                     finish_callback=video_finish_callback,
                     start_image_base64=image_base64,
@@ -224,11 +201,51 @@ class AIDrawService:
                     prompt_start=prompt,
                     prompt_end=prompt_end or "",
                     seed=seed,
+                    is_loop=is_loop,
+                    start_frame_count=start_frame_count,
+                    end_frame_count=end_frame_count,
+                    frame_rate=frame_rate,
                 )
-                
-                if result_video is None:
+
+                if not raw_video_b64:
                     raise Exception("视频生成失败：未收到有效视频数据")
-                
+
+                # ── 在 async 上下文中执行阻塞操作，避免事件循环被卡死 ──
+                raw = raw_video_b64.split(',', 1)[1] if raw_video_b64.startswith('data:') else raw_video_b64
+                video_bytes = await asyncio.to_thread(base64.b64decode, raw)
+
+                # resize（ffmpeg subprocess，必须放到线程中）
+                if target_width is not None and target_height is not None:
+                    try:
+                        video_bytes = await asyncio.to_thread(
+                            resize_video_bytes, video_bytes, target_width, target_height
+                        )
+                        print(f"[AIDrawService] 视频已 resize 至 {target_width}x{target_height}")
+                    except Exception as e:
+                        print(f"[AIDrawService] 视频 resize 失败，使用原始视频: {e}")
+
+                # 文件写入（也放到线程，避免大文件阻塞）
+                save_dir = Path("uploads/video")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"video_{uuid.uuid4().hex}.mp4"
+                filepath = save_dir / filename
+                try:
+                    def _write_file():
+                        with open(filepath, "wb") as vf:
+                            vf.write(video_bytes)
+                    await asyncio.to_thread(_write_file)
+                    result_video = f"/uploads/video/{filename}"
+                except Exception as e:
+                    print(f"[AIDrawService] 保存视频文件失败: {e}")
+                    raise Exception(f"保存视频文件失败: {e}")
+
+                # 现在事件循环空闲，WebSocket 连接正常，可以安全推送
+                self._notify_state_change('media_generated', {
+                    'image': result_video,
+                    'index': 0,
+                    'total': 1
+                })
+
                 images = [result_video]
                 print(f"[AIDrawService] flf2v 视频生成成功")
             

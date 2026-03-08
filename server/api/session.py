@@ -42,6 +42,10 @@ class SessionConfigRequest(BaseModel):
     reference_image: Optional[str] = None
     prompt_end: Optional[str] = None
     reference_image_end: Optional[str] = None
+    is_loop: Optional[bool] = None
+    start_frame_count: Optional[int] = None
+    end_frame_count: Optional[int] = None
+    frame_rate: Optional[float] = None
 
 # ============ 会话管理 API ============
 
@@ -211,6 +215,14 @@ def update_session_config(
         session.config_prompt_end = update_data['prompt_end']
     if 'reference_image_end' in update_data:
         session.config_reference_image_end = update_data['reference_image_end']
+    if 'is_loop' in update_data:
+        session.config_is_loop = update_data['is_loop']
+    if 'start_frame_count' in update_data:
+        session.config_start_frame_count = update_data['start_frame_count']
+    if 'end_frame_count' in update_data:
+        session.config_end_frame_count = update_data['end_frame_count']
+    if 'frame_rate' in update_data:
+        session.config_frame_rate = update_data['frame_rate']
     
     session.updated_at = datetime.now()
     db.commit()
@@ -247,4 +259,8 @@ def get_session_config(
         "reference_image": session.config_reference_image,
         "prompt_end": session.config_prompt_end,
         "reference_image_end": session.config_reference_image_end,
+        "is_loop": session.config_is_loop,
+        "start_frame_count": session.config_start_frame_count,
+        "end_frame_count": session.config_end_frame_count,
+        "frame_rate": session.config_frame_rate,
     }

@@ -69,7 +69,7 @@ export default function GenerateButton() {
         
         {isGenerating && (
           <div className="generate-status">
-            正在生成图片，请稍候...
+            正在生成，请稍候...
           </div>
         )}
       </div>

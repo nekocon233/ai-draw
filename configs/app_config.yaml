@@ -26,6 +26,10 @@ workflow_defaults:
       description: "纯文本生成图像"
       requires_image: false
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
         - name: "count"
           label: "生成数量"
           type: "number"
@@ -43,6 +47,10 @@ workflow_defaults:
       requires_image: true
       supports_original_size: true
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
         - name: "strength"
           label: "重绘强度"
           type: "number"
@@ -76,6 +84,10 @@ workflow_defaults:
       description: "SDXL 参考图工作流"
       requires_image: true
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "1girl"
         - name: "strength"
           label: "参考强度"
           type: "number"
@@ -99,6 +111,10 @@ workflow_defaults:
       description: "Z-Image Turbo 参考图工作流"
       requires_image: true
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
         - name: "strength"
           label: "参考强度"
           type: "number"
@@ -123,8 +139,13 @@ workflow_defaults:
       requires_image: true
       requires_end_image: true
       supports_original_size: true
+      supports_loop: true
       output_type: "video"
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
         - name: "width"
           label: "视频宽度"
           type: "number"
@@ -139,3 +160,24 @@ workflow_defaults:
           max: 1280
           step: 64
           default: 1024
+        - name: "startFrameCount"
+          label: "起始帧长度"
+          type: "number"
+          min: 1
+          max: 200
+          step: 1
+          default: 33
+        - name: "endFrameCount"
+          label: "结束帧长度"
+          type: "number"
+          min: 1
+          max: 200
+          step: 1
+          default: 33
+        - name: "frameRate"
+          label: "帧率"
+          type: "number"
+          min: 1
+          max: 60
+          step: 1
+          default: 16

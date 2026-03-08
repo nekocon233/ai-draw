@@ -220,6 +220,10 @@ class ComfyUIService:
         prompt_start: str,
         prompt_end: str,
         seed=None,
+        is_loop: bool = False,
+        start_frame_count=None,
+        end_frame_count=None,
+        frame_rate=None,
     ):
         """
         首尾帧生视频（First-Last-Frame to Video）
@@ -240,6 +244,10 @@ class ComfyUIService:
             prompt_start,
             prompt_end,
             seed,
+            is_loop=is_loop,
+            start_frame_count=start_frame_count,
+            end_frame_count=end_frame_count,
+            frame_rate=frame_rate,
         )
         if result.is_success:
             print("[ComfyUIService] FLF2V 视频生成成功")

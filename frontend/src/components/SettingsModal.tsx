@@ -18,6 +18,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     width,
     height,
     useOriginalSize,
+    startFrameCount,
+    endFrameCount,
+    frameRate,
     setStrength,
     setCount,
     setLoraPrompt,
@@ -25,6 +28,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setWidth,
     setHeight,
     setUseOriginalSize,
+    setStartFrameCount,
+    setEndFrameCount,
+    setFrameRate,
   } = useAppStore();
 
   const [form] = Form.useForm();
@@ -36,11 +42,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasLoraPrompt = workflowMeta?.parameters.some(p => p.name === 'lora_prompt') || false;
   const hasWidth = workflowMeta?.parameters.some(p => p.name === 'width') || false;
   const hasHeight = workflowMeta?.parameters.some(p => p.name === 'height') || false;
+  const hasStartFrameCount = workflowMeta?.parameters.some(p => p.name === 'startFrameCount') || false;
+  const hasEndFrameCount = workflowMeta?.parameters.some(p => p.name === 'endFrameCount') || false;
+  const hasFrameRate = workflowMeta?.parameters.some(p => p.name === 'frameRate') || false;
   const supportsOriginalSize = workflowMeta?.supports_original_size === true;
 
   // 获取 width 和 height 的参数配置
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
   const heightParam = workflowMeta?.parameters.find(p => p.name === 'height');
+  const startFrameCountParam = workflowMeta?.parameters.find(p => p.name === 'startFrameCount');
+  const endFrameCountParam = workflowMeta?.parameters.find(p => p.name === 'endFrameCount');
+  const frameRateParam = workflowMeta?.parameters.find(p => p.name === 'frameRate');
 
   // 当弹窗打开时，重置表单值为当前状态
   useEffect(() => {
@@ -52,9 +64,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         imagesPerRow: imagesPerRow,
         width: width ?? widthParam?.default ?? 1024,
         height: height ?? heightParam?.default ?? 1024,
+        startFrameCount: startFrameCount ?? startFrameCountParam?.default ?? 0,
+        endFrameCount: endFrameCount ?? endFrameCountParam?.default ?? 33,
+        frameRate: frameRate ?? frameRateParam?.default ?? 16,
       });
     }
-  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam]);
+  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam, startFrameCount, endFrameCount, frameRate, startFrameCountParam, endFrameCountParam, frameRateParam]);
 
   const handleOk = () => {
     form.validateFields().then((values) => {
@@ -64,6 +79,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       setImagesPerRow(values.imagesPerRow);
       if (hasWidth) setWidth(values.width);
       if (hasHeight) setHeight(values.height);
+      if (hasStartFrameCount) setStartFrameCount(values.startFrameCount);
+      if (hasEndFrameCount) setEndFrameCount(values.endFrameCount);
+      if (hasFrameRate) setFrameRate(values.frameRate);
       onClose();
     });
   };
@@ -217,6 +235,88 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                     step={heightParam?.step || 64}
                     size="small"
                     style={{ width: 80 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
+
+        {hasStartFrameCount && (
+          <Form.Item label={startFrameCountParam?.label || '起始帧长度'}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="startFrameCount" noStyle>
+                  <Slider
+                    min={startFrameCountParam?.min ?? 0}
+                    max={startFrameCountParam?.max ?? 200}
+                    step={startFrameCountParam?.step ?? 1}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="startFrameCount" noStyle>
+                  <InputNumber
+                    min={startFrameCountParam?.min ?? 0}
+                    max={startFrameCountParam?.max ?? 200}
+                    step={startFrameCountParam?.step ?? 1}
+                    size="small"
+                    style={{ width: 70 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
+
+        {hasEndFrameCount && (
+          <Form.Item label={endFrameCountParam?.label || '结束帧长度'}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="endFrameCount" noStyle>
+                  <Slider
+                    min={endFrameCountParam?.min ?? 0}
+                    max={endFrameCountParam?.max ?? 200}
+                    step={endFrameCountParam?.step ?? 1}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="endFrameCount" noStyle>
+                  <InputNumber
+                    min={endFrameCountParam?.min ?? 0}
+                    max={endFrameCountParam?.max ?? 200}
+                    step={endFrameCountParam?.step ?? 1}
+                    size="small"
+                    style={{ width: 70 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
+
+        {hasFrameRate && (
+          <Form.Item label={frameRateParam?.label || '帧率'}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="frameRate" noStyle>
+                  <Slider
+                    min={frameRateParam?.min ?? 1}
+                    max={frameRateParam?.max ?? 60}
+                    step={frameRateParam?.step ?? 1}
+                    marks={{ 1: '1', 16: '16', 30: '30', 60: '60' }}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="frameRate" noStyle>
+                  <InputNumber
+                    min={frameRateParam?.min ?? 1}
+                    max={frameRateParam?.max ?? 60}
+                    step={frameRateParam?.step ?? 1}
+                    size="small"
+                    style={{ width: 70 }}
                   />
                 </Form.Item>
               </Col>

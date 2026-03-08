@@ -32,6 +32,10 @@ export interface GenerateMediaRequest {
   prompt_end?: string;
   reference_image_end?: string;
   use_original_size?: boolean;
+  is_loop?: boolean;
+  start_frame_count?: number;
+  end_frame_count?: number;
+  frame_rate?: number;
 }
 
 export interface GenerateMediaResponse {
@@ -65,6 +69,7 @@ export interface WorkflowMetadata {
   requires_image: boolean;
   requires_end_image?: boolean;
   supports_original_size?: boolean;
+  supports_loop?: boolean;
   output_type?: string;   // 'image' | 'video'
   parameters: WorkflowParameter[];
 }

@@ -51,7 +51,7 @@ export const WS_CONFIG = {
 // ============ 默认配置 ============
 export const DEFAULT_CONFIG = {
   WORKFLOW: 't2i', // 后备默认工作流
-  PROMPT: '1girl',
+  PROMPT: '',
   LORA_PROMPT: '',  // 从后端 API 加载
   STRENGTH: 0.8,
   COUNT: 1,

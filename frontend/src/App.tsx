@@ -86,11 +86,13 @@ function AppContent() {
       if (message.type === 'initial_state' && message.data) {
         // 若服务端未在生成，但前端仍认为在生成（服务重启/断线场景），立即重置
         if (!message.data.is_generating) {
-          const { currentGeneratingMessageId, isGenerating } = useAppStore.getState();
+          const { currentGeneratingMessageId, isGenerating, chatHistory } = useAppStore.getState();
           if (isGenerating || currentGeneratingMessageId) {
-            // 清除 loading 占位符，避免消息气泡一直显示"生成中"
+            // 保留断线前已通过 media_generated 收到的媒体（如视频），而非无条件清空
             if (currentGeneratingMessageId) {
-              useAppStore.getState().updateChatImages(currentGeneratingMessageId, []);
+              const msg = chatHistory.find(m => m.id === currentGeneratingMessageId);
+              const existingImages = (msg?.images?.filter(img => typeof img === 'string') ?? []) as string[];
+              useAppStore.getState().updateChatImages(currentGeneratingMessageId, existingImages);
             }
             useAppStore.setState({ isGenerating: false, currentGeneratingMessageId: null });
             messageApi.warning('连接已恢复，生成任务状态已重置');

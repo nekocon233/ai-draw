@@ -80,6 +80,10 @@ class ChatSession(Base):
     config_reference_image = Column(Text, nullable=True)  # base64 编码的参考图
     config_prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
     config_reference_image_end = Column(Text, nullable=True)  # flf2v 结束帧图片
+    config_is_loop = Column(Boolean, default=False, nullable=True)          # flf2v 循环
+    config_start_frame_count = Column(Integer, nullable=True)               # flf2v 起始帧长度
+    config_end_frame_count = Column(Integer, nullable=True)                 # flf2v 结束帧长度
+    config_frame_rate = Column(Float, nullable=True)                        # flf2v 帧率
     
     # 关系
     user = relationship("User", back_populates="sessions")
@@ -103,6 +107,10 @@ class ChatMessage(Base):
     lora_prompt = Column(String(255))
     reference_image = Column(Text, nullable=True)
     reference_image_end = Column(Text, nullable=True)
+    prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
+    frame_rate = Column(Float, nullable=True)          # flf2v 帧率
+    start_frame_count = Column(Integer, nullable=True)  # flf2v 起始帧长度
+    end_frame_count = Column(Integer, nullable=True)    # flf2v 结束帧长度
     
     created_at = Column(DateTime, default=datetime.now, index=True)
     

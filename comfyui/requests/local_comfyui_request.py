@@ -259,6 +259,10 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         prompt_start: str,
         prompt_end: str,
         seed: int,
+        is_loop: bool = False,
+        start_frame_count=None,
+        end_frame_count=None,
+        frame_rate=None,
     ):
         """
         首尾帧生视频（FLF2V）请求
@@ -316,6 +320,37 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             print(f"[LocalComfyUIRequest] seed 设置成功: {seed}")
         except Exception as e:
             print(f"[LocalComfyUIRequest] 设置 seed 失败: {e}")
+
+        # 设置 isLoop
+        try:
+            workflow.set_node_param("isLoop", "value", is_loop)
+            print(f"[LocalComfyUIRequest] isLoop 设置成功: {is_loop}")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 isLoop 失败: {e}")
+
+        # 设置 startFrameCount
+        if start_frame_count is not None:
+            try:
+                workflow.set_node_param("startFrameCount", "value", start_frame_count)
+                print(f"[LocalComfyUIRequest] startFrameCount 设置成功: {start_frame_count}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 startFrameCount 失败: {e}")
+
+        # 设置 endFrameCount
+        if end_frame_count is not None:
+            try:
+                workflow.set_node_param("endFrameCount", "value", end_frame_count)
+                print(f"[LocalComfyUIRequest] endFrameCount 设置成功: {end_frame_count}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 endFrameCount 失败: {e}")
+
+        # 设置 frameRate
+        if frame_rate is not None:
+            try:
+                workflow.set_node_param("frameRate", "value", float(frame_rate))
+                print(f"[LocalComfyUIRequest] frameRate 设置成功: {frame_rate}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 frameRate 失败: {e}")
 
         print("[LocalComfyUIRequest] FLF2V workflow 参数设置完成")
 

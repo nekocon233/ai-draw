@@ -13,12 +13,18 @@ export default function ParametersPanel() {
     width,
     height,
     useOriginalSize,
+    startFrameCount,
+    endFrameCount,
+    frameRate,
     setStrength, 
     setCount,
     setLoraPrompt,
     setWidth,
     setHeight,
     setUseOriginalSize,
+    setStartFrameCount,
+    setEndFrameCount,
+    setFrameRate,
   } = useAppStore();
 
   // 获取当前工作流的参数配置
@@ -33,6 +39,9 @@ export default function ParametersPanel() {
   const hasLoraPrompt = workflowMeta.parameters.some(p => p.name === 'lora_prompt');
   const hasWidth = workflowMeta.parameters.some(p => p.name === 'width');
   const hasHeight = workflowMeta.parameters.some(p => p.name === 'height');
+  const hasStartFrameCount = workflowMeta.parameters.some(p => p.name === 'startFrameCount');
+  const hasEndFrameCount = workflowMeta.parameters.some(p => p.name === 'endFrameCount');
+  const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
   const supportsOriginalSize = workflowMeta.supports_original_size === true;
 
   return (
@@ -182,6 +191,96 @@ export default function ParametersPanel() {
                 onChange={(val) => setHeight(val || 1024)}
                 size="small"
                 style={{ width: 80 }}
+              />
+            </Col>
+          </Row>
+        </div>
+      )}
+
+      {hasStartFrameCount && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.label || '起始帧长度'}
+          </Text>
+          <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
+            <Col flex="auto">
+              <Slider
+                min={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.min ?? 0}
+                max={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.step ?? 1}
+                value={startFrameCount ?? (workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.default as number) ?? 0}
+                onChange={setStartFrameCount}
+              />
+            </Col>
+            <Col>
+              <InputNumber
+                min={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.min ?? 0}
+                max={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.step ?? 1}
+                value={startFrameCount ?? (workflowMeta.parameters.find(p => p.name === 'startFrameCount')?.default as number) ?? 0}
+                onChange={(val) => setStartFrameCount(val ?? 0)}
+                size="small"
+                style={{ width: 65 }}
+              />
+            </Col>
+          </Row>
+        </div>
+      )}
+
+      {hasEndFrameCount && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.label || '结束帧长度'}
+          </Text>
+          <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
+            <Col flex="auto">
+              <Slider
+                min={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.min ?? 0}
+                max={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.step ?? 1}
+                value={endFrameCount ?? (workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.default as number) ?? 33}
+                onChange={setEndFrameCount}
+              />
+            </Col>
+            <Col>
+              <InputNumber
+                min={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.min ?? 0}
+                max={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.step ?? 1}
+                value={endFrameCount ?? (workflowMeta.parameters.find(p => p.name === 'endFrameCount')?.default as number) ?? 33}
+                onChange={(val) => setEndFrameCount(val ?? 33)}
+                size="small"
+                style={{ width: 65 }}
+              />
+            </Col>
+          </Row>
+        </div>
+      )}
+
+      {hasFrameRate && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'frameRate')?.label || '帧率'}
+          </Text>
+          <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
+            <Col flex="auto">
+              <Slider
+                min={workflowMeta.parameters.find(p => p.name === 'frameRate')?.min ?? 1}
+                max={workflowMeta.parameters.find(p => p.name === 'frameRate')?.max ?? 60}
+                step={workflowMeta.parameters.find(p => p.name === 'frameRate')?.step ?? 1}
+                value={frameRate ?? (workflowMeta.parameters.find(p => p.name === 'frameRate')?.default as number) ?? 16}
+                onChange={setFrameRate}
+              />
+            </Col>
+            <Col>
+              <InputNumber
+                min={workflowMeta.parameters.find(p => p.name === 'frameRate')?.min ?? 1}
+                max={workflowMeta.parameters.find(p => p.name === 'frameRate')?.max ?? 60}
+                step={workflowMeta.parameters.find(p => p.name === 'frameRate')?.step ?? 1}
+                value={frameRate ?? (workflowMeta.parameters.find(p => p.name === 'frameRate')?.default as number) ?? 16}
+                onChange={(val) => setFrameRate(val ?? 16)}
+                size="small"
+                style={{ width: 65 }}
               />
             </Col>
           </Row>

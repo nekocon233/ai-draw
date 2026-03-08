@@ -35,7 +35,7 @@ services:
       # 服务器配置
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=14600
-      - SERVER_RELOAD=true
+      - SERVER_RELOAD=false
       - CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173","http://localhost:14601","${PRODUCTION_DOMAIN}"]
       # 前端端口
       - FRONTEND_HTTP_PORT=14601

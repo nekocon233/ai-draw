@@ -81,11 +81,15 @@ export interface ChatMessage {
   params?: {
     workflow: string;
     strength?: number;
-    count: number;
+    count?: number;
     loraPrompt?: string;
     promptEnd?: string;
     referenceImage?: string;
     referenceImageEnd?: string;
+    isLoop?: boolean;
+    frameRate?: number;
+    startFrameCount?: number;
+    endFrameCount?: number;
   };
 }
 
@@ -236,9 +240,13 @@ export interface ChatHistoryResponse {
     timestamp: number;
     params?: {
       workflow: string;
-      strength: number;
-      count: number;
+      strength?: number;
+      count?: number;
       loraPrompt?: string;
+      isLoop?: boolean;
+      frameRate?: number;
+      startFrameCount?: number;
+      endFrameCount?: number;
     };
     images?: string[];
   }>;

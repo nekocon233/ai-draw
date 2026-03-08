@@ -37,7 +37,7 @@ export default function StatusBar() {
       <Space>
         {isGenerating && (
           <Tag icon={<LoadingOutlined />} color="processing">
-            生成图片中...
+            生成中...
           </Tag>
         )}
 

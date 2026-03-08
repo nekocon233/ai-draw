@@ -80,7 +80,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     config = UserConfig(
         user_id=user.id,
         current_workflow="t2i",
-        prompt=None,
+        prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'prompt'),
         lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
         strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
         count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
@@ -237,6 +237,14 @@ def get_chat_history(
                 params["referenceImage"] = msg.reference_image
             if msg.reference_image_end:
                 params["referenceImageEnd"] = msg.reference_image_end
+            if msg.prompt_end:
+                params["promptEnd"] = msg.prompt_end
+            if msg.frame_rate is not None:
+                params["frameRate"] = msg.frame_rate
+            if msg.start_frame_count is not None:
+                params["startFrameCount"] = msg.start_frame_count
+            if msg.end_frame_count is not None:
+                params["endFrameCount"] = msg.end_frame_count
             msg_dict["params"] = params
         elif msg.type == "assistant":
             # 加载关联的图片
@@ -419,6 +427,10 @@ def save_chat_message(
             lora_prompt=message.get("lora_prompt"),
             reference_image=message.get("reference_image"),
             reference_image_end=message.get("reference_image_end"),
+            prompt_end=message.get("prompt_end"),
+            frame_rate=message.get("frame_rate"),
+            start_frame_count=message.get("start_frame_count"),
+            end_frame_count=message.get("end_frame_count"),
         )
         db.add(chat_msg)
         

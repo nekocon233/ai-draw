@@ -91,7 +91,10 @@
     "inputs": {
       "width": 640,
       "height": 640,
-      "length": 33,
+      "length": [
+        "152",
+        0
+      ],
       "batch_size": 1,
       "positive": [
         "90",
@@ -318,7 +321,10 @@
     "inputs": {
       "width": 640,
       "height": 640,
-      "length": 33,
+      "length": [
+        "151",
+        0
+      ],
       "batch_size": 1,
       "positive": [
         "113",
@@ -450,6 +456,7 @@
       "filename_prefix": "video/ComfyUI",
       "format": "auto",
       "codec": "auto",
+      "video-preview": "",
       "video": [
         "127",
         0
@@ -462,9 +469,12 @@
   },
   "127": {
     "inputs": {
-      "fps": 16,
+      "fps": [
+        "153",
+        0
+      ],
       "images": [
-        "117",
+        "149",
         0
       ]
     },
@@ -473,40 +483,60 @@
       "title": "创建视频"
     }
   },
-  "128": {
+  "132": {
     "inputs": {
-      "images": [
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "isLoop"
+    }
+  },
+  "149": {
+    "inputs": {
+      "boolean": [
+        "132",
+        0
+      ],
+      "on_true": [
         "117",
         0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "预览图像"
-    }
-  },
-  "129": {
-    "inputs": {
-      "images": [
-        "103",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "预览图像"
-    }
-  },
-  "130": {
-    "inputs": {
-      "images": [
+      ],
+      "on_false": [
         "85",
         0
       ]
     },
-    "class_type": "PreviewImage",
+    "class_type": "Switch image [Crystools]",
     "_meta": {
-      "title": "预览图像"
+      "title": "🪛 Switch image"
+    }
+  },
+  "151": {
+    "inputs": {
+      "value": 33
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "endFrameCount"
+    }
+  },
+  "152": {
+    "inputs": {
+      "value": 33
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "startFrameCount"
+    }
+  },
+  "153": {
+    "inputs": {
+      "value": 16
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "frameRate"
     }
   }
 }

@@ -32,6 +32,10 @@ class GenerateMediaRequest(BaseModel):
     prompt_end: Optional[str] = None          # flf2v 结束帧提示词
     reference_image_end: Optional[str] = None  # flf2v 结束帧图片
     use_original_size: bool = True             # 是否使用原图尺寸（默认开启）
+    is_loop: bool = False                      # flf2v 是否循环生成（首尾往返）
+    start_frame_count: Optional[int] = None    # flf2v 起始帧视频帧长度
+    end_frame_count: Optional[int] = None      # flf2v 结束帧视频帧长度
+    frame_rate: Optional[float] = None         # flf2v 帧率
 
 
 class GenerateMediaResponse(BaseModel):
