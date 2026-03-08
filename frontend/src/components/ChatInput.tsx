@@ -554,72 +554,74 @@ export default function ChatInput() {
                     )}
                   </div>
 
-                  {/* ── 参考图 2 / 3（仅 Q-Image i2i 工作流） ── */}
-                  {isI2I && (
-                    <>
-                      <div
-                        className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
-                        onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
-                        title="上传参考图 2（可选）"
-                        style={{ flexShrink: 0 }}
-                      >
-                        {referenceImage2 ? (
-                          <>
-                            <Image
-                              src={referenceImage2}
-                              alt="参考图 2"
-                              width={76}
-                              height={76}
-                              style={{ objectFit: 'cover', display: 'block' }}
-                              preview={{ mask: '预览' }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <div
-                              className="flf2v-frame-card-remove"
-                              onClick={(e) => { e.stopPropagation(); setReferenceImage2(null); }}
-                            >
-                              <CloseOutlined />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flf2v-frame-placeholder">
-                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                            <span className="flf2v-frame-placeholder-label">图 2</span>
+                  {/* ── 参考图 2 / 3（仅 Q-Image i2i 工作流，逐张追加） ── */}
+                  {/* 图 1 已上传后才显示图 2 槽位 */}
+                  {isI2I && referenceImage && (
+                    <div
+                      className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
+                      onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
+                      title={referenceImage2 ? '参考图 2' : '添加参考图 2（可选）'}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {referenceImage2 ? (
+                        <>
+                          <Image
+                            src={referenceImage2}
+                            alt="参考图 2"
+                            width={76}
+                            height={76}
+                            style={{ objectFit: 'cover', display: 'block' }}
+                            preview={{ mask: '预览' }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div
+                            className="flf2v-frame-card-remove"
+                            onClick={(e) => { e.stopPropagation(); setReferenceImage2(null); setReferenceImage3(null); }}
+                          >
+                            <CloseOutlined />
                           </div>
-                        )}
-                      </div>
-                      <div
-                        className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
-                        onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
-                        title="上传参考图 3（可选）"
-                        style={{ flexShrink: 0 }}
-                      >
-                        {referenceImage3 ? (
-                          <>
-                            <Image
-                              src={referenceImage3}
-                              alt="参考图 3"
-                              width={76}
-                              height={76}
-                              style={{ objectFit: 'cover', display: 'block' }}
-                              preview={{ mask: '预览' }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <div
-                              className="flf2v-frame-card-remove"
-                              onClick={(e) => { e.stopPropagation(); setReferenceImage3(null); }}
-                            >
-                              <CloseOutlined />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flf2v-frame-placeholder">
-                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                            <span className="flf2v-frame-placeholder-label">图 3</span>
+                        </>
+                      ) : (
+                        <div className="flf2v-frame-placeholder">
+                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                          <span className="flf2v-frame-placeholder-label">添加</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* 图 2 已上传后才显示图 3 槽位 */}
+                  {isI2I && referenceImage2 && (
+                    <div
+                      className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
+                      onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
+                      title={referenceImage3 ? '参考图 3' : '添加参考图 3（可选）'}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {referenceImage3 ? (
+                        <>
+                          <Image
+                            src={referenceImage3}
+                            alt="参考图 3"
+                            width={76}
+                            height={76}
+                            style={{ objectFit: 'cover', display: 'block' }}
+                            preview={{ mask: '预览' }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div
+                            className="flf2v-frame-card-remove"
+                            onClick={(e) => { e.stopPropagation(); setReferenceImage3(null); }}
+                          >
+                            <CloseOutlined />
                           </div>
-                        )}
-                      </div>
-                    </>
+                        </>
+                      ) : (
+                        <div className="flf2v-frame-placeholder">
+                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                          <span className="flf2v-frame-placeholder-label">添加</span>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </>
               )}
