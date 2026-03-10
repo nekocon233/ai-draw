@@ -192,6 +192,30 @@
   }
 }
 
+/* 删除本轮对话按钮 */
+.user-message {
+  position: relative;
+  padding-left: 36px; /* 为删除按钮留出空间，保证 hover 区域包含按钮 */
+}
+
+.delete-round-btn {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.user-message:hover .delete-round-btn {
+  opacity: 0.8;
+}
+
+.delete-round-btn:hover {
+  opacity: 1 !important;
+}
+
 .result-empty {
   display: flex;
   flex-direction: column;

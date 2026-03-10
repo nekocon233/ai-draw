@@ -1,7 +1,9 @@
 """
 聊天会话管理 API
 """
+import os
 from datetime import datetime
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -9,7 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from server.database import get_db
-from server.models import ChatSession, ChatMessage, User
+from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
 
 router = APIRouter(prefix="/chat")
@@ -272,3 +274,73 @@ def get_session_config(
         "end_frame_count": session.config_end_frame_count,
         "frame_rate": session.config_frame_rate,
     }
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+def delete_message_round(
+    session_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除一轮对话（用户消息 + 紧随其后的 AI 回复）"""
+    # 验证会话属于当前用户
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.user_id == current_user.id
+    ).first()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在"
+        )
+
+    # 查找指定的用户消息
+    user_msg = db.query(ChatMessage).filter(
+        ChatMessage.message_id == message_id,
+        ChatMessage.session_id == session_id,
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.type == 'user'
+    ).first()
+
+    if not user_msg:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="消息不存在"
+        )
+
+    # 查找紧随其后的 AI 回复（同一会话内、created_at 大于用户消息、按时间升序取第一条）
+    assistant_msg = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.type == 'assistant',
+        ChatMessage.created_at > user_msg.created_at
+    ).order_by(ChatMessage.created_at.asc()).first()
+
+    # 收集需要删除的磁盘文件
+    messages_to_delete = [user_msg]
+    if assistant_msg:
+        messages_to_delete.append(assistant_msg)
+
+    try:
+        from utils.config_loader import get_config
+        upload_dir = Path(get_config().paths.upload_dir)
+    except Exception:
+        upload_dir = None
+
+    for msg in messages_to_delete:
+        for img in msg.images:
+            if img.file_path and not img.file_path.startswith('data:') and upload_dir:
+                try:
+                    full_path = upload_dir / img.file_path
+                    full_path.unlink(missing_ok=True)
+                except Exception:
+                    pass  # 文件已不存在，忽略
+
+    # 删除消息（ORM cascade 会自动删除关联的 GeneratedImage）
+    for msg in messages_to_delete:
+        db.delete(msg)
+    db.commit()
+
+    print(f"[Session] 用户 {current_user.username} 删除消息轮次: {message_id}")
+    return {"deleted": True}

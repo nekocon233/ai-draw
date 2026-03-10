@@ -41,7 +41,10 @@ export const apiService = {
   
   deleteSession: (sessionId: string): Promise<{ message: string }> =>
     client.delete(`/chat/sessions/${sessionId}`),
-  
+
+  deleteMessage: (sessionId: string, messageId: string): Promise<{ deleted: boolean }> =>
+    client.delete(`/chat/sessions/${sessionId}/messages/${messageId}`),
+
   updateSessionTitle: (sessionId: string, title: string): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}`, { title }),
   

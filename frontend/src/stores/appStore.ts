@@ -15,7 +15,7 @@ import {
   saveGuestSessionConfig,
   deleteGuestSessionConfig
 } from '../utils/helpers';
-import { saveImages } from '../utils/indexedDB';
+import { saveImages, deleteMessageImages } from '../utils/indexedDB';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
 import type { WorkflowMetadata } from '../types/api';
@@ -124,6 +124,7 @@ interface AppState {
   addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null }) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
+  deleteChatMessage: (messageId: string) => Promise<void>;
   clearChatHistory: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -597,6 +598,50 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       
       return { chatHistory: newHistory };
+    });
+  },
+  deleteChatMessage: async (messageId: string) => {
+    const state = get();
+    const sessionId = state.currentSessionId;
+    if (!sessionId) return;
+
+    // 找到用户消息索引，以及紧跟其后的 AI 回复
+    const msgIndex = state.chatHistory.findIndex(m => m.id === messageId && m.type === 'user');
+    if (msgIndex === -1) return;
+
+    const nextMsg = state.chatHistory[msgIndex + 1];
+    const idsToRemove = new Set<string>([messageId]);
+    if (nextMsg && nextMsg.type === 'assistant') {
+      idsToRemove.add(nextMsg.id);
+    }
+
+    if (isLoggedIn()) {
+      try {
+        await apiService.deleteMessage(sessionId, messageId);
+      } catch (error) {
+        console.error('删除消息失败:', error);
+        throw error;
+      }
+    } else {
+      // 游客模式：从 IndexedDB 删除图片
+      deleteMessageImages(sessionId, messageId).catch(() => {});
+      if (nextMsg && nextMsg.type === 'assistant') {
+        deleteMessageImages(sessionId, nextMsg.id).catch(() => {});
+      }
+    }
+
+    set((state) => {
+      const newHistory = state.chatHistory.filter(m => !idsToRemove.has(m.id));
+      const updatedSessions = state.sessions.map(s =>
+        s.id === sessionId
+          ? { ...s, message_count: Math.max(0, s.message_count - idsToRemove.size), updated_at: Date.now() }
+          : s
+      );
+      if (!isLoggedIn()) {
+        saveGuestSessionHistory(sessionId, newHistory);
+        saveGuestSessions(updatedSessions);
+      }
+      return { chatHistory: newHistory, sessions: updatedSessions };
     });
   },
   clearChatHistory: () => set({ chatHistory: [] }),

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Image, Spin, Tag, Button } from 'antd';
-import { DownloadOutlined, PictureOutlined, LoadingOutlined } from '@ant-design/icons';
+import { Image, Spin, Tag, Button, Popconfirm } from 'antd';
+import { DownloadOutlined, PictureOutlined, LoadingOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow, currentSessionId } = useAppStore();
+  const { chatHistory, imagesPerRow, currentSessionId, deleteChatMessage } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -61,6 +61,22 @@ export default function ResultGrid() {
             {message.type === 'user' ? (
               // 用户消息（右侧）
               <div className="chat-message-content user-message">
+                <Popconfirm
+                  title="确认删除这轮对话？"
+                  onConfirm={() => deleteChatMessage(message.id)}
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  placement="topLeft"
+                >
+                  <Button
+                    className="delete-round-btn"
+                    type="text"
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                  />
+                </Popconfirm>
                 <div className="chat-message-bubble">
                   {/* 参考图缩略图（可点击预览） */}
                   {(message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
