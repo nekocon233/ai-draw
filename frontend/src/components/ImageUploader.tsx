@@ -10,9 +10,10 @@ interface ImageSlotProps {
   label: string;
   image: string | null;
   setImage: (img: string | null) => void;
+  onDelete?: () => void;
 }
 
-function ImageSlot({ label, image, setImage }: ImageSlotProps) {
+function ImageSlot({ label, image, setImage, onDelete }: ImageSlotProps) {
   const { setError } = useAppStore();
 
   const uploadProps: UploadProps = {
@@ -54,7 +55,11 @@ function ImageSlot({ label, image, setImage }: ImageSlotProps) {
             size="small"
             icon={<DeleteOutlined />}
             onClick={() => {
-              setImage(null);
+              if (onDelete) {
+                onDelete();
+              } else {
+                setImage(null);
+              }
               setTimeout(() => useAppStore.getState().saveSessionConfig(), 0);
             }}
           >
@@ -99,10 +104,24 @@ export default function ImageUploader() {
     referenceImage3, setReferenceImage3,
   } = useAppStore();
 
+  // 删除时向前顶替：删第 1 张 → 2→1, 3→2；删第 2 张 → 3→2；删第 3 张 → 直接清空
+  const handleDelete1 = () => {
+    setReferenceImage(referenceImage2);
+    setReferenceImage2(referenceImage3);
+    setReferenceImage3(null);
+  };
+  const handleDelete2 = () => {
+    setReferenceImage2(referenceImage3);
+    setReferenceImage3(null);
+  };
+  const handleDelete3 = () => {
+    setReferenceImage3(null);
+  };
+
   const slots = [
-    { label: '参考图片 1', image: referenceImage, setImage: setReferenceImage },
-    { label: '参考图片 2（可选）', image: referenceImage2, setImage: setReferenceImage2 },
-    { label: '参考图片 3（可选）', image: referenceImage3, setImage: setReferenceImage3 },
+    { label: '参考图片 1', image: referenceImage, setImage: setReferenceImage, onDelete: handleDelete1 },
+    { label: '参考图片 2（可选）', image: referenceImage2, setImage: setReferenceImage2, onDelete: handleDelete2 },
+    { label: '参考图片 3（可选）', image: referenceImage3, setImage: setReferenceImage3, onDelete: handleDelete3 },
   ];
 
   return (

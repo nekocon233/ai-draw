@@ -5,6 +5,7 @@ AI 绘画服务核心模块
 """
 import asyncio
 import base64
+import os
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -137,8 +138,8 @@ class AIDrawService:
             # 使用用户选择的工作流
             workflow_type = workflow
             print(f"[AIDrawService] 使用工作流: {workflow_type}")
-            
-            # 切换工作流
+
+            # 切换 ComfyUI 工作流
             if workflow_type != self.comfyui.get_current_workflow_type():
                 self.comfyui.switch_workflow(workflow_type)
             
@@ -311,17 +312,29 @@ class AIDrawService:
                         if not image_base64:
                             workflow_label = workflow_meta.get('label', workflow_type)
                             raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
-                        
-                        await self.comfyui.generate_i2i(
-                            finish_callback=finish_callback,
-                            image_base64=image_base64,
-                            image_base64_2=image_base64_2,
-                            image_base64_3=image_base64_3,
-                            prompt_text=prompt,
-                            denoise_value=strength,
-                            lora_prompt=lora_prompt or "",
-                            seed=seed,
-                        )
+
+                        if workflow_type == 'nano_banana_pro':
+                            nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
+                            await self.comfyui.generate_nano_banana(
+                                finish_callback=finish_callback,
+                                image_base64=image_base64,
+                                image_base64_2=image_base64_2,
+                                image_base64_3=image_base64_3,
+                                prompt_text=prompt,
+                                api_key=nano_api_key,
+                                seed=seed,
+                            )
+                        else:
+                            await self.comfyui.generate_i2i(
+                                finish_callback=finish_callback,
+                                image_base64=image_base64,
+                                image_base64_2=image_base64_2,
+                                image_base64_3=image_base64_3,
+                                prompt_text=prompt,
+                                denoise_value=strength,
+                                lora_prompt=lora_prompt or "",
+                                seed=seed,
+                            )
                     else:
                         # 文生图工作流
                         await self.comfyui.generate_t2i(
@@ -359,6 +372,9 @@ class AIDrawService:
             
         except Exception as e:
             error_msg = f"图像生成失败: {str(e)}"
+            print(f"[AIDrawService] 错误: {error_msg}")
+            import traceback
+            traceback.print_exc()
             self._notify_state_change('generation_progress', error_msg)
             raise
         finally:

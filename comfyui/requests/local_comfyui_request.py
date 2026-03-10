@@ -113,6 +113,44 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         #     self.log_thread.join(timeout=1)
         #     self.log_thread = None
 
+    def _remove_unused_image_nodes(self, workflow, has_img2: bool, has_img3: bool):
+        """
+        从 workflow 中删除未使用的可选图片节点（main_image_1 / main_image_2）及其引用。
+        workflow 是 ComfyWorkflowWrapper（继承自 dict），可直接操作。
+        按从后往前的顺序处理，确保 has_img2=False 时也删除 main_image_1。
+        """
+        titles_to_remove = []
+        if not has_img3:
+            titles_to_remove.append("main_image_2")
+        if not has_img2:
+            titles_to_remove.append("main_image_1")
+
+        for title in titles_to_remove:
+            # 查找节点 ID
+            node_id = None
+            for nid, node in list(workflow.items()):
+                if node.get("_meta", {}).get("title") == title:
+                    node_id = nid
+                    break
+            if node_id is None:
+                print(f"[LocalComfyUIRequest] 未找到节点 '{title}'，跳过")
+                continue
+
+            # 删除节点本身
+            del workflow[node_id]
+            print(f"[LocalComfyUIRequest] 已从 workflow 移除节点: {title} (id={node_id})")
+
+            # 清理其他节点中所有指向该节点的输入项
+            for node in workflow.values():
+                inputs = node.get("inputs", {})
+                keys_to_delete = [
+                    k for k, v in inputs.items()
+                    if isinstance(v, list) and len(v) >= 1 and str(v[0]) == str(node_id)
+                ]
+                for k in keys_to_delete:
+                    del inputs[k]
+                    print(f"[LocalComfyUIRequest] 已清理对节点 {node_id}({title}) 的引用: inputs['{k}']")
+
     async def _queue_and_poll(self, workflow, timeout: int = 3600, poll_interval: float = 3.0) -> str:
         """
         提交工作流并轮询历史 API 等待完成，避免 WebSocket 超时导致挂死。
@@ -186,6 +224,9 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         """
         异步发送I2I生成请求，返回ComfyRequestResult对象
         """
+        # 根据实际传入的图片数量，删除未使用的可选节点，避免默认图片干扰结果
+        self._remove_unused_image_nodes(workflow, has_img2=bool(image_base64_2), has_img3=bool(image_base64_3))
+
         # 先在系统tmp目录下根据image_b64创建临时图片
         input_filename = os.path.join(tempfile.gettempdir(), "input_image.png")
         try:
@@ -410,6 +451,105 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 error="",
             )
         return ComfyUIRequestResult(success=False, data=None, error="FLF2V 未获得有效视频结果")
+
+    async def generate_nano_banana(
+        self,
+        workflow,
+        image_b64: str,
+        prompt_text: str,
+        seed: int,
+        api_key: str,
+        image_base64_2=None,
+        image_base64_3=None,
+    ):
+        """
+        Nano Banana Pro 图生图请求
+        """
+        # 根据实际传入的图片数量，删除未使用的可选节点，避免默认图片干扰结果
+        self._remove_unused_image_nodes(workflow, has_img2=bool(image_base64_2), has_img3=bool(image_base64_3))
+
+        # 写入并上传主图片
+        input_filename = os.path.join(tempfile.gettempdir(), "nano_banana_input.png")
+        try:
+            async with aiofiles.open(input_filename, "wb") as f:
+                await f.write(base64.b64decode(image_b64))
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"写入临时图片失败: {str(e)}")
+
+        try:
+            image_metadata = self.api.upload_image(input_filename)
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"上传图片失败: {str(e)}")
+
+        img_path = (
+            f"{image_metadata['subfolder']}/{image_metadata['name']}"
+            if image_metadata.get('subfolder')
+            else image_metadata['name']
+        )
+        try:
+            workflow.set_node_param("main_image", "image", img_path)
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 main_image 失败: {e}")
+
+        # 可选图片 2
+        if image_base64_2:
+            try:
+                fn2 = os.path.join(tempfile.gettempdir(), "nano_banana_input_2.png")
+                async with aiofiles.open(fn2, "wb") as f:
+                    await f.write(base64.b64decode(image_base64_2))
+                meta2 = self.api.upload_image(fn2)
+                path2 = f"{meta2['subfolder']}/{meta2['name']}" if meta2.get('subfolder') else meta2['name']
+                workflow.set_node_param("main_image_1", "image", path2)
+                print("[LocalComfyUIRequest] nano_banana main_image_1 设置成功")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 main_image_1 失败: {e}")
+
+        # 可选图片 3
+        if image_base64_3:
+            try:
+                fn3 = os.path.join(tempfile.gettempdir(), "nano_banana_input_3.png")
+                async with aiofiles.open(fn3, "wb") as f:
+                    await f.write(base64.b64decode(image_base64_3))
+                meta3 = self.api.upload_image(fn3)
+                path3 = f"{meta3['subfolder']}/{meta3['name']}" if meta3.get('subfolder') else meta3['name']
+                workflow.set_node_param("main_image_2", "image", path3)
+                print("[LocalComfyUIRequest] nano_banana main_image_2 设置成功")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 main_image_2 失败: {e}")
+
+        # 设置提示词
+        try:
+            workflow.set_node_param("positive_prompt", "positive", prompt_text)
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 positive_prompt 失败: {e}")
+
+        # 设置 seed
+        try:
+            workflow.set_node_param("seed", "value", seed)
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 seed 失败: {e}")
+
+        # 设置 API Key
+        try:
+            workflow.set_node_param("api-key", "string", api_key)
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 api-key 失败: {e}")
+
+        print("[LocalComfyUIRequest] Nano Banana workflow 参数设置完成")
+
+        # 执行工作流
+        prompt_id = await self._queue_and_poll(workflow)
+        image_node_id = workflow.get_node_id("保存图像")
+        history = await asyncio.to_thread(self.api.get_history, prompt_id)
+        results = history[prompt_id]["outputs"][image_node_id]["images"]
+
+        if results:
+            first_result = results[0]
+            base64_content = self.api.get_image(
+                first_result["filename"], first_result["subfolder"], first_result["type"]
+            )
+            return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
+        return ComfyUIRequestResult(success=False, data=None, error="Nano Banana 未获得有效图像结果")
 
     async def get_state(self) -> ComfyUIRequestState:
         """异步检查本地ComfyUI服务状态"""

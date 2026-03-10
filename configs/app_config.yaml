@@ -18,6 +18,7 @@ workflow_defaults:
     reference: "reference_workflow_api.json"
     reference_zimage: "reference_zimage_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
+    nano_banana_pro: "nano_banana_pro_workflow_api.json"
   
   # 工作流元数据
   workflow_metadata:
@@ -133,6 +134,16 @@ workflow_defaults:
           label: "LoRA 提示词"
           type: "text"
           default: "<lora:AmeniwaZ:0.8>"
+    nano_banana_pro:
+      label: "图生图（Nano Banana Pro）"
+      description: "基于 Nano Banana Pro 的图生图工作流"
+      requires_image: true
+      output_type: "image"
+      parameters:
+        - name: "prompt"
+          label: "描述 / 指令"
+          type: "text"
+          default: "一个女孩"
     flf2v:
       label: "首尾帧生视频"
       description: "基于首尾帧生成过渡视频"

@@ -51,7 +51,8 @@ export default function ChatInput() {
   const isFlf2v = workflowMeta?.requires_end_image === true;
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
   const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
-  const isT2I = !isRequiresImage && !isFlf2v; // 文生图：不允许上传图片
+  const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
+  const isT2I = !isRequiresImage && !isFlf2v && !isNanoBananaPro; // 文生图：不允许上传图片
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
@@ -166,6 +167,7 @@ export default function ChatInput() {
 
     try {
       const state = useAppStore.getState();
+
       // 接口立即返回，生成在后台执行，结果和错误通过 WebSocket 推送
       await apiService.generateMedia({
         prompt,
@@ -256,11 +258,11 @@ export default function ChatInput() {
       const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
 
       // 普通 requires_image 模式：按序填充槽位
-      // Q-Image (i2i)：最多 3 张；参考图工作流：仅 1 张
+      // Q-Image (i2i) / Nano Banana Pro：最多 3 张；参考图工作流：仅 1 张
       const getNextSlot = () => {
         if (!currentState.referenceImage) return setReferenceImage;
-        if (isI2I && !currentState.referenceImage2) return setReferenceImage2;
-        if (isI2I && !currentState.referenceImage3) return setReferenceImage3;
+        if ((isI2I || isNanoBananaPro) && !currentState.referenceImage2) return setReferenceImage2;
+        if ((isI2I || isNanoBananaPro) && !currentState.referenceImage3) return setReferenceImage3;
         return setReferenceImage; // 全满时替换第 1 张
       };
 
@@ -291,8 +293,8 @@ export default function ChatInput() {
         message.success('尾帧已设置!');
       } else if (isRequiresImage) {
         if (!currentState.referenceImage) { setReferenceImage(url); }
-        else if (isI2I && !currentState.referenceImage2) { setReferenceImage2(url); }
-        else if (isI2I && !currentState.referenceImage3) { setReferenceImage3(url); }
+        else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage2) { setReferenceImage2(url); }
+        else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage3) { setReferenceImage3(url); }
         else { setReferenceImage(url); }
         message.success('图片已设置!');
       } else {
@@ -519,13 +521,13 @@ export default function ChatInput() {
           <>
             {/* 输入框行（requires_image 时包含帧卡片） */}
             <div className="chat-input-row">
-              {isRequiresImage && (
+              {(isRequiresImage || isNanoBananaPro) && (
                 <>
-                  {/* ── 参考图 1（所有 requires_image 工作流都有） ── */}
+                  {/* ── 参考图 1（所有 requires_image 工作流都有，Nano Banana Pro 可选） ── */}
                   <div
                     className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
                     onClick={() => !referenceImage && fileInputRef.current?.click()}
-                    title={isI2I ? '上传参考图 1' : '上传参考图'}
+                    title={isI2I ? '上传参考图 1' : isNanoBananaPro ? '上传参考图（可选）' : '上传参考图'}
                     style={{ flexShrink: 0 }}
                   >
                     {referenceImage ? (
@@ -541,7 +543,7 @@ export default function ChatInput() {
                         />
                         <div
                           className="flf2v-frame-card-remove"
-                          onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
+                          onClick={(e) => { e.stopPropagation(); setReferenceImage(referenceImage2); setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
                         >
                           <CloseOutlined />
                         </div>
@@ -549,14 +551,16 @@ export default function ChatInput() {
                     ) : (
                       <div className="flf2v-frame-placeholder">
                         <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                        <span className="flf2v-frame-placeholder-label">{isI2I ? '图 1' : '参考图'}</span>
+                        <span className="flf2v-frame-placeholder-label">
+                          {isI2I ? '图 1' : isNanoBananaPro ? '参考图' : '参考图'}
+                        </span>
                       </div>
                     )}
                   </div>
 
-                  {/* ── 参考图 2 / 3（仅 Q-Image i2i 工作流，逐张追加） ── */}
+                  {/* ── 参考图 2 / 3（i2i 和 Nano Banana Pro，逐张追加） ── */}
                   {/* 图 1 已上传后才显示图 2 槽位 */}
-                  {isI2I && referenceImage && (
+                  {(isI2I || isNanoBananaPro) && referenceImage && (
                     <div
                       className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
                       onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
@@ -576,7 +580,7 @@ export default function ChatInput() {
                           />
                           <div
                             className="flf2v-frame-card-remove"
-                            onClick={(e) => { e.stopPropagation(); setReferenceImage2(null); setReferenceImage3(null); }}
+                            onClick={(e) => { e.stopPropagation(); setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
                           >
                             <CloseOutlined />
                           </div>
@@ -590,7 +594,7 @@ export default function ChatInput() {
                     </div>
                   )}
                   {/* 图 2 已上传后才显示图 3 槽位 */}
-                  {isI2I && referenceImage2 && (
+                  {(isI2I || isNanoBananaPro) && referenceImage2 && (
                     <div
                       className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
                       onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
@@ -630,9 +634,9 @@ export default function ChatInput() {
                   ref={textAreaRef}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="描述你想要生成的图片..."
+                  placeholder={isNanoBananaPro ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...'}
                   className="chat-textarea"
-                  autoSize={{ minRows: isRequiresImage ? 1 : 2, maxRows: 6 }}
+                  autoSize={{ minRows: (isRequiresImage || isNanoBananaPro) ? 1 : 2, maxRows: 6 }}
                   onPressEnter={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -690,7 +694,7 @@ export default function ChatInput() {
                 }
               }}
             />
-            {/* 文生图不显示上传按钮；仅非 requires_image 且非 flf2v 且非 t2i 时保留（当前无此场景，预留扩展） */}
+            {/* 预留：文生图不显示上传按钮（isT2I 时无任何图片入口） */}
 
             {/* 参数设置 */}
             <button 

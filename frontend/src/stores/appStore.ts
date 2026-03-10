@@ -91,6 +91,8 @@ interface AppState {
     referenceImage3: string | null;
     referenceImageEnd: string | null;
     promptEnd: string;
+    prompt: string;       // 工作流独立 prompt
+    loraPrompt: string;   // 工作流独立 LoRA prompt
   }>;
   
   // UI 状态
@@ -282,6 +284,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         referenceImage3: state.referenceImage3,
         referenceImageEnd: state.referenceImageEnd,
         promptEnd: state.promptEnd,
+        prompt: state.prompt,
+        loraPrompt: state.loraPrompt,
       };
       const saved = stash[workflow];
       (updates as any).referenceImage = saved?.referenceImage ?? null;
@@ -289,6 +293,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       (updates as any).referenceImage3 = saved?.referenceImage3 ?? null;
       (updates as any).referenceImageEnd = saved?.referenceImageEnd ?? null;
       (updates as any).promptEnd = saved?.promptEnd ?? '';
+      // 恢复工作流独立 prompt/loraPrompt，无暂存时才使用 yaml 默认值
+      if (saved?.prompt !== undefined) {
+        (updates as any).prompt = saved.prompt;
+      }
+      if (saved?.loraPrompt !== undefined) {
+        (updates as any).loraPrompt = saved.loraPrompt;
+      }
       (updates as any).workflowImageStash = stash;
 
       set(updates);
@@ -1078,8 +1089,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       count: state.count,
       images_per_row: state.imagesPerRow,
       reference_image: state.referenceImage,
-      reference_image_2: state.referenceImage2 || undefined,
-      reference_image_3: state.referenceImage3 || undefined,
+      reference_image_2: state.referenceImage2,
+      reference_image_3: state.referenceImage3,
       prompt_end: state.promptEnd || undefined,
       reference_image_end: state.referenceImageEnd || undefined,
       is_loop: state.isLoop,

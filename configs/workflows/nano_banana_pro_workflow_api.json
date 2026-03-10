@@ -1,0 +1,118 @@
+{
+  "4": {
+    "inputs": {
+      "prompt": [
+        "9",
+        0
+      ],
+      "model": "Nano Banana Pro",
+      "batch_size": 1,
+      "seed": [
+        "10",
+        0
+      ],
+      "system_prompt": "",
+      "api_key": [
+        "11",
+        0
+      ],
+      "aspect_ratio": "auto",
+      "image_size": "auto",
+      "images": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "NanoBananaGeminiImageNode",
+    "_meta": {
+      "title": "Nano Banana Gemini"
+    }
+  },
+  "5": {
+    "inputs": {
+      "image1": [
+        "6",
+        0
+      ],
+      "image2": [
+        "7",
+        0
+      ],
+      "image3": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "BatchImages",
+    "_meta": {
+      "title": "Batch Images"
+    }
+  },
+  "6": {
+    "inputs": {
+      "image": "image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image"
+    }
+  },
+  "7": {
+    "inputs": {
+      "image": "image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image_1"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": "image.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image_2"
+    }
+  },
+  "9": {
+    "inputs": {
+      "positive": "一个女孩"
+    },
+    "class_type": "easy positive",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "10": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "seed"
+    }
+  },
+  "11": {
+    "inputs": {
+      "string": ""
+    },
+    "class_type": "StringConstant",
+    "_meta": {
+      "title": "api-key"
+    }
+  },
+  "12": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  }
+}

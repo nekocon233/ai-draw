@@ -58,6 +58,21 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    async def generate_nano_banana(
+        self,
+        workflow,
+        image_b64: str,
+        prompt_text: str,
+        seed: int,
+        api_key: str,
+        image_base64_2=None,
+        image_base64_3=None,
+    ) -> ComfyUIRequestResult:
+        """
+        Nano Banana Pro 图生图，由子类实现
+        """
+
+    @abstractmethod
     async def get_state(self) -> ComfyUIRequestState:
         """
         获取ComfyUI服务的当前状态，由子类实现
