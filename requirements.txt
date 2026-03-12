@@ -3,6 +3,7 @@ pillow>=10.0.0
 
 # AI & OpenAI
 openai>=1.0.0
+google-generativeai>=0.8
 
 # FastAPI & server
 fastapi>=0.104.0

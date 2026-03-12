@@ -78,6 +78,9 @@ interface AppState {
   endFrameCount: number | null;   // flf2v 结束帧长度
   frameRate: number | null;       // flf2v 帧率
   
+  // Gemini 多轮对话开关（nano_banana_pro 专用）
+  nanoBananaSendHistory: boolean;
+  
   // 参考图片
   referenceImage: string | null;
   referenceImage2: string | null; // i2i 第 2 张参考图
@@ -117,6 +120,7 @@ interface AppState {
   setStartFrameCount: (v: number | null) => void;
   setEndFrameCount: (v: number | null) => void;
   setFrameRate: (v: number | null) => void;
+  setNanoBananaSendHistory: (v: boolean) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
@@ -190,6 +194,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   startFrameCount: null,
   endFrameCount: null,
   frameRate: null,
+  nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
   referenceImage: initialConfig.referenceImage,
   referenceImage2: null,
   referenceImage3: null,
@@ -392,6 +397,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ frameRate: v });
     const state = get();
     state.saveSessionConfig();
+  },
+  setNanoBananaSendHistory: (v) => {
+    set({ nanoBananaSendHistory: v });
+    localStorage.setItem('nanoBananaSendHistory', String(v));
   },
   addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount }) => {
     const state = get();

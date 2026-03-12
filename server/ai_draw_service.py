@@ -135,6 +135,8 @@ class AIDrawService:
         start_frame_count: Optional[int] = None,
         end_frame_count: Optional[int] = None,
         frame_rate: Optional[float] = None,
+        send_history: bool = False,
+        session_id: Optional[str] = None,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
@@ -314,34 +316,54 @@ class AIDrawService:
                             'total': count
                         })
                     
-                    if requires_image:
-                        # 需要参考图的工作流
+                    if workflow_type == 'nano_banana_pro' and send_history and session_id:
+                        # 场景1：Gemini 多轮对话路径（携带历史，绕过 ComfyUI）
+                        await self.generate_nano_banana_gemini_chat(
+                            session_id=session_id,
+                            current_prompt=prompt,
+                            current_image_b64=image_base64,
+                            current_image_b64_2=image_base64_2,
+                            current_image_b64_3=image_base64_3,
+                            finish_callback=finish_callback,
+                        )
+                    elif workflow_type == 'nano_banana_pro' and image_base64:
+                        # 场景2：有参考图 → ComfyUI nano_banana
+                        nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
+                        await self.comfyui.generate_nano_banana(
+                            finish_callback=finish_callback,
+                            image_base64=image_base64,
+                            image_base64_2=image_base64_2,
+                            image_base64_3=image_base64_3,
+                            prompt_text=prompt,
+                            api_key=nano_api_key,
+                            seed=seed,
+                        )
+                    elif workflow_type == 'nano_banana_pro':
+                        # 场景3：无图无历史 → Gemini 单轮（图片可选）
+                        await self.generate_nano_banana_gemini_chat(
+                            session_id=session_id or '',
+                            current_prompt=prompt,
+                            current_image_b64=None,
+                            current_image_b64_2=None,
+                            current_image_b64_3=None,
+                            finish_callback=finish_callback,
+                        )
+                    elif requires_image:
+                        # 其他需要参考图的工作流（i2i, reference 等）
                         if not image_base64:
                             workflow_label = workflow_meta.get('label', workflow_type)
                             raise ValueError(f"工作流 '{workflow_label}' 需要提供参考图")
 
-                        if workflow_type == 'nano_banana_pro':
-                            nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
-                            await self.comfyui.generate_nano_banana(
-                                finish_callback=finish_callback,
-                                image_base64=image_base64,
-                                image_base64_2=image_base64_2,
-                                image_base64_3=image_base64_3,
-                                prompt_text=prompt,
-                                api_key=nano_api_key,
-                                seed=seed,
-                            )
-                        else:
-                            await self.comfyui.generate_i2i(
-                                finish_callback=finish_callback,
-                                image_base64=image_base64,
-                                image_base64_2=image_base64_2,
-                                image_base64_3=image_base64_3,
-                                prompt_text=prompt,
-                                denoise_value=strength,
-                                lora_prompt=lora_prompt or "",
-                                seed=seed,
-                            )
+                        await self.comfyui.generate_i2i(
+                            finish_callback=finish_callback,
+                            image_base64=image_base64,
+                            image_base64_2=image_base64_2,
+                            image_base64_3=image_base64_3,
+                            prompt_text=prompt,
+                            denoise_value=strength,
+                            lora_prompt=lora_prompt or "",
+                            seed=seed,
+                        )
                     else:
                         # 文生图工作流
                         await self.comfyui.generate_t2i(
@@ -388,6 +410,125 @@ class AIDrawService:
             self.is_generating = False
             self._notify_state_change('is_generating', False)
     
+    # ── Gemini 多轮对话辅助 ─────────────────────────────────────────────────
+
+    def _load_image_b64(self, path: str) -> Optional[str]:
+        """从文件路径或 data URL 读取图片，返回 base64（不含前缀），失败返回 None"""
+        try:
+            if not path:
+                return None
+            if path.startswith('data:image'):
+                return path.split(',', 1)[1]
+            elif path.startswith('/uploads/'):
+                # 服务器生成图：/uploads/generated/img_xxx.png → 相对路径
+                file_path = Path(path[1:])  # 去掉开头的 /
+                if file_path.exists():
+                    return base64.b64encode(file_path.read_bytes()).decode('utf-8')
+        except Exception as e:
+            print(f"[AIDrawService] 读取图片失败 ({str(path)[:60]}): {e}")
+        return None
+
+    async def generate_nano_banana_gemini_chat(
+        self,
+        session_id: str,
+        current_prompt: str,
+        current_image_b64: Optional[str],
+        current_image_b64_2: Optional[str],
+        current_image_b64_3: Optional[str],
+        finish_callback,
+    ):
+        """使用 Gemini 多轮对话路径生成图像（nano_banana_pro + send_history）"""
+        from server.database import get_db_session
+        from server.models import ChatMessage, GeneratedImage
+        from utils.gemini_chat import GeminiChat
+
+        nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
+        if not nano_api_key:
+            raise ValueError("未配置 NANO_BANANA_API_KEY，无法调用 Gemini")
+
+        # ── 从数据库读取历史对话（只取完整轮次：user + assistant 配对） ──
+        history = []
+        with get_db_session() as db:
+            messages = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.created_at.asc())
+                .all()
+            )
+
+            i = 0
+            while i < len(messages):
+                msg = messages[i]
+                if msg.type != 'user':
+                    i += 1
+                    continue
+
+                # 跳过 flf2v 工作流的轮次（含其 assistant 回复）
+                if msg.workflow == 'flf2v':
+                    i += 1
+                    if i < len(messages) and messages[i].type == 'assistant':
+                        i += 1
+                    continue
+
+                # 必须有紧随的 assistant 消息，否则是当前正在进行的请求，跳过
+                if i + 1 >= len(messages) or messages[i + 1].type != 'assistant':
+                    i += 1
+                    continue
+
+                assistant_msg = messages[i + 1]
+
+                # 收集该轮用户上传的图片
+                user_images = []
+                for ref in [msg.reference_image, msg.reference_image_2, msg.reference_image_3]:
+                    b64 = self._load_image_b64(ref)
+                    if b64:
+                        user_images.append(b64)
+
+                # 收集该轮 AI 生成的图片
+                result_images = []
+                gen_imgs = (
+                    db.query(GeneratedImage)
+                    .filter(GeneratedImage.message_id == assistant_msg.message_id)
+                    .order_by(GeneratedImage.image_index.asc())
+                    .all()
+                )
+                for gen_img in gen_imgs:
+                    b64 = self._load_image_b64(gen_img.file_path)
+                    if b64:
+                        result_images.append(b64)
+
+                history.append({
+                    "prompt": msg.content or "",
+                    "images": user_images,
+                    "result_images": result_images,
+                })
+                i += 2
+
+        print(f"[AIDrawService] Gemini 多轮对话，历史轮次: {len(history)}")
+
+        # ── 构建当前图片列表 ───────────────────────────────────────────────
+        current_images = [
+            img for img in [current_image_b64, current_image_b64_2, current_image_b64_3]
+            if img
+        ]
+
+        # ── 调用 Gemini（在线程池中执行，避免阻塞事件循环） ───────────────
+        gemini = GeminiChat(api_key=nano_api_key, model_name="gemini-3-pro-image-preview")
+        result_imgs = await asyncio.to_thread(
+            gemini.generate,
+            current_prompt=current_prompt,
+            current_images=current_images,
+            history=history,
+        )
+
+        if not result_imgs:
+            print("[AIDrawService] Gemini 未返回任何图像")
+            finish_callback(None)
+            return
+
+        # 回调保存图片（取第一张，与 ComfyUI 路径行为一致）
+        finish_callback(f"data:image/png;base64,{result_imgs[0]}")
+
     def clear_previews(self):
         """清空预览图片"""
         self.preview_items = []

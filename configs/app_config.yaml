@@ -141,7 +141,7 @@ workflow_defaults:
     nano_banana_pro:
       label: "图生图（Nano Banana Pro）"
       description: "基于 Nano Banana Pro 的图生图工作流"
-      requires_image: true
+      requires_image: false
       output_type: "image"
       prompt_template: "你是一个图像描述扩写专家，当前使用 Nano Banana Pro（Gemini）模型，能够理解极为丰富的中文细节描述。请将以下简短描述扩写为非常详细丰富的中文描述，涵盖人物外貌、表情、服装、姿势、场景环境、光线氛围、风格等所有细节：\n描述：{desc}\n只输出扩写后的中文描述，不要解释："
       parameters:

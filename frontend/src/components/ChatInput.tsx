@@ -36,6 +36,7 @@ export default function ChatInput() {
     frameRate,
     startFrameCount,
     endFrameCount,
+    nanoBananaSendHistory,
     setPrompt,
     setPromptEnd,
     setCurrentWorkflow,
@@ -44,6 +45,7 @@ export default function ChatInput() {
     setReferenceImage3,
     setReferenceImageEnd,
     setIsLoop,
+    setNanoBananaSendHistory,
     setError,
     clearError,
   } = useAppStore();
@@ -187,8 +189,14 @@ export default function ChatInput() {
         start_frame_count: isFlf2v ? (state.startFrameCount ?? undefined) : undefined,
         end_frame_count: isFlf2v ? (state.endFrameCount ?? undefined) : undefined,
         frame_rate: isFlf2v ? (state.frameRate ?? undefined) : undefined,
+        // Gemini 多轮对话（nano_banana_pro 开关开时附加）
+        send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
+        session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,
       });
-      // 任务已提交，无需在此处理结果
+      // 携带历史发送时清空输入框（普通模式提示词随工作流保留）
+      if (isNanoBananaPro && nanoBananaSendHistory) {
+        setPrompt('');
+      }
     } catch (err: any) {
       // HTTP 层面失败（任务未能提交到后台）
       useAppStore.getState().updateChatImages(messageId, []);
@@ -714,6 +722,20 @@ export default function ChatInput() {
               <ThunderboltOutlined />
             </button>
 
+            {/* Gemini 历史对话开关（仅 nano_banana_pro 工作流显示） */}
+            {isNanoBananaPro && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Switch
+                  size="small"
+                  checked={nanoBananaSendHistory}
+                  onChange={setNanoBananaSendHistory}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                  携带历史
+                </span>
+              </div>
+            )}
+
             {/* 工作流选择器 */}
             <Select
               value={currentWorkflow}
@@ -733,7 +755,7 @@ export default function ChatInput() {
             type="primary"
             icon={isGenerating ? <StopOutlined /> : <SendOutlined />}
             onClick={handleSend}
-            disabled={!isGenerating && !!(isFlf2v || isRequiresImage) && !referenceImage}
+            disabled={!isGenerating && !!isRequiresImage && !referenceImage}
             className="chat-send-button"
             danger={isGenerating}
           />

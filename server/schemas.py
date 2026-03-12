@@ -39,6 +39,9 @@ class GenerateMediaRequest(BaseModel):
     start_frame_count: Optional[int] = None    # flf2v 起始帧视频帧长度
     end_frame_count: Optional[int] = None      # flf2v 结束帧视频帧长度
     frame_rate: Optional[float] = None         # flf2v 帧率
+    # Gemini 多轮对话（nano_banana_pro 专用）
+    send_history: bool = False                 # 是否携带历史对话发送给 Gemini
+    session_id: Optional[str] = None          # 当前会话 ID（send_history=True 时必填）
 
 
 class GenerateMediaResponse(BaseModel):

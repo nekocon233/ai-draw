@@ -39,6 +39,9 @@ export interface GenerateMediaRequest {
   start_frame_count?: number;
   end_frame_count?: number;
   frame_rate?: number;
+  // Gemini 多轮对话（nano_banana_pro 专用）
+  send_history?: boolean;
+  session_id?: string;
 }
 
 export interface GenerateMediaResponse {

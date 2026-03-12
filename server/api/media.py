@@ -40,6 +40,8 @@ async def generate_media(
                 start_frame_count=request.start_frame_count,
                 end_frame_count=request.end_frame_count,
                 frame_rate=request.frame_rate,
+                send_history=request.send_history,
+                session_id=request.session_id,
             )
         except Exception as e:
             # 通过 WebSocket 推送错误信息
