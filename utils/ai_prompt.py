@@ -13,8 +13,9 @@ class AIPrompt:
         self.prompt_template = prompt_template or config.template
         self.client = OpenAI(api_key=self.api_key, base_url=self.url)
 
-    def generate(self, natural_desc: str) -> str:
-        prompt = self.prompt_template.format(desc=natural_desc)
+    def generate(self, natural_desc: str, template: str | None = None) -> str:
+        active_template = template if template is not None else self.prompt_template
+        prompt = active_template.format(desc=natural_desc)
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{'role': 'user', 'content': prompt}]

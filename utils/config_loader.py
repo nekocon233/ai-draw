@@ -127,6 +127,11 @@ class WorkflowDefaultsConfig(BaseModel):
                 return param.get('default')
         return None
 
+    def get_workflow_prompt_template(self, workflow: str) -> Optional[str]:
+        """从 workflow_metadata 获取工作流专属 prompt 模板，未配置时返回 None"""
+        metadata = self.workflow_metadata.get(workflow, {})
+        return metadata.get('prompt_template', None)
+
 
 class AppConfig(BaseSettings):
     """应用配置"""

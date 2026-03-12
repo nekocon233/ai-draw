@@ -10,6 +10,7 @@ from typing import Optional, List
 class GeneratePromptRequest(BaseModel):
     """生成 Prompt 请求"""
     description: str
+    workflow_id: Optional[str] = None
 
 
 class GeneratePromptResponse(BaseModel):

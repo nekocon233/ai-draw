@@ -26,6 +26,7 @@ workflow_defaults:
       label: "文生图（Z-Image）"
       description: "纯文本生成图像"
       requires_image: false
+      prompt_template: "你是一个 AI 图像生成提示词专家，当前使用 Z-Image（Lumina2 架构）模型，该模型擅长理解中文自然语言描述。请将以下描述扩写为详细的中文图像提示词，描述主体、外貌、服装、场景、光线、风格等细节，语言流畅自然，不要使用英文标签格式：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
         - name: "prompt"
           label: "提示词"
@@ -47,6 +48,7 @@ workflow_defaults:
       description: "基于参考图重绘"
       requires_image: true
       supports_original_size: true
+      prompt_template: "你是一个 AI 图像编辑提示词专家，当前使用 Qwen 图像编辑模型，支持中文自然语言指令。请将以下描述转换为简洁明确的中文图像编辑指令，说明对图像做什么修改（如改变颜色、调整风格、修改内容等）：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
         - name: "prompt"
           label: "提示词"
@@ -84,6 +86,7 @@ workflow_defaults:
       label: "参考图（SDXL）"
       description: "SDXL 参考图工作流"
       requires_image: true
+      prompt_template: "你是一个 Stable Diffusion 提示词专家，当前使用 SDXL 模型，需要英文标签格式提示词。请将以下自然语言描述转换为 SDXL 英文提示词（英文标签，用逗号分隔，包含外貌、服装、场景、风格、画质等标签）：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
         - name: "prompt"
           label: "提示词"
@@ -111,6 +114,7 @@ workflow_defaults:
       label: "参考图（Z-Image）"
       description: "Z-Image Turbo 参考图工作流"
       requires_image: true
+      prompt_template: "你是一个 AI 图像生成提示词专家，当前使用 Z-Image Turbo 模型，支持中文自然语言描述。请将以下描述扩写为详细的中文图像提示词，描述主体、外貌、服装、场景、光线、风格等细节，语言流畅自然：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
         - name: "prompt"
           label: "提示词"
@@ -139,6 +143,7 @@ workflow_defaults:
       description: "基于 Nano Banana Pro 的图生图工作流"
       requires_image: true
       output_type: "image"
+      prompt_template: "你是一个图像描述扩写专家，当前使用 Nano Banana Pro（Gemini）模型，能够理解极为丰富的中文细节描述。请将以下简短描述扩写为非常详细丰富的中文描述，涵盖人物外貌、表情、服装、姿势、场景环境、光线氛围、风格等所有细节：\n描述：{desc}\n只输出扩写后的中文描述，不要解释："
       parameters:
         - name: "prompt"
           label: "描述 / 指令"
@@ -152,6 +157,7 @@ workflow_defaults:
       supports_original_size: true
       supports_loop: true
       output_type: "video"
+      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Wan2.2 视频模型，基于首帧和尾帧生成过渡视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出动态感和画面过渡效果：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
         - name: "prompt"
           label: "提示词"

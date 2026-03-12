@@ -9,9 +9,10 @@ interface AIPromptModalProps {
   open: boolean;
   onClose: () => void;
   onApply: (prompt: string) => void;
+  workflowId?: string;
 }
 
-export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalProps) {
+export default function AIPromptModal({ open, onClose, onApply, workflowId }: AIPromptModalProps) {
   const [description, setDescription] = useState('');
   const [generatedPrompt, setGeneratedPrompt] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,7 +25,7 @@ export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalP
 
     setLoading(true);
     try {
-      const res = await apiService.generatePrompt({ description });
+      const res = await apiService.generatePrompt({ description, workflow_id: workflowId });
       setGeneratedPrompt(res.prompt);
       message.success('Prompt 生成成功');
     } catch (err: any) {
@@ -59,7 +60,7 @@ export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalP
       title={
         <Space>
           <ThunderboltOutlined style={{ color: '#faad14' }} />
-          <span>AI 生成英文 Prompt</span>
+          <span>AI 生成提示词</span>
         </Space>
       }
       open={open}
@@ -121,7 +122,7 @@ export default function AIPromptModal({ open, onClose, onApply }: AIPromptModalP
               fontWeight: 500
             }}
           >
-            生成英文 Prompt
+            AI 生成提示词
           </Button>
         </div>
 

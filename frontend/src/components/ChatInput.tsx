@@ -137,7 +137,7 @@ export default function ChatInput() {
       return;
     }
 
-    if (isRequiresImage && !referenceImage) {
+    if (isRequiresImage && !isNanoBananaPro && !referenceImage) {
       message.warning('请上传参考图片');
       return;
     }
@@ -751,6 +751,7 @@ export default function ChatInput() {
         open={aiPromptOpen}
         onClose={() => setAiPromptOpen(false)}
         onApply={handleApplyPrompt}
+        workflowId={currentWorkflow}
       />
     </div>
   );

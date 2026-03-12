@@ -12,6 +12,7 @@ export interface ServiceStatus {
 // 生成 Prompt 请求
 export interface GeneratePromptRequest {
   description: string;
+  workflow_id?: string;
 }
 
 export interface GeneratePromptResponse {

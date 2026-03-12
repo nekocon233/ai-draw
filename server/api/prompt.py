@@ -16,7 +16,7 @@ async def generate_prompt(
 ) -> GeneratePromptResponse:
     """根据中文描述生成英文 Prompt"""
     try:
-        prompt = await service.generate_prompt(request.description)
+        prompt = await service.generate_prompt(request.description, request.workflow_id)
         return GeneratePromptResponse(prompt=prompt)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

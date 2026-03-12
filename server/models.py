@@ -35,8 +35,8 @@ class UserConfig(Base):
     current_workflow = Column(String(20), nullable=True)
     prompt = Column(Text, nullable=True)
     lora_prompt = Column(String(255), nullable=True)
-    strength = Column(Float, nullable=True)
-    count = Column(Integer, nullable=True)
+    strength = Column(Float, nullable=True, default=1)
+    count = Column(Integer, nullable=True, default=1)
     images_per_row = Column(Integer, default=4)
     current_session_id = Column(String(100), nullable=True)  # 当前选中的会话ID
     

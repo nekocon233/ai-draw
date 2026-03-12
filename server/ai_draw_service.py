@@ -89,14 +89,21 @@ class AIDrawService:
             self._notify_state_change('is_service_available', False)
             return False
     
-    async def generate_prompt(self, description: str) -> str:
+    async def generate_prompt(self, description: str, workflow_id: Optional[str] = None) -> str:
         """生成 Prompt"""
         try:
             self.is_generating_prompt = True
             self._notify_state_change('is_generating_prompt', True)
             self._notify_state_change('prompt_generation_progress', '正在生成 Prompt...')
-            
-            prompt = await asyncio.to_thread(self.ai_prompt.generate, description)
+
+            # 获取工作流专属模板（无则回退到全局模板）
+            workflow_template = None
+            if workflow_id:
+                config = get_config()
+                if config.workflow_defaults:
+                    workflow_template = config.workflow_defaults.get_workflow_prompt_template(workflow_id)
+
+            prompt = await asyncio.to_thread(self.ai_prompt.generate, description, workflow_template)
             
             self._notify_state_change('prompt_generation_progress', 'Prompt 生成完成')
             return prompt
