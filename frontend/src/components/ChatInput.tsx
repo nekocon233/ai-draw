@@ -193,9 +193,12 @@ export default function ChatInput() {
         send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
         session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,
       });
-      // 携带历史发送时清空输入框（普通模式提示词随工作流保留）
+      // 携带历史发送时清空输入框和参考图（普通模式下提示词随会话保留）
       if (isNanoBananaPro && nanoBananaSendHistory) {
         setPrompt('');
+        setReferenceImage(null);
+        setReferenceImage2(null);
+        setReferenceImage3(null);
       }
     } catch (err: any) {
       // HTTP 层面失败（任务未能提交到后台）
@@ -279,7 +282,7 @@ export default function ChatInput() {
         if (fillEnd) {
           setReferenceImageEnd(res.image);
           message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
-        } else if (isRequiresImage) {
+        } else if (isRequiresImage || isNanoBananaPro) {
           getNextSlot()(res.image);
           message.success('\u4e0a\u4f20\u6210\u529f!');
         } else {
@@ -299,7 +302,7 @@ export default function ChatInput() {
       if (fillEnd) {
         setReferenceImageEnd(url);
         message.success('尾帧已设置!');
-      } else if (isRequiresImage) {
+      } else if (isRequiresImage || isNanoBananaPro) {
         if (!currentState.referenceImage) { setReferenceImage(url); }
         else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage2) { setReferenceImage2(url); }
         else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage3) { setReferenceImage3(url); }
