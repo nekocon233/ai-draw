@@ -22,6 +22,7 @@ class GeminiChat:
         current_prompt: str,
         current_images: Optional[list[str]] = None,
         history: Optional[list[dict]] = None,
+        context_image: Optional[str] = None,
     ) -> list[str]:
         """
         调用 Gemini API 生成图像（多轮对话）
@@ -35,17 +36,19 @@ class GeminiChat:
                          "images": list[str],        # 用户上传图片 base64 列表
                          "result_images": list[str], # AI 生成图片 base64 列表
                      }
+            context_image: 上一轮 AI 生成的图片 base64（当前轮无参考图时自动注入）
 
         Returns:
             生成图像的 base64 字符串列表（不含 data URL 前缀）
         """
         import google.generativeai as genai  # 延迟导入，避免启动时 import 失败
-        import google.ai.generativelanguage as glm
 
         genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel(model_name=self.model_name)
 
         # ── 构建历史对话内容 ──────────────────────────────────────────────
+        # 官方方案：将 AI 生成图片放回 user 角色（紧跟当轮用户消息），
+        # model 角色仅保留纯文本占位，避免使用 thought_signature 黑科技。
         chat_history = []
         for turn in (history or []):
             user_parts: list = []
@@ -67,33 +70,40 @@ class GeminiChat:
             if turn.get("prompt"):
                 user_parts.append(turn["prompt"])
 
-            if user_parts:
-                chat_history.append({"role": "user", "parts": user_parts})
-
-            # Model 回复（仅包含生成图片）
-            # Gemini 3 的 thought_signature 在历史重建时无法获取，
-            # 使用官方占位符 "skip_thought_signature_validator" 跳过校验
-            # 必须用 glm.Part proto 类型，SDK 无法解析含 thought_signature 的普通 dict
-            model_parts: list = []
+            # AI 生成结果图也放入 user_parts（紧跟在用户消息之后）
             for img_b64 in (turn.get("result_images") or []):
                 if img_b64:
                     try:
-                        model_parts.append(
-                            glm.Part(
-                                inline_data=glm.Blob(
-                                    mime_type="image/png",
-                                    data=base64.b64decode(img_b64),
-                                ),
-                                thought_signature=b"skip_thought_signature_validator",
-                            )
-                        )
+                        user_parts.append({
+                            "inline_data": {
+                                "mime_type": "image/png",
+                                "data": img_b64,
+                            }
+                        })
                     except Exception as e:
                         logger.warning(f"[GeminiChat] 历史生成图处理失败: {e}")
-            if model_parts:
-                chat_history.append({"role": "model", "parts": model_parts})
+
+            if user_parts:
+                chat_history.append({"role": "user", "parts": user_parts})
+
+            # Model 回复使用纯文本占位（无需 thought_signature）
+            chat_history.append({"role": "model", "parts": ["Image generated."]})
 
         # ── 构建当前用户消息 ──────────────────────────────────────────────
         current_parts: list = []
+
+        # 若当前轮无用户参考图，但有上一轮生成结果，则注入作为上下文
+        if context_image and not current_images:
+            try:
+                current_parts.append({
+                    "inline_data": {
+                        "mime_type": "image/png",
+                        "data": context_image,
+                    }
+                })
+            except Exception as e:
+                logger.warning(f"[GeminiChat] context_image 注入失败: {e}")
+
         for img_b64 in (current_images or []):
             if img_b64:
                 try:
@@ -115,7 +125,6 @@ class GeminiChat:
         )
 
         # ── 调用 Gemini API ───────────────────────────────────────────────
-        # 不传 thinking_config（旧版 SDK 不支持），改用官方占位符跳过签名校验
         generation_config = {
             "response_modalities": ["IMAGE", "TEXT"],
         }

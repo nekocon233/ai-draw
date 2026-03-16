@@ -129,6 +129,12 @@ interface AppState {
   updateChatImages: (messageId: string, images: string[]) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   deleteChatMessage: (messageId: string) => Promise<void>;
+  editAndRegenerateMessage: (
+    userMsgId: string,
+    newContent: string,
+    newRefImages: { referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null },
+    newPromptEnd?: string
+  ) => Promise<void>;
   clearChatHistory: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -652,6 +658,112 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { chatHistory: newHistory, sessions: updatedSessions };
     });
+  },
+  editAndRegenerateMessage: async (userMsgId, newContent, newRefImages, newPromptEnd) => {
+    const state = get();
+    const sessionId = state.currentSessionId;
+    if (!sessionId) return;
+
+    const msgIndex = state.chatHistory.findIndex(m => m.id === userMsgId && m.type === 'user');
+    if (msgIndex === -1) return;
+
+    const userMsg = state.chatHistory[msgIndex];
+    const nextMsg = state.chatHistory[msgIndex + 1];
+    if (!nextMsg || nextMsg.type !== 'assistant') return;
+    const assistantMsgId = nextMsg.id;
+
+    const count = userMsg.params?.count || 1;
+    const loadingImages = Array.from({ length: count }, () => ({ loading: true as const }));
+
+    // 更新 state：修改用户消息内容 + 重置 AI 回复为 loading 状态
+    set((s) => ({
+      chatHistory: s.chatHistory.map((msg) => {
+        if (msg.id === userMsgId) {
+          return {
+            ...msg,
+            content: newContent,
+            params: {
+              ...msg.params!,
+              referenceImage: newRefImages.referenceImage !== undefined
+                ? (newRefImages.referenceImage || undefined)
+                : msg.params?.referenceImage,
+              referenceImage2: newRefImages.referenceImage2 !== undefined
+                ? (newRefImages.referenceImage2 || undefined)
+                : msg.params?.referenceImage2,
+              referenceImage3: newRefImages.referenceImage3 !== undefined
+                ? (newRefImages.referenceImage3 || undefined)
+                : msg.params?.referenceImage3,
+              promptEnd: newPromptEnd !== undefined ? (newPromptEnd || undefined) : msg.params?.promptEnd,
+            },
+          };
+        }
+        if (msg.id === assistantMsgId) {
+          return { ...msg, images: loadingImages };
+        }
+        return msg;
+      }),
+      currentGeneratingMessageId: assistantMsgId,
+    }));
+
+    // 登录用户：先等待数据库更新完成，再触发生成（避免与 generateMedia 的竞态条件）
+    if (isLoggedIn()) {
+      try {
+        await apiService.updateMessageContent(userMsgId, {
+          content: newContent,
+          reference_image: newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : undefined,
+          reference_image_2: newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : undefined,
+          reference_image_3: newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : undefined,
+        });
+      } catch (err) {
+        console.error('更新消息内容失败:', err);
+      }
+    } else {
+      // 游客模式：更新 localStorage
+      const updated = get();
+      saveGuestSessionHistory(sessionId, updated.chatHistory);
+    }
+
+    // 触发重新生成
+    const params = userMsg.params!;
+    // nano_banana_pro 时读取当前 nanoBananaSendHistory 状态，与 ChatInput.tsx 保持一致
+    const isNanoBananaPro = params.workflow === 'nano_banana_pro';
+    const sendHistory = isNanoBananaPro ? get().nanoBananaSendHistory : false;
+    const finalImg1 = newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : params.referenceImage;
+    const finalImg2 = newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : params.referenceImage2;
+    const finalImg3 = newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : params.referenceImage3;
+    const finalPromptEnd = newPromptEnd !== undefined ? newPromptEnd : params.promptEnd;
+
+    try {
+      await apiService.generateMedia({
+        prompt: newContent,
+        workflow: params.workflow,
+        strength: params.strength,
+        lora_prompt: params.loraPrompt,
+        count: count,
+        reference_image: finalImg1 || undefined,
+        reference_image_2: finalImg2 || undefined,
+        reference_image_3: finalImg3 || undefined,
+        reference_image_end: params.referenceImageEnd || undefined,
+        prompt_end: finalPromptEnd || undefined,
+        is_loop: params.isLoop,
+        frame_rate: params.frameRate ?? undefined,
+        start_frame_count: params.startFrameCount ?? undefined,
+        end_frame_count: params.endFrameCount ?? undefined,
+        use_original_size: true,
+        // 仅 nano_banana_pro + sendHistory=true 时传 session_id，与 ChatInput.tsx 逻辑一致
+        send_history: isNanoBananaPro ? sendHistory : undefined,
+        session_id: isNanoBananaPro && sendHistory ? sessionId : undefined,
+      });
+    } catch (err) {
+      console.error('重新生成失败:', err);
+      // 生成失败时清除 loading 状态
+      set((s) => ({
+        chatHistory: s.chatHistory.map((msg) =>
+          msg.id === assistantMsgId ? { ...msg, images: [] } : msg
+        ),
+        currentGeneratingMessageId: null,
+      }));
+    }
   },
   clearChatHistory: () => set({ chatHistory: [] }),
   setLoading: (loading) => set({ loading }),

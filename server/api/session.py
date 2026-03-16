@@ -25,6 +25,13 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionTitleRequest(BaseModel):
     title: str
 
+class UpdateMessageRequest(BaseModel):
+    """更新用户消息内容请求（用于编辑后重新生成）"""
+    content: Optional[str] = None
+    reference_image: Optional[str] = None
+    reference_image_2: Optional[str] = None
+    reference_image_3: Optional[str] = None
+
 class SessionResponse(BaseModel):
     id: str
     title: str
@@ -274,6 +281,66 @@ def get_session_config(
         "end_frame_count": session.config_end_frame_count,
         "frame_rate": session.config_frame_rate,
     }
+
+
+@router.patch("/messages/{message_id}")
+def update_message_content(
+    message_id: str,
+    request: UpdateMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """更新用户消息内容，并清空对应 AI 回复的图片（用于编辑后重新生成）"""
+    # 查找用户消息
+    user_msg = db.query(ChatMessage).filter(
+        ChatMessage.message_id == message_id,
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.type == 'user'
+    ).first()
+
+    if not user_msg:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="消息不存在"
+        )
+
+    # 更新可编辑字段
+    update_data = request.model_dump(exclude_unset=True)
+    if 'content' in update_data:
+        user_msg.content = update_data['content']
+    if 'reference_image' in update_data:
+        user_msg.reference_image = update_data['reference_image']
+    if 'reference_image_2' in update_data:
+        user_msg.reference_image_2 = update_data['reference_image_2']
+    if 'reference_image_3' in update_data:
+        user_msg.reference_image_3 = update_data['reference_image_3']
+
+    # 找到紧随其后的 AI 回复，清空其图片记录（为重新生成留空）
+    assistant_msg = db.query(ChatMessage).filter(
+        ChatMessage.session_id == user_msg.session_id,
+        ChatMessage.type == 'assistant',
+        ChatMessage.created_at > user_msg.created_at
+    ).order_by(ChatMessage.created_at.asc()).first()
+
+    if assistant_msg:
+        try:
+            from utils.config_loader import get_config
+            upload_dir = Path(get_config().paths.upload_dir)
+        except Exception:
+            upload_dir = None
+
+        for img in list(assistant_msg.images):
+            if img.file_path and not img.file_path.startswith('data:') and upload_dir:
+                try:
+                    (upload_dir / img.file_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            db.delete(img)
+        db.flush()
+
+    db.commit()
+    print(f"[Session] 用户 {current_user.username} 编辑消息内容: {message_id}")
+    return {"updated": True}
 
 
 @router.delete("/sessions/{session_id}/messages/{message_id}")

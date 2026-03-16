@@ -45,6 +45,14 @@ export const apiService = {
   deleteMessage: (sessionId: string, messageId: string): Promise<{ deleted: boolean }> =>
     client.delete(`/chat/sessions/${sessionId}/messages/${messageId}`),
 
+  updateMessageContent: (messageId: string, data: {
+    content?: string;
+    reference_image?: string | null;
+    reference_image_2?: string | null;
+    reference_image_3?: string | null;
+  }): Promise<{ updated: boolean }> =>
+    client.patch(`/chat/messages/${messageId}`, data),
+
   updateSessionTitle: (sessionId: string, title: string): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}`, { title }),
   

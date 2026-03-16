@@ -1,14 +1,68 @@
-import { useEffect, useRef } from 'react';
-import { Image, Spin, Tag, Button, Popconfirm } from 'antd';
-import { DownloadOutlined, PictureOutlined, LoadingOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Image, Spin, Tag, Button, Popconfirm, Input } from 'antd';
+import {
+  DownloadOutlined, PictureOutlined, LoadingOutlined,
+  DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
+} from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow, currentSessionId, deleteChatMessage } = useAppStore();
+  const { chatHistory, imagesPerRow, currentSessionId, isGenerating, deleteChatMessage, editAndRegenerateMessage } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
+
+  // ---- 编辑状态 ----
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editPromptEnd, setEditPromptEnd] = useState('');
+  const [editRefImages, setEditRefImages] = useState<{
+    img1?: string | null;
+    img2?: string | null;
+    img3?: string | null;
+  }>({});
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const activeRefSlot = useRef<1 | 2 | 3>(1);
+
+  const startEdit = useCallback((message: { id: string; content: string; params?: { promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string } }) => {
+    setEditingMsgId(message.id);
+    setEditContent(message.content);
+    setEditPromptEnd(message.params?.promptEnd || '');
+    setEditRefImages({
+      img1: message.params?.referenceImage ?? null,
+      img2: message.params?.referenceImage2 ?? null,
+      img3: message.params?.referenceImage3 ?? null,
+    });
+  }, []);
+
+  const cancelEdit = useCallback(() => setEditingMsgId(null), []);
+
+  const confirmEdit = useCallback(async (msgId: string) => {
+    // 立即退出编辑模式，不等待生成完成
+    const content = editContent;
+    const refImages = { ...editRefImages };
+    const promptEnd = editPromptEnd;
+    setEditingMsgId(null);
+    await editAndRegenerateMessage(msgId, content, {
+      referenceImage: refImages.img1,
+      referenceImage2: refImages.img2,
+      referenceImage3: refImages.img3,
+    }, promptEnd);
+  }, [editAndRegenerateMessage, editContent, editPromptEnd, editRefImages]);
+
+  const handleEditFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      const slot = activeRefSlot.current;
+      setEditRefImages(prev => ({ ...prev, [`img${slot}`]: base64 }));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }, []);
 
   // 统一的滚动逻辑
   useEffect(() => {
@@ -52,6 +106,14 @@ export default function ResultGrid() {
 
   return (
     <div className="result-container">
+      {/* 隐藏的文件选择器（编辑模式参考图上传） */}
+      <input
+        ref={editFileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleEditFileChange}
+      />
       <div className="chat-messages">
         {chatHistory.map((message) => (
           <div
@@ -61,6 +123,7 @@ export default function ResultGrid() {
             {message.type === 'user' ? (
               // 用户消息（右侧）
               <div className="chat-message-content user-message">
+                {/* 删除按钮 */}
                 <Popconfirm
                   title="确认删除这轮对话？"
                   onConfirm={() => deleteChatMessage(message.id)}
@@ -68,6 +131,7 @@ export default function ResultGrid() {
                   cancelText="取消"
                   okButtonProps={{ danger: true }}
                   placement="topLeft"
+                  disabled={editingMsgId === message.id}
                 >
                   <Button
                     className="delete-round-btn"
@@ -75,9 +139,108 @@ export default function ResultGrid() {
                     size="small"
                     danger
                     icon={<DeleteOutlined />}
+                    disabled={editingMsgId === message.id || isGenerating}
                   />
                 </Popconfirm>
+                {/* 编辑按钮 */}
+                <Button
+                  className="edit-round-btn"
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  disabled={isGenerating}
+                  onClick={() => startEdit(message)}
+                  style={{ display: editingMsgId === message.id ? 'none' : undefined }}
+                />
                 <div className="chat-message-bubble">
+                  {editingMsgId === message.id ? (
+                    /* ======= 编辑模式 ======= */
+                    <div className="chat-message-edit-mode">
+                      {/* 参考图编辑区 */}
+                      {(editRefImages.img1 || editRefImages.img2 || editRefImages.img3 ||
+                        message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3) && (
+                        <div className="user-reference-images edit-ref-images">
+                          {(['img1', 'img2', 'img3'] as const).map((slot, i) => {
+                            const src = editRefImages[slot];
+                            const slotNum = (i + 1) as 1 | 2 | 3;
+                            return src ? (
+                              <div key={slot} className="edit-ref-image-tile">
+                                <img src={src} alt={`参考图 ${slotNum}`} className="edit-ref-thumb" />
+                                <button
+                                  className="edit-ref-remove"
+                                  onClick={() => setEditRefImages(prev => ({ ...prev, [slot]: null }))}
+                                >
+                                  <CloseOutlined />
+                                </button>
+                                <button
+                                  className="edit-ref-replace"
+                                  onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
+                                  title="点击更换图片"
+                                >
+                                  <EditOutlined />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                key={slot}
+                                className="edit-ref-add"
+                                onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
+                                title={`添加参考图 ${slotNum}`}
+                              >
+                                <PlusOutlined />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* 提示词文本编辑 */}
+                      <Input.TextArea
+                        className="edit-content-textarea"
+                        value={editContent}
+                        onChange={e => setEditContent(e.target.value)}
+                        autoSize={{ minRows: 2, maxRows: 8 }}
+                        placeholder="输入提示词…"
+                      />
+
+                      {/* 尾帧提示词（flf2v 循环模式） */}
+                      {message.params?.isLoop && (
+                        <Input.TextArea
+                          className="edit-content-textarea edit-content-textarea-end"
+                          value={editPromptEnd}
+                          onChange={e => setEditPromptEnd(e.target.value)}
+                          autoSize={{ minRows: 2, maxRows: 4 }}
+                          placeholder="结束帧提示词…"
+                        />
+                      )}
+
+                      {/* 参数标签（只读）+ 操作按钮 */}
+                      {message.params && (
+                        <div className="chat-message-params">
+                          <Tag>{message.params.workflow}</Tag>
+                          {message.params.strength != null && <Tag>强度: {message.params.strength}</Tag>}
+                          {message.params.count != null && message.params.count > 1 && <Tag>数量: {message.params.count}</Tag>}
+                          {message.params.loraPrompt && <Tag>LoRA: {message.params.loraPrompt}</Tag>}
+                        </div>
+                      )}
+                      <div className="edit-actions">
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<CheckOutlined />}
+                          onClick={() => confirmEdit(message.id)}
+                          disabled={!editContent.trim()}
+                        >
+                          重新生成
+                        </Button>
+                        <Button size="small" icon={<CloseOutlined />} onClick={cancelEdit}>
+                          取消
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ======= 正常显示模式 ======= */
+                    <>
                   {/* 参考图缩略图（可点击预览） */}
                   {(message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
                     <div className="user-reference-images">
@@ -152,6 +315,8 @@ export default function ResultGrid() {
                         <Tag>结束帧: {message.params.endFrameCount}</Tag>
                       )}
                     </div>
+                  )}
+                    </>
                   )}
                 </div>
               </div>

@@ -497,6 +497,11 @@ class AIDrawService:
                     if b64:
                         result_images.append(b64)
 
+                # 跳过图片已被清空的轮次（编辑后重新生成时该轮图片会被清空）
+                if not result_images:
+                    i += 2
+                    continue
+
                 history.append({
                     "prompt": msg.content or "",
                     "images": user_images,
@@ -512,6 +517,16 @@ class AIDrawService:
             if img
         ]
 
+        # 无用户参考图时，将最近一轮的生成结果作为 context 注入，帮助模型保持一致性
+        last_result_image_b64: Optional[str] = None
+        if history:
+            for turn in reversed(history):
+                imgs = turn.get("result_images") or []
+                if imgs:
+                    last_result_image_b64 = imgs[-1]
+                    break
+        context_image = last_result_image_b64 if not current_images else None
+
         # ── 调用 Gemini（在线程池中执行，避免阻塞事件循环） ───────────────
         gemini = GeminiChat(api_key=nano_api_key, model_name="gemini-3-pro-image-preview")
         result_imgs = await asyncio.to_thread(
@@ -519,6 +534,7 @@ class AIDrawService:
             current_prompt=current_prompt,
             current_images=current_images,
             history=history,
+            context_image=context_image,
         )
 
         if not result_imgs:

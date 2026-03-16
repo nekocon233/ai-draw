@@ -192,10 +192,10 @@
   }
 }
 
-/* 删除本轮对话按钮 */
+/* 删除/编辑本轮对话按钮区 */
 .user-message {
   position: relative;
-  padding-left: 36px; /* 为删除按钮留出空间，保证 hover 区域包含按钮 */
+  padding-left: 68px; /* 为删除+编辑两个按钮留出空间 */
 }
 
 .delete-round-btn {
@@ -208,12 +208,142 @@
   transition: opacity 0.15s ease;
 }
 
-.user-message:hover .delete-round-btn {
+.edit-round-btn {
+  position: absolute;
+  top: 50%;
+  left: 32px;
+  transform: translateY(-50%);
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  color: var(--text-secondary);
+}
+
+.user-message:hover .delete-round-btn,
+.user-message:hover .edit-round-btn {
   opacity: 0.8;
 }
 
-.delete-round-btn:hover {
+.delete-round-btn:hover,
+.edit-round-btn:hover {
   opacity: 1 !important;
+}
+
+/* ======= 编辑模式 ======= */
+.chat-message-edit-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 编辑模式下的 textarea */
+.edit-content-textarea {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 8px !important;
+  color: white !important;
+  font-size: 14px !important;
+  resize: none;
+}
+
+.edit-content-textarea::placeholder {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.edit-content-textarea-end {
+  border-top: 1px dashed rgba(255, 255, 255, 0.3) !important;
+}
+
+/* 编辑模式参考图区域 */
+.edit-ref-images {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.edit-ref-image-tile {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.edit-ref-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.edit-ref-remove,
+.edit-ref-replace {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  opacity: 0;
+  font-size: 11px;
+}
+
+.edit-ref-image-tile:hover .edit-ref-remove,
+.edit-ref-image-tile:hover .edit-ref-replace {
+  opacity: 1;
+}
+
+.edit-ref-remove {
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(220, 50, 50, 0.85);
+  color: white;
+}
+
+.edit-ref-replace {
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+}
+
+.edit-ref-add {
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.edit-ref-add:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 编辑操作按钮 */
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  justify-content: flex-end;
 }
 
 .result-empty {
