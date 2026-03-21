@@ -91,7 +91,7 @@ workflow_defaults:
           type: "text"
           default: "一个女孩"
     flf2v:
-      label: "首尾帧生视频"
+      label: "首尾帧生视频（Wan FLF2V）"
       description: "基于首尾帧生成过渡视频"
       requires_image: true
       requires_end_image: true
