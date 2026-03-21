@@ -329,6 +329,30 @@
   transform: scale(1.1);
 }
 
+.flf2v-frame-pose {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(80, 80, 160, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  transition: all 0.2s ease;
+  z-index: 1;
+  pointer-events: all;
+}
+
+.flf2v-frame-pose:hover {
+  background: rgba(100, 100, 220, 0.85);
+  transform: scale(1.15);
+}
+
 .flf2v-frame-placeholder {
   display: flex;
   flex-direction: column;

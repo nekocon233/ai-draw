@@ -148,8 +148,8 @@ class AIDrawService:
             workflow_type = workflow
             print(f"[AIDrawService] 使用工作流: {workflow_type}")
 
-            # 切换 ComfyUI 工作流
-            if workflow_type != self.comfyui.get_current_workflow_type():
+            # 切换 ComfyUI 工作流（纯 Gemini 工作流无需切换）
+            if workflow_type in self.comfyui.workflow_configs and workflow_type != self.comfyui.get_current_workflow_type():
                 self.comfyui.switch_workflow(workflow_type)
             
             # 处理开始帧参考图（如果有）
@@ -316,36 +316,14 @@ class AIDrawService:
                             'total': count
                         })
                     
-                    if workflow_type == 'nano_banana_pro' and send_history and session_id:
-                        # 场景1：Gemini 多轮对话路径（携带历史，绕过 ComfyUI）
+                    if workflow_type == 'nano_banana_pro':
+                        # 全部走 Gemini：有历史携带历史，无历史单轮；参考图直接传入
                         await self.generate_nano_banana_gemini_chat(
-                            session_id=session_id,
+                            session_id=session_id or '',
                             current_prompt=prompt,
                             current_image_b64=image_base64,
                             current_image_b64_2=image_base64_2,
                             current_image_b64_3=image_base64_3,
-                            finish_callback=finish_callback,
-                        )
-                    elif workflow_type == 'nano_banana_pro' and image_base64:
-                        # 场景2：有参考图 → ComfyUI nano_banana
-                        nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
-                        await self.comfyui.generate_nano_banana(
-                            finish_callback=finish_callback,
-                            image_base64=image_base64,
-                            image_base64_2=image_base64_2,
-                            image_base64_3=image_base64_3,
-                            prompt_text=prompt,
-                            api_key=nano_api_key,
-                            seed=seed,
-                        )
-                    elif workflow_type == 'nano_banana_pro':
-                        # 场景3：无图无历史 → Gemini 单轮（图片可选）
-                        await self.generate_nano_banana_gemini_chat(
-                            session_id=session_id or '',
-                            current_prompt=prompt,
-                            current_image_b64=None,
-                            current_image_b64_2=None,
-                            current_image_b64_3=None,
                             finish_callback=finish_callback,
                         )
                     elif requires_image:
@@ -442,8 +420,9 @@ class AIDrawService:
         from server.models import ChatMessage, GeneratedImage
         from utils.gemini_chat import GeminiChat
 
-        nano_api_key = os.getenv('NANO_BANANA_API_KEY', '')
-        if not nano_api_key:
+        from utils.config_loader import get_nano_banana_config
+        nano_banana_cfg = get_nano_banana_config()
+        if not nano_banana_cfg.api_key:
             raise ValueError("未配置 NANO_BANANA_API_KEY，无法调用 Gemini")
 
         # ── 从数据库读取历史对话（只取完整轮次：user + assistant 配对） ──
@@ -528,7 +507,11 @@ class AIDrawService:
         context_image = last_result_image_b64 if not current_images else None
 
         # ── 调用 Gemini（在线程池中执行，避免阻塞事件循环） ───────────────
-        gemini = GeminiChat(api_key=nano_api_key, model_name="gemini-3-pro-image-preview")
+        gemini = GeminiChat(
+            api_key=nano_banana_cfg.api_key,
+            base_url=nano_banana_cfg.base_url,
+            model_name=nano_banana_cfg.model,
+        )
         result_imgs = await asyncio.to_thread(
             gemini.generate,
             current_prompt=current_prompt,
@@ -551,13 +534,15 @@ class AIDrawService:
         self._notify_state_change('preview_update', {'action': 'clear'})
     
     def switch_workflow(self, workflow_type: str):
-        """切换工作流"""
-        self.comfyui.switch_workflow(workflow_type)
+        """切换工作流（纯 Gemini 工作流无需加载 ComfyUI 文件）"""
+        if workflow_type in self.comfyui.workflow_configs:
+            self.comfyui.switch_workflow(workflow_type)
         self._notify_state_change('workflow_type', workflow_type)
     
     def get_available_workflows(self) -> list[str]:
         """获取可用的工作流列表"""
-        return list(self.comfyui.workflow_configs.keys())
+        config = get_config()
+        return list(config.workflow_defaults.workflow_metadata.keys())
     
     def get_current_workflow(self) -> str:
         """获取当前工作流类型"""

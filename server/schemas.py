@@ -18,13 +18,28 @@ class GeneratePromptResponse(BaseModel):
     prompt: str
 
 
+class AnalyzePoseRequest(BaseModel):
+    """Gemini 反推姿势提示词请求"""
+    images: List[str]  # data URL 列表（一或多张参考图）
+
+
+class AnalyzePoseResponse(BaseModel):
+    """Gemini 反推姿势提示词响应"""
+    prompt: str
+
+
+class PosePresetResponse(BaseModel):
+    """姿势预设提示词响应"""
+    prompt: str
+
+
 # ============ 媒体生成相关 ============
 
 class GenerateMediaRequest(BaseModel):
     """生成图像请求"""
     prompt: str
     workflow: str = "t2i"  # 工作流类型：t2i, i2i, reference, reference_zimage, flf2v
-    strength: float = 0.5
+    strength: Optional[float] = None
     lora_prompt: str = ""
     count: int = 1
     reference_image: Optional[str] = None

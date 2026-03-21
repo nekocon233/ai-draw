@@ -85,6 +85,15 @@ export interface WorkflowsResponse {
   default_workflow: string;
 }
 
+// 姿势反推
+export interface AnalyzePoseRequest {
+  images: string[];
+}
+
+export interface AnalyzePoseResponse {
+  prompt: string;
+}
+
 // WebSocket 消息类型
 export interface WSMessage {
   type: 'state_change' | 'progress' | 'error' | 'result' | 'initial_state';

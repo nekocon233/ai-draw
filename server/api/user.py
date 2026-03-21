@@ -229,10 +229,11 @@ def get_chat_history(
         if msg.type == "user" and msg.workflow:
             params = {
                 "workflow": msg.workflow,
-                "strength": msg.strength,
                 "count": msg.count,
                 "loraPrompt": msg.lora_prompt
             }
+            if msg.strength is not None:
+                params["strength"] = msg.strength
             if msg.reference_image:
                 params["referenceImage"] = msg.reference_image
             if msg.reference_image_2:

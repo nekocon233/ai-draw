@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Input, Button, message, Select, Image, Switch } from 'antd';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { Input, Button, message, Select, Image, Switch, Tooltip } from 'antd';
 import { 
   SendOutlined, 
   SettingOutlined, 
@@ -7,13 +7,17 @@ import {
   ThunderboltOutlined,
   CloseOutlined,
   StopOutlined,
-  PlusOutlined
+  PlusOutlined,
+  ScanOutlined,
+  FormOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
 import SettingsModal from './SettingsModal';
 import AIPromptModal from './AIPromptModal';
 import './ChatInput.css';
+
+const PoseEditorWeb = lazy(() => import('./PoseEditorWeb'));
 
 const { TextArea } = Input;
 
@@ -58,6 +62,9 @@ export default function ChatInput() {
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
+  const [poseWebOpen, setPoseWebOpen] = useState(false);
+  const [poseWebTargetSlot, setPoseWebTargetSlot] = useState<1 | 2 | 3>(1);
+  const [isAnalyzingPose, setIsAnalyzingPose] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
@@ -65,6 +72,16 @@ export default function ChatInput() {
   const fileInputEndRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<any>(null);
+  const posePresetRef = useRef<string>('');
+
+  // 挂载时从后端拉取姿势预设提示词（同源配置）
+  useEffect(() => {
+    apiService.getPosePreset().then(res => {
+      posePresetRef.current = res.prompt;
+    }).catch(() => {
+      // 网络异常时保持空值，按钮点击时再提示
+    });
+  }, []);
 
   // 组件加载或切换会话时自动聚焦到输入框，并将光标移到末尾
   useEffect(() => {
@@ -560,12 +577,22 @@ export default function ChatInput() {
                         </div>
                       </>
                     ) : (
-                      <div className="flf2v-frame-placeholder">
-                        <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                        <span className="flf2v-frame-placeholder-label">
-                          {isI2I ? '图 1' : isNanoBananaPro ? '参考图' : '参考图'}
-                        </span>
-                      </div>
+                      <>
+                        <div className="flf2v-frame-placeholder">
+                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                          <span className="flf2v-frame-placeholder-label">
+                            {isI2I ? '图 1' : '参考图'}
+                          </span>
+                        </div>
+                        <Tooltip title="姿势参考（posemy.art）" placement="right">
+                          <div
+                            className="flf2v-frame-pose"
+                            onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(1); setPoseWebOpen(true); }}
+                          >
+                            🎭
+                          </div>
+                        </Tooltip>
+                      </>
                     )}
                   </div>
 
@@ -597,10 +624,20 @@ export default function ChatInput() {
                           </div>
                         </>
                       ) : (
-                        <div className="flf2v-frame-placeholder">
-                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                          <span className="flf2v-frame-placeholder-label">添加</span>
-                        </div>
+                        <>
+                          <div className="flf2v-frame-placeholder">
+                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                            <span className="flf2v-frame-placeholder-label">添加</span>
+                          </div>
+                          <Tooltip title="姿势参考（posemy.art）" placement="right">
+                            <div
+                              className="flf2v-frame-pose"
+                              onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(2); setPoseWebOpen(true); }}
+                            >
+                              🎭
+                            </div>
+                          </Tooltip>
+                        </>
                       )}
                     </div>
                   )}
@@ -631,10 +668,20 @@ export default function ChatInput() {
                           </div>
                         </>
                       ) : (
-                        <div className="flf2v-frame-placeholder">
-                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                          <span className="flf2v-frame-placeholder-label">添加</span>
-                        </div>
+                        <>
+                          <div className="flf2v-frame-placeholder">
+                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
+                            <span className="flf2v-frame-placeholder-label">添加</span>
+                          </div>
+                          <Tooltip title="姿势参考（posemy.art）" placement="right">
+                            <div
+                              className="flf2v-frame-pose"
+                              onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(3); setPoseWebOpen(true); }}
+                            >
+                              🎭
+                            </div>
+                          </Tooltip>
+                        </>
                       )}
                     </div>
                   )}
@@ -725,6 +772,53 @@ export default function ChatInput() {
               <ThunderboltOutlined />
             </button>
 
+            {/* AI 反推姿势（i2i / nano_banana_pro） */}
+            {(isI2I || isNanoBananaPro) && (
+              <Tooltip title="AI 反推姿势提示词">
+                <button
+                  className="chat-input-icon-button"
+                  disabled={isAnalyzingPose}
+                  onClick={async () => {
+                    const imgs = [referenceImage, referenceImage2, referenceImage3].filter(Boolean) as string[];
+                    if (imgs.length === 0) {
+                      message.warning('请先上传参考图');
+                      return;
+                    }
+                    setIsAnalyzingPose(true);
+                    try {
+                      const res = await apiService.analyzePose({ images: imgs });
+                      setPrompt(res.prompt);
+                      message.success('姿势反推成功，已填入提示词');
+                    } catch (err: any) {
+                      message.error('反推失败：' + (err?.response?.data?.detail || err.message));
+                    } finally {
+                      setIsAnalyzingPose(false);
+                    }
+                  }}
+                >
+                  {isAnalyzingPose ? <ScanOutlined spin /> : <ScanOutlined />}
+                </button>
+              </Tooltip>
+            )}
+
+            {/* 快捷填充姿势提示词（i2i / nano_banana_pro） */}
+            {(isI2I || isNanoBananaPro) && (
+              <Tooltip title="填充参考姿势提示词">
+                <button
+                  className="chat-input-icon-button"
+                  onClick={() => {
+                    if (!posePresetRef.current) {
+                      message.warning('预设提示词加载中，请稍后重试');
+                      return;
+                    }
+                    setPrompt(posePresetRef.current);
+                  }}
+                >
+                  <FormOutlined />
+                </button>
+              </Tooltip>
+            )}
+
             {/* Gemini 历史对话开关（仅 nano_banana_pro 工作流显示） */}
             {isNanoBananaPro && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -778,6 +872,22 @@ export default function ChatInput() {
         onApply={handleApplyPrompt}
         workflowId={currentWorkflow}
       />
+
+      {/* 姿势参考弹窗 */}
+      <Suspense fallback={null}>
+        {poseWebOpen && (
+          <PoseEditorWeb
+            open={poseWebOpen}
+            onClose={() => setPoseWebOpen(false)}
+            targetSlot={poseWebTargetSlot}
+            onApplyImage={(base64) => {
+              if (poseWebTargetSlot === 1) setReferenceImage(base64);
+              else if (poseWebTargetSlot === 2) setReferenceImage2(base64);
+              else setReferenceImage3(base64);
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

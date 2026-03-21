@@ -737,7 +737,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await apiService.generateMedia({
         prompt: newContent,
         workflow: params.workflow,
-        strength: params.strength,
+        strength: params.strength ?? undefined,
         lora_prompt: params.loraPrompt,
         count: count,
         reference_image: finalImg1 || undefined,

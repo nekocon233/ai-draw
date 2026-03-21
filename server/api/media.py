@@ -25,7 +25,7 @@ async def generate_media(
             await service.generate_media(
                 prompt=request.prompt,
                 workflow=request.workflow,
-                strength=request.strength,
+                strength=request.strength if request.strength is not None else 1,
                 lora_prompt=request.lora_prompt,
                 count=request.count,
                 reference_image=request.reference_image,

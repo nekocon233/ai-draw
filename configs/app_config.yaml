@@ -18,8 +18,6 @@ workflow_defaults:
     reference: "reference_workflow_api.json"
     reference_zimage: "reference_zimage_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
-    nano_banana_pro: "nano_banana_pro_workflow_api.json"
-  
   # 工作流元数据
   workflow_metadata:
     t2i:

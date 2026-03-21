@@ -217,39 +217,6 @@ class ComfyUIService:
             print(f"[ComfyUIService] I2I生成失败: {result.error}")
             finish_callback(None)
 
-    async def generate_nano_banana(
-        self,
-        finish_callback,
-        image_base64: str,
-        prompt_text: str,
-        api_key: str,
-        seed=None,
-        image_base64_2=None,
-        image_base64_3=None,
-    ):
-        """Nano Banana Pro 图生图"""
-        if seed is None:
-            seed = random.randrange(0, 2**31)  # 32 位整数范围，NanoBananaGeminiImageNode 限制
-
-        # 每次生成使用新鲜的工作流副本，避免节点删除操作污染后续调用
-        fresh_workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
-
-        result = await self.request.generate_nano_banana(
-            fresh_workflow,
-            image_base64,
-            prompt_text,
-            seed,
-            api_key,
-            image_base64_2=image_base64_2,
-            image_base64_3=image_base64_3,
-        )
-        if result.is_success:
-            print("[ComfyUIService] Nano Banana 生成成功")
-            finish_callback(result.data)
-        else:
-            print(f"[ComfyUIService] Nano Banana 生成失败: {result.error}")
-            finish_callback(None)
-
     async def generate_flf2v(
         self,
         finish_callback,

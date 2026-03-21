@@ -51,6 +51,15 @@ class AIPromptConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class NanoBananaConfig(BaseSettings):
+    """Nano Banana (Gemini) 配置"""
+    api_key: str = Field(default="", validation_alias="NANO_BANANA_API_KEY")
+    base_url: str = Field(default="https://api.uniapi.io/gemini", validation_alias="NANO_BANANA_BASE_URL")
+    model: str = Field(default="gemini-3-pro-image-preview", validation_alias="NANO_BANANA_MODEL")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class ServerConfig(BaseSettings):
     """服务器配置"""
     host: str = Field(validation_alias="SERVER_HOST")
@@ -148,6 +157,7 @@ class Config(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
+    nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -226,6 +236,11 @@ def get_comfyui_config() -> ComfyUIConfig:
 def get_ai_prompt_config() -> AIPromptConfig:
     """获取 AI Prompt 配置"""
     return get_config().ai_prompt
+
+
+def get_nano_banana_config() -> NanoBananaConfig:
+    """获取 Nano Banana 配置"""
+    return get_config().nano_banana
 
 
 def get_server_config() -> ServerConfig:
