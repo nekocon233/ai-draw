@@ -8,7 +8,6 @@ import {
   CloseOutlined,
   StopOutlined,
   PlusOutlined,
-  ScanOutlined,
   FormOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
@@ -66,7 +65,6 @@ export default function ChatInput() {
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
   const [poseWebOpen, setPoseWebOpen] = useState(false);
   const [poseWebTargetSlot, setPoseWebTargetSlot] = useState<1 | 2 | 3>(1);
-  const [isAnalyzingPose, setIsAnalyzingPose] = useState(false);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
@@ -775,35 +773,6 @@ export default function ChatInput() {
             >
               <ThunderboltOutlined />
             </button>
-
-            {/* AI 反推姿势（i2i / nano_banana_pro） */}
-            {(isI2I || isNanoBananaPro) && (
-              <Tooltip title="AI 反推姿势提示词">
-                <button
-                  className="chat-input-icon-button"
-                  disabled={isAnalyzingPose}
-                  onClick={async () => {
-                    const imgs = [referenceImage, referenceImage2, referenceImage3].filter(Boolean) as string[];
-                    if (imgs.length === 0) {
-                      message.warning('请先上传参考图');
-                      return;
-                    }
-                    setIsAnalyzingPose(true);
-                    try {
-                      const res = await apiService.analyzePose({ images: imgs });
-                      setPrompt(res.prompt);
-                      message.success('姿势反推成功，已填入提示词');
-                    } catch (err: any) {
-                      message.error('反推失败：' + (err?.response?.data?.detail || err.message));
-                    } finally {
-                      setIsAnalyzingPose(false);
-                    }
-                  }}
-                >
-                  {isAnalyzingPose ? <ScanOutlined spin /> : <ScanOutlined />}
-                </button>
-              </Tooltip>
-            )}
 
             {/* 快捷填充姿势提示词（i2i / nano_banana_pro） */}
             {(isI2I || isNanoBananaPro) && (

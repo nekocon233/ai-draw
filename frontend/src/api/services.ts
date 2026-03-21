@@ -6,8 +6,6 @@ import type {
   ServiceStatus,
   GeneratePromptRequest,
   GeneratePromptResponse,
-  AnalyzePoseRequest,
-  AnalyzePoseResponse,
   AnalyzeImageForPromptRequest,
   AnalyzeImageForPromptResponse,
   GenerateMediaRequest,
@@ -153,10 +151,6 @@ export const apiService = {
   // Prompt 生成
   generatePrompt: (data: GeneratePromptRequest): Promise<GeneratePromptResponse> =>
     client.post('/prompt/generate', data),
-
-  // Gemini 反推姿势提示词
-  analyzePose: (data: AnalyzePoseRequest): Promise<AnalyzePoseResponse> =>
-    client.post('/prompt/analyze-pose', data),
 
   // Gemini 以图生词（分析图片风格/元素/动作/镜头 → 文生图提示词）
   analyzeImageForPrompt: (data: AnalyzeImageForPromptRequest): Promise<AnalyzeImageForPromptResponse> =>

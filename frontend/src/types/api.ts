@@ -86,15 +86,6 @@ export interface WorkflowsResponse {
   default_workflow: string;
 }
 
-// 姿势反推
-export interface AnalyzePoseRequest {
-  images: string[];
-}
-
-export interface AnalyzePoseResponse {
-  prompt: string;
-}
-
 // 以图生词（Gemini 分析图片风格/元素/动作/镜头 → 文生图提示词）
 export interface AnalyzeImageForPromptRequest {
   image: string;        // data URL

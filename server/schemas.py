@@ -18,16 +18,6 @@ class GeneratePromptResponse(BaseModel):
     prompt: str
 
 
-class AnalyzePoseRequest(BaseModel):
-    """Gemini 反推姿势提示词请求"""
-    images: List[str]  # data URL 列表（一或多张参考图）
-
-
-class AnalyzePoseResponse(BaseModel):
-    """Gemini 反推姿势提示词响应"""
-    prompt: str
-
-
 class PosePresetResponse(BaseModel):
     """姿势预设提示词响应"""
     prompt: str
