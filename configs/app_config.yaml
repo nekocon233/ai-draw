@@ -15,8 +15,6 @@ workflow_defaults:
   workflow_files:
     t2i: "t2i_workflow_api.json"
     i2i: "qwen_image_edit_workflow_api.json"
-    reference: "reference_workflow_api.json"
-    reference_zimage: "reference_zimage_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
   # 工作流元数据
   workflow_metadata:
@@ -80,62 +78,6 @@ workflow_defaults:
           max: 2048
           step: 64
           default: 1024
-    reference:
-      label: "参考图（SDXL）"
-      description: "SDXL 参考图工作流"
-      requires_image: true
-      prompt_template: "你是一个 Stable Diffusion 提示词专家，当前使用 SDXL 模型，需要英文标签格式提示词。请将以下自然语言描述转换为 SDXL 英文提示词（英文标签，用逗号分隔，包含外貌、服装、场景、风格、画质等标签）：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "1girl"
-        - name: "strength"
-          label: "参考强度"
-          type: "number"
-          min: 0
-          max: 1
-          step: 0.01
-          default: 0.8
-        - name: "count"
-          label: "生成数量"
-          type: "number"
-          min: 1
-          max: 8
-          step: 1
-          default: 1
-        - name: "lora_prompt"
-          label: "LoRA 提示词"
-          type: "text"
-          default: "<lora:Ameniwa:0.8>"
-    reference_zimage:
-      label: "参考图（Z-Image）"
-      description: "Z-Image Turbo 参考图工作流"
-      requires_image: true
-      prompt_template: "你是一个 AI 图像生成提示词专家，当前使用 Z-Image Turbo 模型，支持中文自然语言描述。请将以下描述扩写为详细的中文图像提示词，描述主体、外貌、服装、场景、光线、风格等细节，语言流畅自然：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "一个女孩"
-        - name: "strength"
-          label: "参考强度"
-          type: "number"
-          min: 0
-          max: 1
-          step: 0.01
-          default: 0.8
-        - name: "count"
-          label: "生成数量"
-          type: "number"
-          min: 1
-          max: 8
-          step: 1
-          default: 1
-        - name: "lora_prompt"
-          label: "LoRA 提示词"
-          type: "text"
-          default: "<lora:AmeniwaZ:0.8>"
     nano_banana_pro:
       label: "图生图（Nano Banana Pro）"
       description: "基于 Nano Banana Pro 的图生图工作流"
