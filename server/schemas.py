@@ -33,6 +33,17 @@ class PosePresetResponse(BaseModel):
     prompt: str
 
 
+class AnalyzeImageForPromptRequest(BaseModel):
+    """Gemini 以图生词请求（分析图片风格/元素/动作/镜头，生成文生图提示词）"""
+    image: str        # data URL 格式（含 data:image/... 前缀）
+    description: str  # 指定要描述的内容（必填）
+
+
+class AnalyzeImageForPromptResponse(BaseModel):
+    """Gemini 以图生词响应"""
+    prompt: str
+
+
 # ============ 媒体生成相关 ============
 
 class GenerateMediaRequest(BaseModel):

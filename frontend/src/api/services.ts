@@ -8,6 +8,8 @@ import type {
   GeneratePromptResponse,
   AnalyzePoseRequest,
   AnalyzePoseResponse,
+  AnalyzeImageForPromptRequest,
+  AnalyzeImageForPromptResponse,
   GenerateMediaRequest,
   GenerateMediaResponse,
   UploadImageResponse,
@@ -144,6 +146,10 @@ export const apiService = {
   // Gemini 反推姿势提示词
   analyzePose: (data: AnalyzePoseRequest): Promise<AnalyzePoseResponse> =>
     client.post('/prompt/analyze-pose', data),
+
+  // Gemini 以图生词（分析图片风格/元素/动作/镜头 → 文生图提示词）
+  analyzeImageForPrompt: (data: AnalyzeImageForPromptRequest): Promise<AnalyzeImageForPromptResponse> =>
+    client.post('/prompt/analyze-image', data),
 
   // 获取姿势迁移预设提示词（与后端同源）
   getPosePreset: (): Promise<{ prompt: string }> =>

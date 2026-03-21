@@ -94,6 +94,16 @@ export interface AnalyzePoseResponse {
   prompt: string;
 }
 
+// 以图生词（Gemini 分析图片风格/元素/动作/镜头 → 文生图提示词）
+export interface AnalyzeImageForPromptRequest {
+  image: string;        // data URL
+  description: string;  // 指定要描述的内容（必填）
+}
+
+export interface AnalyzeImageForPromptResponse {
+  prompt: string;
+}
+
 // WebSocket 消息类型
 export interface WSMessage {
   type: 'state_change' | 'progress' | 'error' | 'result' | 'initial_state';
