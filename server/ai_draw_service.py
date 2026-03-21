@@ -135,6 +135,7 @@ class AIDrawService:
         start_frame_count: Optional[int] = None,
         end_frame_count: Optional[int] = None,
         frame_rate: Optional[float] = None,
+        frame_count: Optional[int] = None,
         send_history: bool = False,
         session_id: Optional[str] = None,
     ) -> list:
@@ -269,6 +270,65 @@ class AIDrawService:
                 images = [result_video]
                 print(f"[AIDrawService] flf2v 视频生成成功")
             
+            # ── i2v：图生视频 ────────────────────────────────────────────────────────────
+            elif workflow_type == 'i2v':
+                if not image_base64:
+                    raise ValueError("i2v 工作流需要提供起始帧图片")
+
+                seed = None
+                raw_video_b64 = None
+
+                def i2v_finish_callback(data):
+                    nonlocal raw_video_b64
+                    raw_video_b64 = data
+
+                await self.comfyui.generate_i2v(
+                    finish_callback=i2v_finish_callback,
+                    image_base64=image_base64,
+                    prompt_text=prompt,
+                    seed=seed,
+                    frame_count=frame_count,
+                    frame_rate=frame_rate,
+                )
+
+                if not raw_video_b64:
+                    raise Exception("I2V 视频生成失败：未收到有效视频数据")
+
+                raw = raw_video_b64.split(',', 1)[1] if raw_video_b64.startswith('data:') else raw_video_b64
+                video_bytes = await asyncio.to_thread(base64.b64decode, raw)
+
+                if target_width is not None and target_height is not None:
+                    try:
+                        video_bytes = await asyncio.to_thread(
+                            resize_video_bytes, video_bytes, target_width, target_height
+                        )
+                        print(f"[AIDrawService] I2V 视频已 resize 至 {target_width}x{target_height}")
+                    except Exception as e:
+                        print(f"[AIDrawService] I2V 视频 resize 失败，使用原始视频: {e}")
+
+                save_dir = Path("uploads/video")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"video_{uuid.uuid4().hex}.mp4"
+                filepath = save_dir / filename
+                try:
+                    def _write_i2v_file():
+                        with open(filepath, "wb") as vf:
+                            vf.write(video_bytes)
+                    await asyncio.to_thread(_write_i2v_file)
+                    result_video = f"/uploads/video/{filename}"
+                except Exception as e:
+                    print(f"[AIDrawService] 保存 I2V 视频文件失败: {e}")
+                    raise Exception(f"保存视频文件失败: {e}")
+
+                self._notify_state_change('media_generated', {
+                    'image': result_video,
+                    'index': 0,
+                    'total': 1
+                })
+
+                images = [result_video]
+                print(f"[AIDrawService] i2v 视频生成成功")
+
             # ── 图像类工作流 ────────────────────────────────────────────────
             else:
                 images = []

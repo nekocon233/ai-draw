@@ -58,6 +58,20 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    async def generate_i2v(
+        self,
+        workflow,
+        image_base64: str,
+        prompt_text: str,
+        seed: int,
+        frame_count=None,
+        frame_rate=None,
+    ) -> ComfyUIRequestResult:
+        """
+        图生视频（Image-to-Video）推理请求，由子类实现
+        """
+
+    @abstractmethod
     async def get_state(self) -> ComfyUIRequestState:
         """
         获取ComfyUI服务的当前状态，由子类实现

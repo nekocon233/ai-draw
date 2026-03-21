@@ -21,6 +21,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     startFrameCount,
     endFrameCount,
     frameRate,
+    frameCount,
     setStrength,
     setCount,
     setLoraPrompt,
@@ -31,6 +32,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setStartFrameCount,
     setEndFrameCount,
     setFrameRate,
+    setFrameCount,
   } = useAppStore();
 
   const [form] = Form.useForm();
@@ -45,6 +47,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasStartFrameCount = workflowMeta?.parameters.some(p => p.name === 'startFrameCount') || false;
   const hasEndFrameCount = workflowMeta?.parameters.some(p => p.name === 'endFrameCount') || false;
   const hasFrameRate = workflowMeta?.parameters.some(p => p.name === 'frameRate') || false;
+  const hasFrameCount = workflowMeta?.parameters.some(p => p.name === 'frameCount') || false;
   const supportsOriginalSize = workflowMeta?.supports_original_size === true;
 
   // 获取 width 和 height 的参数配置
@@ -53,6 +56,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const startFrameCountParam = workflowMeta?.parameters.find(p => p.name === 'startFrameCount');
   const endFrameCountParam = workflowMeta?.parameters.find(p => p.name === 'endFrameCount');
   const frameRateParam = workflowMeta?.parameters.find(p => p.name === 'frameRate');
+  const frameCountParam = workflowMeta?.parameters.find(p => p.name === 'frameCount');
 
   // 当弹窗打开时，重置表单值为当前状态
   useEffect(() => {
@@ -67,9 +71,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         startFrameCount: startFrameCount ?? startFrameCountParam?.default ?? 0,
         endFrameCount: endFrameCount ?? endFrameCountParam?.default ?? 33,
         frameRate: frameRate ?? frameRateParam?.default ?? 16,
+        frameCount: frameCount ?? frameCountParam?.default ?? 33,
       });
     }
-  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam, startFrameCount, endFrameCount, frameRate, startFrameCountParam, endFrameCountParam, frameRateParam]);
+  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam, startFrameCount, endFrameCount, frameRate, frameCount, startFrameCountParam, endFrameCountParam, frameRateParam, frameCountParam]);
 
   const handleOk = () => {
     form.validateFields().then((values) => {
@@ -82,6 +87,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       if (hasStartFrameCount) setStartFrameCount(values.startFrameCount);
       if (hasEndFrameCount) setEndFrameCount(values.endFrameCount);
       if (hasFrameRate) setFrameRate(values.frameRate);
+      if (hasFrameCount) setFrameCount(values.frameCount);
       onClose();
     });
   };
@@ -315,6 +321,33 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                     min={frameRateParam?.min ?? 1}
                     max={frameRateParam?.max ?? 60}
                     step={frameRateParam?.step ?? 1}
+                    size="small"
+                    style={{ width: 70 }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form.Item>
+        )}
+
+        {hasFrameCount && (
+          <Form.Item label={frameCountParam?.label || '总帧数'}>
+            <Row gutter={12} align="middle">
+              <Col flex="auto">
+                <Form.Item name="frameCount" noStyle>
+                  <Slider
+                    min={frameCountParam?.min ?? 1}
+                    max={frameCountParam?.max ?? 200}
+                    step={frameCountParam?.step ?? 1}
+                  />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="frameCount" noStyle>
+                  <InputNumber
+                    min={frameCountParam?.min ?? 1}
+                    max={frameCountParam?.max ?? 200}
+                    step={frameCountParam?.step ?? 1}
                     size="small"
                     style={{ width: 70 }}
                   />

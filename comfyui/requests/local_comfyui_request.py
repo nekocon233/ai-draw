@@ -452,6 +452,93 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             )
         return ComfyUIRequestResult(success=False, data=None, error="FLF2V 未获得有效视频结果")
 
+    async def generate_i2v(
+        self,
+        workflow,
+        image_base64: str,
+        prompt_text: str,
+        seed: int,
+        frame_count=None,
+        frame_rate=None,
+    ):
+        """
+        图生视频（I2V）请求
+        """
+        # 写入并上传起始帧图片
+        img_filename = os.path.join(tempfile.gettempdir(), "i2v_input.png")
+        try:
+            async with aiofiles.open(img_filename, "wb") as f:
+                await f.write(base64.b64decode(image_base64))
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"写入临时图片失败: {str(e)}")
+
+        try:
+            img_meta = self.api.upload_image(img_filename)
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=f"上传图片失败: {str(e)}")
+
+        # 设置参数
+        try:
+            img_path = (
+                f"{img_meta['subfolder']}/{img_meta['name']}"
+                if img_meta.get('subfolder')
+                else img_meta['name']
+            )
+            workflow.set_node_param("main_image", "image", img_path)
+            print("[LocalComfyUIRequest] i2v main_image 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 i2v main_image 失败: {e}")
+
+        try:
+            workflow.set_node_param("positive_prompt", "positive", prompt_text)
+            print("[LocalComfyUIRequest] i2v positive_prompt 设置成功")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 i2v positive_prompt 失败: {e}")
+
+        try:
+            workflow.set_node_param("seed", "value", seed)
+            print(f"[LocalComfyUIRequest] i2v seed 设置成功: {seed}")
+        except Exception as e:
+            print(f"[LocalComfyUIRequest] 设置 i2v seed 失败: {e}")
+
+        if frame_count is not None:
+            try:
+                workflow.set_node_param("frameCount", "value", int(frame_count))
+                print(f"[LocalComfyUIRequest] i2v frameCount 设置成功: {frame_count}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 i2v frameCount 失败: {e}")
+
+        if frame_rate is not None:
+            try:
+                workflow.set_node_param("frameRate", "value", float(frame_rate))
+                print(f"[LocalComfyUIRequest] i2v frameRate 设置成功: {frame_rate}")
+            except Exception as e:
+                print(f"[LocalComfyUIRequest] 设置 i2v frameRate 失败: {e}")
+
+        print("[LocalComfyUIRequest] I2V workflow 参数设置完成")
+
+        # 执行工作流
+        prompt_id = await self._queue_and_poll(workflow, timeout=3600)
+        video_node_id = workflow.get_node_id("保存视频")
+        history = await asyncio.to_thread(self.api.get_history, prompt_id)
+        node_output = history[prompt_id]["outputs"].get(video_node_id, {})
+        print(f"[LocalComfyUIRequest] I2V 视频节点输出 keys: {list(node_output.keys())}")
+
+        results = node_output.get("videos") or node_output.get("gifs") or node_output.get("images") or []
+        if results:
+            first_result = results[0]
+            video_bytes = self.api.get_image(
+                first_result["filename"],
+                first_result.get("subfolder", ""),
+                first_result.get("type", "output"),
+            )
+            return ComfyUIRequestResult(
+                success=True,
+                data=base64.b64encode(video_bytes).decode('utf-8'),
+                error="",
+            )
+        return ComfyUIRequestResult(success=False, data=None, error="I2V 未获得有效视频结果")
+
     async def get_state(self) -> ComfyUIRequestState:
         """异步检查本地ComfyUI服务状态"""
 

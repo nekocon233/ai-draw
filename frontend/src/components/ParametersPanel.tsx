@@ -16,6 +16,7 @@ export default function ParametersPanel() {
     startFrameCount,
     endFrameCount,
     frameRate,
+    frameCount,
     setStrength, 
     setCount,
     setLoraPrompt,
@@ -25,6 +26,7 @@ export default function ParametersPanel() {
     setStartFrameCount,
     setEndFrameCount,
     setFrameRate,
+    setFrameCount,
   } = useAppStore();
 
   // 获取当前工作流的参数配置
@@ -42,6 +44,7 @@ export default function ParametersPanel() {
   const hasStartFrameCount = workflowMeta.parameters.some(p => p.name === 'startFrameCount');
   const hasEndFrameCount = workflowMeta.parameters.some(p => p.name === 'endFrameCount');
   const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
+  const hasFrameCount = workflowMeta.parameters.some(p => p.name === 'frameCount');
   const supportsOriginalSize = workflowMeta.supports_original_size === true;
 
   return (
@@ -279,6 +282,36 @@ export default function ParametersPanel() {
                 step={workflowMeta.parameters.find(p => p.name === 'frameRate')?.step ?? 1}
                 value={frameRate ?? (workflowMeta.parameters.find(p => p.name === 'frameRate')?.default as number) ?? 16}
                 onChange={(val) => setFrameRate(val ?? 16)}
+                size="small"
+                style={{ width: 65 }}
+              />
+            </Col>
+          </Row>
+        </div>
+      )}
+
+      {hasFrameCount && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'frameCount')?.label || '总帧数'}
+          </Text>
+          <Row gutter={12} align="middle" style={{ marginTop: 12 }}>
+            <Col flex="auto">
+              <Slider
+                min={workflowMeta.parameters.find(p => p.name === 'frameCount')?.min ?? 1}
+                max={workflowMeta.parameters.find(p => p.name === 'frameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'frameCount')?.step ?? 1}
+                value={frameCount ?? (workflowMeta.parameters.find(p => p.name === 'frameCount')?.default as number) ?? 33}
+                onChange={setFrameCount}
+              />
+            </Col>
+            <Col>
+              <InputNumber
+                min={workflowMeta.parameters.find(p => p.name === 'frameCount')?.min ?? 1}
+                max={workflowMeta.parameters.find(p => p.name === 'frameCount')?.max ?? 200}
+                step={workflowMeta.parameters.find(p => p.name === 'frameCount')?.step ?? 1}
+                value={frameCount ?? (workflowMeta.parameters.find(p => p.name === 'frameCount')?.default as number) ?? 33}
+                onChange={(val) => setFrameCount(val ?? 33)}
                 size="small"
                 style={{ width: 65 }}
               />

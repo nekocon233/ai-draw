@@ -40,6 +40,7 @@ export default function ChatInput() {
     frameRate,
     startFrameCount,
     endFrameCount,
+    frameCount,
     nanoBananaSendHistory,
     setPrompt,
     setPromptEnd,
@@ -55,6 +56,7 @@ export default function ChatInput() {
   } = useAppStore();
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   const isFlf2v = workflowMeta?.requires_end_image === true;
+  const isI2V = currentWorkflow === 'i2v'; // Wan i2v：图生视频
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
   const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
   const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
@@ -179,9 +181,10 @@ export default function ChatInput() {
       referenceImage3: referenceImage3 || undefined,
       referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
       isLoop: isFlf2v ? isLoop : undefined,
-      frameRate: isFlf2v ? frameRate : undefined,
+      frameRate: isFlf2v ? frameRate : (isI2V ? frameRate : undefined),
       startFrameCount: isFlf2v ? startFrameCount : undefined,
       endFrameCount: isFlf2v ? endFrameCount : undefined,
+      frameCount: isI2V ? frameCount : undefined,
     });
 
     try {
@@ -205,7 +208,8 @@ export default function ChatInput() {
         is_loop: isFlf2v ? isLoop : undefined,
         start_frame_count: isFlf2v ? (state.startFrameCount ?? undefined) : undefined,
         end_frame_count: isFlf2v ? (state.endFrameCount ?? undefined) : undefined,
-        frame_rate: isFlf2v ? (state.frameRate ?? undefined) : undefined,
+        frame_rate: (isFlf2v || isI2V) ? (state.frameRate ?? undefined) : undefined,
+        frame_count: isI2V ? (state.frameCount ?? undefined) : undefined,
         // Gemini 多轮对话（nano_banana_pro 开关开时附加）
         send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
         session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,

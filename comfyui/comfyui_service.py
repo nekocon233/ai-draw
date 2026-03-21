@@ -261,6 +261,40 @@ class ComfyUIService:
             print(f"[ComfyUIService] FLF2V 视频生成失败: {result.error}")
             finish_callback(None)  # 确保回调被调用，触发 image_generated 事件
 
+    async def generate_i2v(
+        self,
+        finish_callback,
+        image_base64: str,
+        prompt_text: str,
+        seed=None,
+        frame_count=None,
+        frame_rate=None,
+    ):
+        """
+        图生视频（Image-to-Video）
+        image_base64: 起始帧图片 base64
+        prompt_text:  视频描述
+        seed:         随机种子
+        finish_callback: 完成回调，参数为 base64 视频内容（失败为 None）
+        """
+        if seed is None:
+            seed = random.randrange(0, 2**63)
+
+        result = await self.request.generate_i2v(
+            self.workflow,
+            image_base64,
+            prompt_text,
+            seed,
+            frame_count=frame_count,
+            frame_rate=frame_rate,
+        )
+        if result.is_success:
+            print("[ComfyUIService] I2V 视频生成成功")
+            finish_callback(result.data)
+        else:
+            print(f"[ComfyUIService] I2V 视频生成失败: {result.error}")
+            finish_callback(None)
+
     async def get_state(self) -> ComfyUIRequestState:
         """
         获取当前ComfyUI服务的状态

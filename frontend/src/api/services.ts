@@ -73,6 +73,11 @@ export const apiService = {
     reference_image_3?: string | null;
     prompt_end?: string | null;
     reference_image_end?: string | null;
+    is_loop?: boolean;
+    start_frame_count?: number | null;
+    end_frame_count?: number | null;
+    frame_rate?: number | null;
+    frame_count?: number | null;
   }> =>
     client.get(`/chat/sessions/${sessionId}/config`),
   
@@ -88,6 +93,11 @@ export const apiService = {
     reference_image_3?: string | null;
     prompt_end?: string | null;
     reference_image_end?: string | null;
+    is_loop?: boolean;
+    start_frame_count?: number;
+    end_frame_count?: number;
+    frame_rate?: number;
+    frame_count?: number;
   }): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}/config`, config),
   
@@ -113,6 +123,7 @@ export const apiService = {
     frame_rate?: number;
     start_frame_count?: number;
     end_frame_count?: number;
+    frame_count?: number;
   }): Promise<{ message: string }> =>
     client.post('/chat/save', data),
   

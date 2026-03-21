@@ -288,7 +288,8 @@ function ImageAnalyzePanel({
 // 主组件
 // ─────────────────────────────────────────────
 export default function AIPromptModal({ open, onClose, onApply, workflowId }: AIPromptModalProps) {
-  const isT2i = workflowId === 't2i';
+  // 需要显示"图片分析"Tab 的工作流：文生图（可上传参考图分析风格）、图生视频（分析主图生成运镜描述）
+  const showImageTab = workflowId === 't2i' || workflowId === 'i2v';
 
   const handleClose = () => {
     onClose();
@@ -335,7 +336,7 @@ export default function AIPromptModal({ open, onClose, onApply, workflowId }: AI
       centered
       footer={null}
     >
-      {isT2i ? (
+      {showImageTab ? (
         <Tabs items={tabItems} defaultActiveKey="text" />
       ) : (
         <TextDescriptionPanel workflowId={workflowId} onApply={onApply} onClose={handleClose} />

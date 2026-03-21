@@ -41,6 +41,7 @@ interface ChatMessage {
     frameRate?: number;        // flf2v 帧率
     startFrameCount?: number;  // flf2v 起始帧长度
     endFrameCount?: number;    // flf2v 结束帧长度
+    frameCount?: number;       // i2v 总帧数
   }
 }
 
@@ -77,6 +78,7 @@ interface AppState {
   startFrameCount: number | null; // flf2v 起始帧长度
   endFrameCount: number | null;   // flf2v 结束帧长度
   frameRate: number | null;       // flf2v 帧率
+  frameCount: number | null;      // i2v 总帧数
   
   // Gemini 多轮对话开关（nano_banana_pro 专用）
   nanoBananaSendHistory: boolean;
@@ -120,12 +122,13 @@ interface AppState {
   setStartFrameCount: (v: number | null) => void;
   setEndFrameCount: (v: number | null) => void;
   setFrameRate: (v: number | null) => void;
+  setFrameCount: (v: number | null) => void;
   setNanoBananaSendHistory: (v: boolean) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
   setReferenceImageEnd: (image: string | null) => void;
-  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null }) => Promise<string>;
+  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null; frameCount?: number | null }) => Promise<string>;
   updateChatImages: (messageId: string, images: string[]) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   deleteChatMessage: (messageId: string) => Promise<void>;
@@ -200,6 +203,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   startFrameCount: null,
   endFrameCount: null,
   frameRate: null,
+  frameCount: null,
   nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
   referenceImage: initialConfig.referenceImage,
   referenceImage2: null,
@@ -235,6 +239,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hasStartFrameCount = workflowMeta.parameters.some(p => p.name === 'startFrameCount');
       const hasEndFrameCount = workflowMeta.parameters.some(p => p.name === 'endFrameCount');
       const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
+      const hasFrameCount = workflowMeta.parameters.some(p => p.name === 'frameCount');
       
       workflowMeta.parameters.forEach(param => {
         if (param.name === 'prompt') {
@@ -255,6 +260,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           updates.endFrameCount = param.default as number;
         } else if (param.name === 'frameRate') {
           updates.frameRate = param.default as number;
+        } else if (param.name === 'frameCount') {
+          updates.frameCount = param.default as number;
         }
       });
       
@@ -282,6 +289,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (!hasFrameRate) {
         updates.frameRate = null;
+      }
+      if (!hasFrameCount) {
+        updates.frameCount = null;
       }
       // 切换工作流时重置 isLoop
       (updates as any).isLoop = false;
@@ -404,11 +414,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
+  setFrameCount: (v) => {
+    set({ frameCount: v });
+    const state = get();
+    state.saveSessionConfig();
+  },
   setNanoBananaSendHistory: (v) => {
     set({ nanoBananaSendHistory: v });
     localStorage.setItem('nanoBananaSendHistory', String(v));
   },
-  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount }) => {
+  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount }) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -477,6 +492,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         frameRate: frameRate ?? undefined,
         startFrameCount: startFrameCount ?? undefined,
         endFrameCount: endFrameCount ?? undefined,
+        frameCount: frameCount ?? undefined,
       }
     };
     const assistantMessage: ChatMessage = {
@@ -528,6 +544,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         frame_rate: frameRate ?? undefined,
         start_frame_count: startFrameCount ?? undefined,
         end_frame_count: endFrameCount ?? undefined,
+        frame_count: frameCount ?? undefined,
       }).catch(err => console.error('保存用户消息失败:', err));
     }
     
@@ -749,6 +766,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         frame_rate: params.frameRate ?? undefined,
         start_frame_count: params.startFrameCount ?? undefined,
         end_frame_count: params.endFrameCount ?? undefined,
+        frame_count: params.frameCount ?? undefined,
         use_original_size: true,
         // 仅 nano_banana_pro + sendHistory=true 时传 session_id，与 ChatInput.tsx 逻辑一致
         send_history: isNanoBananaPro ? sendHistory : undefined,
@@ -1263,6 +1281,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       start_frame_count: state.startFrameCount ?? undefined,
       end_frame_count: state.endFrameCount ?? undefined,
       frame_rate: state.frameRate ?? undefined,
+      frame_count: state.frameCount ?? undefined,
     };
     
     if (isLoggedIn()) {
@@ -1287,6 +1306,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         startFrameCount: config.start_frame_count,
         endFrameCount: config.end_frame_count,
         frameRate: config.frame_rate,
+        frameCount: config.frame_count,
       });
     }
   },
@@ -1313,6 +1333,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           startFrameCount: (config as any).start_frame_count ?? null,
           endFrameCount: (config as any).end_frame_count ?? null,
           frameRate: (config as any).frame_rate ?? null,
+          frameCount: config.frame_count ?? null,
           workflowImageStash: {},
         });
       } catch (error) {
@@ -1334,6 +1355,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           startFrameCount: null,
           endFrameCount: null,
           frameRate: null,
+          frameCount: null,
           workflowImageStash: {},
         });
       }
@@ -1357,6 +1379,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           startFrameCount: (config as any).startFrameCount ?? null,
           endFrameCount: (config as any).endFrameCount ?? null,
           frameRate: (config as any).frameRate ?? null,
+          frameCount: (config as any).frameCount ?? null,
           workflowImageStash: {},
         });
       } else {

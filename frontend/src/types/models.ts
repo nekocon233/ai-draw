@@ -90,6 +90,7 @@ export interface ChatMessage {
     frameRate?: number;
     startFrameCount?: number;
     endFrameCount?: number;
+    frameCount?: number;   // i2v 总帧数
   };
 }
 

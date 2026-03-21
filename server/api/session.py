@@ -57,6 +57,7 @@ class SessionConfigRequest(BaseModel):
     start_frame_count: Optional[int] = None
     end_frame_count: Optional[int] = None
     frame_rate: Optional[float] = None
+    frame_count: Optional[int] = None
 
 # ============ 会话管理 API ============
 
@@ -238,6 +239,8 @@ def update_session_config(
         session.config_end_frame_count = update_data['end_frame_count']
     if 'frame_rate' in update_data:
         session.config_frame_rate = update_data['frame_rate']
+    if 'frame_count' in update_data:
+        session.config_frame_count = update_data['frame_count']
     
     session.updated_at = datetime.now()
     db.commit()
@@ -280,6 +283,7 @@ def get_session_config(
         "start_frame_count": session.config_start_frame_count,
         "end_frame_count": session.config_end_frame_count,
         "frame_rate": session.config_frame_rate,
+        "frame_count": session.config_frame_count,
     }
 
 

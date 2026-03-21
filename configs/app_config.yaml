@@ -16,6 +16,7 @@ workflow_defaults:
     t2i: "t2i_workflow_api.json"
     i2i: "qwen_image_edit_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
+    i2v: "i2v_workflow_api.json"
   # 工作流元数据
   workflow_metadata:
     t2i:
@@ -126,6 +127,32 @@ workflow_defaults:
           default: 33
         - name: "endFrameCount"
           label: "结束帧长度"
+          type: "number"
+          min: 1
+          max: 200
+          step: 1
+          default: 33
+        - name: "frameRate"
+          label: "帧率"
+          type: "number"
+          min: 1
+          max: 60
+          step: 1
+          default: 16
+    i2v:
+      label: "图生视频（Wan i2v）"
+      description: "基于参考图生成视频"
+      requires_image: true
+      supports_original_size: true
+      output_type: "video"
+      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Wan2.2 i2v 视频模型，基于起始帧图像生成视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出动态感：\n描述：{desc}\n只输出提示词，不要解释："
+      parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
+        - name: "frameCount"
+          label: "总帧数"
           type: "number"
           min: 1
           max: 200

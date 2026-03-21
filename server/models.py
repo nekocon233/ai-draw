@@ -86,6 +86,7 @@ class ChatSession(Base):
     config_start_frame_count = Column(Integer, nullable=True)               # flf2v 起始帧长度
     config_end_frame_count = Column(Integer, nullable=True)                 # flf2v 结束帧长度
     config_frame_rate = Column(Float, nullable=True)                        # flf2v 帧率
+    config_frame_count = Column(Integer, nullable=True)                     # i2v 总帧数
     
     # 关系
     user = relationship("User", back_populates="sessions")
@@ -115,6 +116,7 @@ class ChatMessage(Base):
     frame_rate = Column(Float, nullable=True)          # flf2v 帧率
     start_frame_count = Column(Integer, nullable=True)  # flf2v 起始帧长度
     end_frame_count = Column(Integer, nullable=True)    # flf2v 结束帧长度
+    frame_count = Column(Integer, nullable=True)        # i2v 总帧数
     
     created_at = Column(DateTime, default=datetime.now, index=True)
     
