@@ -9,7 +9,7 @@ from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.schemas import GeneratePromptRequest, GeneratePromptResponse, AnalyzePoseRequest, AnalyzePoseResponse, PosePresetResponse
 
 # 姿势迁移提示词前缀（前后端统一来源）
-POSE_PRESET_PROMPT = "参照第二张图中人物的动作和姿态，将第一张图角色做出完全相同的动作，严格保持第一张图的画面长宽比例、尺寸、画风、镜头距离与视角、角色外形及背景，不得改变取景范围和画面裁切方式"
+POSE_PRESET_PROMPT = "参照第二张图中人物的动作和姿态，将第一张图角色做出完全相同的动作，严格保持第一张图的画面尺寸、长宽比例、画风、镜头距离与视角、角色外形及背景，不得改变取景范围和画面裁切方式"
 
 router = APIRouter(prefix="/prompt", tags=["Prompt生成"])
 

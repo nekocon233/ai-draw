@@ -5,21 +5,22 @@ import ChatInput from './components/ChatInput';
 import ResultGrid from './components/ResultGrid';
 import StatusBar from './components/StatusBar';
 import ChatSessionSidebar from './components/ChatSessionSidebar';
+import LoginModal from './components/LoginModal';
 import { wsManager } from './api/websocket';
 import { apiService } from './api/services';
 import { useAppStore } from './stores/appStore';
-import { isLoggedIn, getStorageUsage } from './utils/helpers';
-import { WS_MESSAGE_TYPES, STATE_FIELDS, STORAGE_CONFIG } from './utils/constants';
+import { isLoggedIn } from './utils/helpers';
+import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
 import './App.css';
 
 function AppContent() {
   const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore();
   const [isDark, setIsDark] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
+  const [forceLoginOpen] = useState(!isLoggedIn());
 
-  // 主题检测和存储监控
+  // 主题检测
   useEffect(() => {
-    // 检测系统主题
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     setIsDark(mediaQuery.matches);
 
@@ -28,34 +29,10 @@ function AppContent() {
     };
 
     mediaQuery.addEventListener('change', handleThemeChange);
-
-    // 检查游客模式的存储使用情况
-    let storageCheckInterval: number | null = null;
-    if (!isLoggedIn()) {
-      const checkStorage = () => {
-        const usage = getStorageUsage();
-        if (usage.percentage > STORAGE_CONFIG.WARN_USAGE_PERCENTAGE) {
-          messageApi.warning({
-            content: `浏览器存储空间已使用 ${usage.percentage.toFixed(0)}%，建议登录以保存更多历史记录`,
-            duration: 5,
-          });
-        }
-      };
-      
-      // 启动时检查
-      checkStorage();
-      
-      // 每 30 秒检查一次
-      storageCheckInterval = setInterval(checkStorage, 30000);
-    }
-    
     return () => {
       mediaQuery.removeEventListener('change', handleThemeChange);
-      if (storageCheckInterval) {
-        clearInterval(storageCheckInterval);
-      }
     };
-  }, [messageApi]);
+  }, []);
 
   // 数据加载和 WebSocket 连接
   useEffect(() => {
@@ -174,6 +151,12 @@ function AppContent() {
     >
       <AntApp>
         {contextHolder}
+        <LoginModal
+          open={forceLoginOpen}
+          onClose={() => {}}
+          onSuccess={(_username) => { window.location.reload(); }}
+          closable={false}
+        />
         <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
           {/* 顶部状态栏 */}
           <div style={{ 

@@ -25,6 +25,7 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    invite_code: str
 
 class LoginRequest(BaseModel):
     username: str
@@ -57,6 +58,16 @@ class UpdateConfigRequest(BaseModel):
 @router.post("/auth/register", response_model=TokenResponse)
 def register(request: RegisterRequest, db: Session = Depends(get_db)):
     """用户注册"""
+    # 验证邀请码
+    from utils.config_loader import get_config as _get_cfg
+    _cfg = _get_cfg()
+    _invite = _cfg.auth.invite_code
+    if not _invite or request.invite_code != _invite:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="邀请码无效"
+        )
+
     # 检查用户名是否已存在
     existing = db.query(User).filter(User.username == request.username).first()
     if existing:

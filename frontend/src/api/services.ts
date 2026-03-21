@@ -18,7 +18,7 @@ import type { AuthResponse, UserConfig } from '../types/models';
 
 export const apiService = {
   // 用户认证
-  register: (data: { username: string; password: string }): Promise<AuthResponse> =>
+  register: (data: { username: string; password: string; invite_code: string }): Promise<AuthResponse> =>
     client.post('/auth/register', data),
   
   login: (data: { username: string; password: string }): Promise<AuthResponse> =>

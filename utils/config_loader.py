@@ -106,6 +106,7 @@ class AuthConfig(BaseSettings):
     jwt_secret_key: str = Field(validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(validation_alias="JWT_ALGORITHM")
     jwt_access_token_expire_minutes: int = Field(validation_alias="JWT_EXPIRE_MINUTES")
+    invite_code: str = Field(default="", validation_alias="INVITE_CODE")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

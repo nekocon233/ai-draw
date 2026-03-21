@@ -58,6 +58,7 @@ services:
       # 认证配置
       - JWT_ALGORITHM=HS256
       - JWT_EXPIRE_MINUTES=10080
+      - INVITE_CODE=${INVITE_CODE}
       # 数据库配置
       - DB_HOST=postgres
       - DB_PORT=5432

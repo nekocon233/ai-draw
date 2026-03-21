@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import { Modal, Form, Input, Tabs, message } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, KeyOutlined } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { setAccessToken, setUsername } from '../utils/helpers';
 import { VALIDATION } from '../utils/constants';
@@ -12,9 +12,10 @@ interface LoginModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess: (username: string) => void;
+  closable?: boolean;
 }
 
-export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
+export default function LoginModal({ open, onClose, onSuccess, closable }: LoginModalProps) {
   const [loading, setLoading] = useState(false);
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();
@@ -36,7 +37,7 @@ export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps
     }
   };
 
-  const handleRegister = async (values: { username: string; password: string }) => {
+  const handleRegister = async (values: { username: string; password: string; invite_code: string }) => {
     setLoading(true);
     try {
       const response = await apiService.register(values);
@@ -159,14 +160,31 @@ export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps
           size="large"
         />
       </Form.Item>
+
+      <Form.Item
+        name="invite_code"
+        label="邀请码"
+        rules={[{ required: true, message: '请输入邀请码' }]}
+      >
+        <Input
+          prefix={<KeyOutlined />}
+          placeholder="邀请码"
+          size="large"
+        />
+      </Form.Item>
     </Form>
   );
+
+  const isClosable = closable !== false;
 
   return (
     <Modal
       title="账户登录"
       open={open}
-      onCancel={onClose}
+      onCancel={isClosable ? onClose : undefined}
+      closable={isClosable}
+      maskClosable={isClosable}
+      keyboard={isClosable}
       onOk={() => {
         const activeKey = document.querySelector('.ant-tabs-tab-active')?.getAttribute('data-node-key');
         if (activeKey === 'login') {
@@ -176,7 +194,8 @@ export default function LoginModal({ open, onClose, onSuccess }: LoginModalProps
         }
       }}
       okText="确定"
-      cancelText="取消"
+      cancelText={isClosable ? '取消' : undefined}
+      footer={isClosable ? undefined : (_, { OkBtn }) => <OkBtn />}
       confirmLoading={loading}
       width={450}
       centered
