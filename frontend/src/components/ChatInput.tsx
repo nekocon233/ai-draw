@@ -843,6 +843,7 @@ export default function ChatInput() {
         open={aiPromptOpen}
         onClose={() => setAiPromptOpen(false)}
         onApply={handleApplyPrompt}
+        onApplyEnd={(p) => { setPromptEnd(p); message.success('尾帧描述已应用'); }}
         workflowId={currentWorkflow}
       />
 

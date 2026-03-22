@@ -8,6 +8,8 @@ import type {
   GeneratePromptResponse,
   AnalyzeImageForPromptRequest,
   AnalyzeImageForPromptResponse,
+  AnalyzeFramesForPromptRequest,
+  AnalyzeFramesForPromptResponse,
   GenerateMediaRequest,
   GenerateMediaResponse,
   UploadImageResponse,
@@ -152,9 +154,13 @@ export const apiService = {
   generatePrompt: (data: GeneratePromptRequest): Promise<GeneratePromptResponse> =>
     client.post('/prompt/generate', data),
 
-  // Gemini 以图生词（分析图片风格/元素/动作/镜头 → 文生图提示词）
+  // Gemini 以图生词（分析单张图片风格/元素/动作/镜头 → 文生图提示词）
   analyzeImageForPrompt: (data: AnalyzeImageForPromptRequest): Promise<AnalyzeImageForPromptResponse> =>
     client.post('/prompt/analyze-image', data),
+
+  // Gemini 首尾帧分析 → flf2v 视频过渡提示词
+  analyzeFramesForPrompt: (data: AnalyzeFramesForPromptRequest): Promise<AnalyzeFramesForPromptResponse> =>
+    client.post('/prompt/analyze-frames', data),
 
   // 获取姿势迁移预设提示词（与后端同源）
   getPosePreset: (): Promise<{ prompt: string }> =>

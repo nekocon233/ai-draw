@@ -86,7 +86,7 @@ export interface WorkflowsResponse {
   default_workflow: string;
 }
 
-// 以图生词（Gemini 分析图片风格/元素/动作/镜头 → 文生图提示词）
+// 以图生词（Gemini 分析单张图片风格/元素/动作/镜头 → 文生图提示词）
 export interface AnalyzeImageForPromptRequest {
   image: string;        // data URL
   description: string;  // 指定要描述的内容（必填）
@@ -94,6 +94,19 @@ export interface AnalyzeImageForPromptRequest {
 
 export interface AnalyzeImageForPromptResponse {
   prompt: string;
+}
+
+// 首尾帧分析（Gemini 分析 flf2v 首尾帧 → 过渡视频提示词）
+export interface AnalyzeFramesForPromptRequest {
+  image_start?: string;  // 首帧 data URL
+  image_end?: string;    // 尾帧 data URL
+  description?: string;  // 补充要求（可选）
+  is_loop?: boolean;     // 是否循环（首尾帧往返）
+}
+
+export interface AnalyzeFramesForPromptResponse {
+  prompt_start: string;  // 首帧描述提示词
+  prompt_end: string;    // 尾帧描述提示词
 }
 
 // WebSocket 消息类型

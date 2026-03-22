@@ -24,7 +24,7 @@ class PosePresetResponse(BaseModel):
 
 
 class AnalyzeImageForPromptRequest(BaseModel):
-    """Gemini 以图生词请求（分析图片风格/元素/动作/镜头，生成文生图提示词）"""
+    """Gemini 以图生词请求（分析单张图片风格/元素/动作/镜头，生成文生图提示词）"""
     image: str        # data URL 格式（含 data:image/... 前缀）
     description: str  # 指定要描述的内容（必填）
 
@@ -32,6 +32,20 @@ class AnalyzeImageForPromptRequest(BaseModel):
 class AnalyzeImageForPromptResponse(BaseModel):
     """Gemini 以图生词响应"""
     prompt: str
+
+
+class AnalyzeFramesForPromptRequest(BaseModel):
+    """Gemini 首尾帧分析请求（flf2v：分析首尾帧，生成过渡视频提示词）"""
+    image_start: Optional[str] = None  # 首帧 data URL
+    image_end: Optional[str] = None    # 尾帧 data URL
+    description: Optional[str] = None  # 补充要求（可选）
+    is_loop: bool = False               # 是否循环（首尾帧往返过渡）
+
+
+class AnalyzeFramesForPromptResponse(BaseModel):
+    """Gemini 首尾帧分析响应"""
+    prompt_start: str  # 首帧描述提示词
+    prompt_end: str    # 尾帧描述提示词
 
 
 # ============ 媒体生成相关 ============
