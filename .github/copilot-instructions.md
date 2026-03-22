@@ -31,7 +31,10 @@ AI-Draw 是一个基于 FastAPI + React 的 AI 辅助绘画 Web 平台，集成 
 
 **模块化 API 设计** - 按功能拆分为独立模块:
 - `server/api/media.py`: 媒体生成相关 API（图像 / 视频），路由前缀 `/media`
-- `server/api/prompt.py`: AI Prompt 生成
+- `server/api/prompt.py`: AI Prompt 生成，包含三个端点：
+  - `POST /prompt/generate`: 生成提示词
+  - `GET /prompt/pose-preset`: 返回姿势迁移预设提示词列表
+  - `POST /prompt/analyze-image`: 以图生词（调用 Gemini 分析图片风格，生成 Z-Image 提示词）
 - `server/api/service.py`: 服务状态、工作流配置
 - `server/api/user.py`: 用户认证、配置管理
 - `server/api/session.py`: 会话管理、聊天历史
@@ -72,11 +75,16 @@ async def generate_media(
 - `config_prompt_end`、`prompt_end`: flf2v 结束帧提示词
 - `config_reference_image_end`、`reference_image_end`: flf2v 结束帧图片
 - `config_is_loop`、`config_start_frame_count`、`config_end_frame_count`、`config_frame_rate` / 对应消息字段: flf2v 视频参数
+- `config_frame_count`、`frame_count`: i2v 总帧数
 
 **配置系统** - 单一数据源原则:
 - **环境变量优先**: 端口、密钥、数据库连接等通过 `.env` 和 `docker-compose.yml` 配置
 - `configs/app_config.yaml`: 仅保留工作流配置（复杂结构）
-- `utils/config_loader.py`: 使用 Pydantic Settings，`Field(validation_alias="ENV_VAR")` 映射环境变量
+- `utils/config_loader.py`: 使用 Pydantic Settings，`Field(validation_alias="ENV_VAR")` 映射环境变量；包含以下配置类：
+  - `AppConfig`: 基础应用配置（端口、密钥、数据库 URL 等）
+  - `NanoBananaConfig`: Gemini/Nano Banana 配置（`NANO_BANANA_API_KEY`、`NANO_BANANA_BASE_URL`、`NANO_BANANA_MODEL`），通过 `get_nano_banana_config()` 获取
+  - `RedisConfig`: Redis 连接配置（`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD`、`REDIS_DB`）
+  - `Config`: 全局配置聚合类，包含上述所有子配置
 
 **WebSocket 架构** (`server/websocket/__init__.py`):
 - 全局 `ConnectionManager` 管理连接，支持会话 ID 关联
@@ -94,12 +102,15 @@ const {
   // flf2v 视频参数
   promptEnd, referenceImageEnd, isLoop,
   startFrameCount, endFrameCount, frameRate,
+  // i2v 视频参数
+  frameCount,
   // i2i 多参考图
   referenceImage2, referenceImage3,
   // 其他扩展
   width, height, useOriginalSize,
   nanoBananaSendHistory, workflowImageStash,
   currentGeneratingMessageId,
+  sidebarCollapsed, imagesPerRow,
   setServiceStatus, loadAvailableWorkflows
 } = useAppStore();
 ```
@@ -110,9 +121,9 @@ const {
 - `websocket.ts`: WebSocket 管理器，支持自动重连
 
 **类型定义** (`frontend/src/types/`):
-- `api.ts`: API 请求/响应类型（`WorkflowMetadata`, `GenerateMediaRequest`）
+- `api.ts`: API 请求/响应类型（`WorkflowMetadata`, `GenerateMediaRequest`，含 `frame_count` 字段）
 - `models.ts`: 数据模型（`ChatSession`, `UserConfig`）
-- `store.ts`: Zustand Store 类型
+- `store.ts`: 早期遗留文件，当前 Store 类型已内联定义在 `appStore.ts` 中，该文件已基本过时
 
 ## 开发工作流
 
@@ -158,10 +169,9 @@ npm run dev  # 启动在 http://localhost:5173
 |-----------|------|-----------|----------|-----------|
 | `t2i` | 文生图（Z-Image） | ❌ | image | `t2i_workflow_api.json` |
 | `i2i` | 图生图（Q-Image） | ✅（最多 3 张） | image | `qwen_image_edit_workflow_api.json` |
-| `reference` | 参考图（SDXL） | ✅ | image | `reference_workflow_api.json` |
-| `reference_zimage` | 参考图（Z-Image） | ✅ | image | `reference_zimage_workflow_api.json` |
 | `flf2v` | 首尾帧生视频 | ✅（需起始帧和结束帧） | **video** | `flf2v_workflow_api.json` |
-| `nano_banana_pro` | 图生图（Nano Banana Pro） | 可选 | image | `nano_banana_pro_workflow_api.json` |
+| `i2v` | 图生视频（Wan i2v） | ✅ | **video** | `i2v_workflow_api.json` |
+| `nano_banana_pro` | 图生图（Nano Banana Pro） | 可选 | image | —（走 Gemini，无工作流文件） |
 
 `workflow_metadata` 中每个工作流支持的元数据字段（`app_config.yaml`）:
 - `label`, `description`, `requires_image`, `parameters`: 基础字段
@@ -170,6 +180,7 @@ npm run dev  # 启动在 http://localhost:5173
 - `supports_original_size`: 是否支持原图尺寸
 - `supports_loop`: 是否支持循环生成
 - `output_type`: 输出类型（`"image"` | `"video"`）
+- `supports_frame_count`: 是否支持自定义总帧数（i2v）
 
 **添加新工作流**:
 1. 在 ComfyUI 中设计工作流并导出为 API JSON
@@ -189,7 +200,7 @@ npm run dev  # 启动在 http://localhost:5173
 
 ### Gemini 集成（nano_banana_pro 工作流）
 
-`utils/gemini_chat.py` 封装 Google Gemini 多轮对话图像生成，使用 `NANO_BANANA_API_KEY` 环境变量：
+`utils/gemini_chat.py` 封装 Google Gemini 多轮对话图像生成，配置通过 `NanoBananaConfig` 管理：
 
 ```python
 # nano_banana_pro 三种路由逻辑（在 ai_draw_service.py 中实现）:
@@ -197,18 +208,27 @@ npm run dev  # 启动在 http://localhost:5173
 # 2. 无参考图 + send_history=True  → 走 GeminiChat 多轮对话（携带当前会话历史）
 # 3. 无参考图 + send_history=False → 走 GeminiChat 单轮生成
 
-gemini = GeminiChat(api_key=os.getenv("NANO_BANANA_API_KEY"))
+from utils.config_loader import get_nano_banana_config
+nb_config = get_nano_banana_config()
+gemini = GeminiChat(
+    api_key=nb_config.api_key,
+    model_name=nb_config.model,
+    base_url=nb_config.base_url,
+)
 result_images = gemini.generate(
     current_prompt=prompt,
     history=chat_history,   # 格式: [{"prompt", "images", "result_images"}, ...]
+    context_image=last_result_image,  # 可选，当无参考图时注入上轮生成图
 )
 ```
 
-> **注意**: `NANO_BANANA_API_KEY` 通过 `os.getenv()` 直接读取，未注册进 `config_loader.py` 的配置类，需在 `.env` 中手动配置。
+> **配置**: 相关环境变量为 `NANO_BANANA_API_KEY`、`NANO_BANANA_BASE_URL`、`NANO_BANANA_MODEL`，已注册进 `config_loader.py` 的 `NanoBananaConfig` 类，通过 `get_nano_banana_config()` 获取。
 
-### 视频生成（flf2v 工作流）
+`utils/gemini_chat.py` 也被 `POST /prompt/analyze-image` 端点复用，用于以图生词功能（`gemini-3.1-flash-image-preview` 模型分析图片风格，生成 Z-Image 提示词）。
 
-`flf2v` 工作流需要起始帧图片和结束帧图片，输出视频文件：
+### 视频生成（flf2v / i2v 工作流）
+
+`flf2v` 工作流需要起始帧图片和结束帧图片，输出视频文件；`i2v`（Wan i2v）工作流只需一张参考图，通过 `frame_count` 控制总帧数：
 
 - `utils/media_processor.py`: 提供 `resize_image_base64()`（cover 模式图像缩放）和 `resize_video_bytes()`（调用系统 ffmpeg 进行视频 resize，输出 h264 mp4）
 - `utils/thread_runner.py`: 单例 `ThreadRunner`，在独立线程的独立事件循环中执行异步任务，避免阻塞 FastAPI 主事件循环。Gemini 调用等耗时同步操作通过此类调度
@@ -316,5 +336,5 @@ self._notify_state_change('is_generating', True)  # WebSocket 广播
 
 ### 配置
 - `docker-compose.yml`: Docker 服务编排
-- `.env`: 环境变量（密钥、数据库、`NANO_BANANA_API_KEY` 等）
+- `.env`: 环境变量（密钥、数据库、`NANO_BANANA_API_KEY`、`NANO_BANANA_BASE_URL`、`NANO_BANANA_MODEL`、`REDIS_*` 等）
 - `configs/app_config.yaml`: 工作流配置
