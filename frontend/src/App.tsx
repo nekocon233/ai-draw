@@ -165,7 +165,9 @@ function AppContent() {
             paddingRight: 'max(24px, env(safe-area-inset-right, 24px))',
             borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
             background: isDark ? 'rgba(22, 27, 34, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(10px)'
+            backdropFilter: 'blur(10px)',
+            position: 'relative',
+            zIndex: 100,
           }}>
             <StatusBar />
           </div>

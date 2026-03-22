@@ -196,13 +196,15 @@
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
   }
 
-  /* 展开状态：滑入 */
-  .chat-session-sidebar.mobile-open {
-    transform: translateX(0);
+  /* mobile-open 优先级最高，无论是否带 collapsed 都强制滑入 */
+  .chat-session-sidebar.mobile-open,
+  .chat-session-sidebar.collapsed.mobile-open {
+    transform: translateX(0) !important;
+    width: 280px !important;
   }
 
-  /* 折叠状态也隐藏（手机上不用图标折叠模式） */
-  .chat-session-sidebar.collapsed {
+  /* collapsed 但未展开，保持隐藏 */
+  .chat-session-sidebar.collapsed:not(.mobile-open) {
     width: 280px !important;
     transform: translateX(-100%);
   }
@@ -211,9 +213,17 @@
     font-size: 14px;
   }
 
-  /* 遮罩层 */
-  .sidebar-overlay {
-    display: block;
+  /* collapsed 时会话列表在手机端正常显示（抽屉展开时需要内容） */
+  .collapsed .session-list {
+    opacity: 1;
+    pointer-events: auto;
+    padding: 8px;
+  }
+
+  /* collapsed 时 header 布局恢复正常 */
+  .collapsed .sidebar-header {
+    padding: 12px 16px;
+    justify-content: space-between;
   }
 }
 
@@ -233,7 +243,7 @@
   position: fixed;
   top: 14px;
   left: 12px;
-  z-index: 200;
+  z-index: 500;
   width: 34px;
   height: 34px;
   border-radius: 8px;
