@@ -98,6 +98,70 @@
   align-items: center;
   gap: 8px;
   justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .chat-input-wrapper {
+    max-width: 100%;
+  }
+
+  .chat-input-container {
+    border-radius: 20px;
+    padding: 10px;
+  }
+
+  .chat-input-buttons {
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  /* 按钮行左侧的按钮组自动换行 */
+  .chat-input-buttons > div:first-child {
+    flex-wrap: wrap;
+    gap: 4px;
+    row-gap: 6px;
+  }
+
+  /* 工作流选择器宽度自适应 */
+  .chat-input-buttons .ant-select {
+    min-width: 120px !important;
+    max-width: 200px !important;
+  }
+
+  /* 帧卡片在手机上缩小一点 */
+  .flf2v-frame-card {
+    width: 64px;
+    height: 64px;
+  }
+
+  .chat-textarea {
+    font-size: 14px !important;
+  }
+
+  /* flf2v 双帧布局在手机上纵向排列 */
+  .flf2v-input-area {
+    flex-direction: column;
+  }
+
+  .flf2v-frames {
+    justify-content: center;
+  }
+
+  .flf2v-prompts {
+    padding-right: 0;
+  }
+
+  .flf2v-prompts--loop {
+    flex-direction: column;
+  }
+
+  .flf2v-prompts--loop .flf2v-prompt-divider {
+    width: auto;
+    height: 1px;
+    margin: 4px 0;
+    align-self: auto;
+  }
 }
 
 .chat-input-icon-button {

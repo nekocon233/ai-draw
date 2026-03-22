@@ -1,6 +1,7 @@
 .chat-session-sidebar {
   width: 280px;
   height: calc(100vh - 60px);
+  height: calc(100dvh - 60px);
   background: var(--sidebar-bg, #1a1d24);
   border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
   display: flex;
@@ -182,12 +183,79 @@
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+  /* 手机端：侧边栏变为覆盖式抽屉，默认隐藏在左侧 */
   .chat-session-sidebar {
-    width: 240px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    width: 280px !important;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
   }
-  
+
+  /* 展开状态：滑入 */
+  .chat-session-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* 折叠状态也隐藏（手机上不用图标折叠模式） */
+  .chat-session-sidebar.collapsed {
+    width: 280px !important;
+    transform: translateX(-100%);
+  }
+
   .sidebar-header h3 {
     font-size: 14px;
+  }
+
+  /* 遮罩层 */
+  .sidebar-overlay {
+    display: block;
+  }
+}
+
+/* 遮罩层默认隐藏 */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  backdrop-filter: blur(2px);
+}
+
+/* 手机端汉堡按钮（侧边栏收起时显示在左上角） */
+.sidebar-mobile-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 12px;
+  z-index: 200;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-secondary, #fff);
+  color: var(--text-secondary, #666);
+  font-size: 16px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  transition: background 0.2s;
+  padding: 0;
+}
+
+.sidebar-mobile-toggle:hover {
+  background: var(--hover-bg, #f1f3f4);
+}
+
+@media (max-width: 768px) {
+  .sidebar-mobile-toggle {
+    display: flex;
   }
 }
 

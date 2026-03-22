@@ -160,7 +160,9 @@ function AppContent() {
         <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
           {/* 顶部状态栏 */}
           <div style={{ 
-            padding: '12px 24px', 
+            padding: '12px 24px',
+            paddingLeft: 'max(24px, env(safe-area-inset-left, 24px))',
+            paddingRight: 'max(24px, env(safe-area-inset-right, 24px))',
             borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
             background: isDark ? 'rgba(22, 27, 34, 0.95)' : 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(10px)'

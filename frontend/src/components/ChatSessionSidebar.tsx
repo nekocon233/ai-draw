@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, List, Input, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined,
@@ -28,9 +28,17 @@ export default function ChatSessionSidebar() {
   
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const isMobile = () => window.innerWidth <= 768;
+
+  // 手机端点击会话后自动关闭侧边栏
+  useEffect(() => {
+    setIsMobileOpen(false);
+  }, [currentSessionId]);
 
   const handleCreateSession = async () => {
     await createSession();
+    if (isMobile()) setIsMobileOpen(false);
   };
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -81,7 +89,24 @@ export default function ChatSessionSidebar() {
   };
 
   return (
-    <div className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+    <>
+      {/* 手机端遮罩层 */}
+      {isMobileOpen && (
+        <div className="sidebar-overlay" onClick={() => setIsMobileOpen(false)} />
+      )}
+
+      {/* 手机端汉堡按钮（固定在左上角，侧边栏收起时显示） */}
+      {!isMobileOpen && (
+        <button
+          className="sidebar-mobile-toggle"
+          onClick={() => setIsMobileOpen(true)}
+          title="打开会话列表"
+        >
+          <MenuUnfoldOutlined />
+        </button>
+      )}
+
+      <div className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
         {!sidebarCollapsed && (
           <Button
@@ -97,7 +122,13 @@ export default function ChatSessionSidebar() {
           className="collapse-btn"
           type="text"
           icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onClick={() => {
+            if (isMobile()) {
+              setIsMobileOpen(false);
+            } else {
+              setSidebarCollapsed(!sidebarCollapsed);
+            }
+          }}
           title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
         />
       </div>
@@ -182,5 +213,6 @@ export default function ChatSessionSidebar() {
         />
       </div>
     </div>
+    </>
   );
 }

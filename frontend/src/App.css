@@ -9,6 +9,7 @@
 #root {
   width: 100%;
   height: 100vh;
+  height: 100dvh; /* 动态视口高度，修复手机浏览器地址栏遮挡 */
   overflow: hidden;
 }
 
@@ -52,6 +53,7 @@
 .app-content {
   display: flex;
   height: calc(100vh - 60px);
+  height: calc(100dvh - 60px);
   overflow: hidden;
 }
 
@@ -312,9 +314,25 @@
   .results-area {
     padding: 16px;
   }
-  
+
   .chat-input-area {
-    padding: 16px;
+    padding: 10px 12px 16px;
+    gap: 12px;
+  }
+
+  /* 欢迎标题在手机上缩小 */
+  .welcome-title {
+    font-size: 42px !important;
+    letter-spacing: -1px !important;
+  }
+
+  .welcome-subtitle {
+    font-size: 14px !important;
+  }
+
+  /* empty-state 时输入区域位移减小 */
+  .chat-container.empty-state .chat-input-area {
+    transform: translateY(-6vh);
   }
 }
 
