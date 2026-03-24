@@ -172,6 +172,10 @@ workflow_defaults:
       output_type: "animation"
       prompt_template: null
       parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
         - name: "action"
           label: "动作"
           type: "select"
