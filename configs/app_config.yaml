@@ -165,3 +165,25 @@ workflow_defaults:
           max: 60
           step: 1
           default: 16
+    pixel_lab_animate:
+      label: "像素动画（PixelLab）"
+      description: "基于参考图生成像素角色动画序列帧"
+      requires_image: true
+      output_type: "animation"
+      prompt_template: null
+      parameters:
+        - name: "action"
+          label: "动作"
+          type: "select"
+          options: ["walk", "run", "jump", "attack", "idle"]
+          default: "walk"
+        - name: "view"
+          label: "视角"
+          type: "select"
+          options: ["sidescroller", "low top-down", "high top-down"]
+          default: "sidescroller"
+        - name: "direction"
+          label: "朝向"
+          type: "select"
+          options: ["east", "south", "west", "north", "south-east", "north-east", "south-west", "north-west"]
+          default: "east"

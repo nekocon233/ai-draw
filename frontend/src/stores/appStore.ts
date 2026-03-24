@@ -79,6 +79,10 @@ interface AppState {
   endFrameCount: number | null;   // flf2v 结束帧长度
   frameRate: number | null;       // flf2v 帧率
   frameCount: number | null;      // i2v 总帧数
+  // PixelLab 动画参数
+  pixelLabAction: string;        // 动画动作
+  pixelLabView: string;          // 视角
+  pixelLabDirection: string;      // 朝向
   
   // Gemini 多轮对话开关（nano_banana_pro 专用）
   nanoBananaSendHistory: boolean;
@@ -124,6 +128,9 @@ interface AppState {
   setFrameRate: (v: number | null) => void;
   setFrameCount: (v: number | null) => void;
   setNanoBananaSendHistory: (v: boolean) => void;
+  setPixelLabAction: (v: string) => void;
+  setPixelLabView: (v: string) => void;
+  setPixelLabDirection: (v: string) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
@@ -204,6 +211,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   endFrameCount: null,
   frameRate: null,
   frameCount: null,
+  pixelLabAction: 'walk',
+  pixelLabView: 'sidescroller',
+  pixelLabDirection: 'east',
   nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
   referenceImage: initialConfig.referenceImage,
   referenceImage2: null,
@@ -422,6 +432,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   setNanoBananaSendHistory: (v) => {
     set({ nanoBananaSendHistory: v });
     localStorage.setItem('nanoBananaSendHistory', String(v));
+  },
+  setPixelLabAction: (v) => {
+    set({ pixelLabAction: v });
+    get().saveSessionConfig();
+  },
+  setPixelLabView: (v) => {
+    set({ pixelLabView: v });
+    get().saveSessionConfig();
+  },
+  setPixelLabDirection: (v) => {
+    set({ pixelLabDirection: v });
+    get().saveSessionConfig();
   },
   addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount }) => {
     const state = get();

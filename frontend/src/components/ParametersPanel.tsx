@@ -1,4 +1,4 @@
-import { Slider, InputNumber, Row, Col, Typography, Input, Switch } from 'antd';
+import { Slider, InputNumber, Row, Col, Typography, Input, Switch, Select } from 'antd';
 import { useAppStore } from '../stores/appStore';
 
 const { Title, Text } = Typography;
@@ -45,6 +45,9 @@ export default function ParametersPanel() {
   const hasEndFrameCount = workflowMeta.parameters.some(p => p.name === 'endFrameCount');
   const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
   const hasFrameCount = workflowMeta.parameters.some(p => p.name === 'frameCount');
+  const hasPixelLabAction = workflowMeta.parameters.some(p => p.name === 'action');
+  const hasPixelLabView = workflowMeta.parameters.some(p => p.name === 'view');
+  const hasPixelLabDirection = workflowMeta.parameters.some(p => p.name === 'direction');
   const supportsOriginalSize = workflowMeta.supports_original_size === true;
 
   return (
@@ -317,6 +320,49 @@ export default function ParametersPanel() {
               />
             </Col>
           </Row>
+        </div>
+      )}
+
+      {/* PixelLab 动画参数 */}
+      {hasPixelLabAction && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'action')?.label || '动作'}
+          </Text>
+          <Select
+            value={workflowMeta.parameters.find(p => p.name === 'action')?.default as string || 'walk'}
+            onChange={(val) => useAppStore.getState().setPixelLabAction(val)}
+            style={{ width: '100%', marginTop: 12 }}
+            options={['walk', 'run', 'jump', 'attack', 'idle'].map(v => ({ label: v, value: v }))}
+          />
+        </div>
+      )}
+
+      {hasPixelLabView && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'view')?.label || '视角'}
+          </Text>
+          <Select
+            value={workflowMeta.parameters.find(p => p.name === 'view')?.default as string || 'sidescroller'}
+            onChange={(val) => useAppStore.getState().setPixelLabView(val)}
+            style={{ width: '100%', marginTop: 12 }}
+            options={['sidescroller', 'low top-down', 'high top-down'].map(v => ({ label: v, value: v }))}
+          />
+        </div>
+      )}
+
+      {hasPixelLabDirection && (
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>
+            {workflowMeta.parameters.find(p => p.name === 'direction')?.label || '朝向'}
+          </Text>
+          <Select
+            value={workflowMeta.parameters.find(p => p.name === 'direction')?.default as string || 'east'}
+            onChange={(val) => useAppStore.getState().setPixelLabDirection(val)}
+            style={{ width: '100%', marginTop: 12 }}
+            options={['east', 'south', 'west', 'north', 'south-east', 'north-east', 'south-west', 'north-west'].map(v => ({ label: v, value: v }))}
+          />
         </div>
       )}
     </div>

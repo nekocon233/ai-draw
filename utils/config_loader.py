@@ -60,6 +60,13 @@ class NanoBananaConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class PixelLabConfig(BaseSettings):
+    """PixelLab 配置"""
+    api_key: str = Field(default="", validation_alias="PIXEL_LAB_API_KEY")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class ServerConfig(BaseSettings):
     """服务器配置"""
     host: str = Field(validation_alias="SERVER_HOST")
@@ -159,6 +166,7 @@ class Config(BaseSettings):
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
     nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
+    pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -242,6 +250,11 @@ def get_ai_prompt_config() -> AIPromptConfig:
 def get_nano_banana_config() -> NanoBananaConfig:
     """获取 Nano Banana 配置"""
     return get_config().nano_banana
+
+
+def get_pixel_lab_config() -> PixelLabConfig:
+    """获取 PixelLab 配置"""
+    return get_config().pixel_lab
 
 
 def get_server_config() -> ServerConfig:

@@ -43,6 +43,10 @@ export interface GenerateMediaRequest {
   // Gemini 多轮对话（nano_banana_pro 专用）
   send_history?: boolean;
   session_id?: string;
+  // PixelLab 动画参数
+  action?: string;
+  view?: string;
+  direction?: string;
 }
 
 export interface GenerateMediaResponse {

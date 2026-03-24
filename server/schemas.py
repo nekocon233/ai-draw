@@ -73,6 +73,10 @@ class GenerateMediaRequest(BaseModel):
     # Gemini 多轮对话（nano_banana_pro 专用）
     send_history: bool = False                 # 是否携带历史对话发送给 Gemini
     session_id: Optional[str] = None          # 当前会话 ID（send_history=True 时必填）
+    # PixelLab 动画参数（pixel_lab_animate 专用）
+    action: str = "walk"                      # 动画动作
+    view: str = "sidescroller"               # 视角
+    direction: str = "east"                   # 朝向
 
 
 class GenerateMediaResponse(BaseModel):

@@ -211,6 +211,10 @@ export default function ChatInput() {
         // Gemini 多轮对话（nano_banana_pro 开关开时附加）
         send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
         session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,
+        // PixelLab 动画参数
+        action: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabAction : undefined,
+        view: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabView : undefined,
+        direction: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabDirection : undefined,
       });
       // 携带历史发送时清空输入框和参考图（普通模式下提示词随会话保留）
       if (isNanoBananaPro && nanoBananaSendHistory) {

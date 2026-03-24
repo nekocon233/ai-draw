@@ -138,6 +138,10 @@ class AIDrawService:
         frame_count: Optional[int] = None,
         send_history: bool = False,
         session_id: Optional[str] = None,
+        # PixelLab 动画参数
+        action: str = "walk",
+        view: str = "sidescroller",
+        direction: str = "east",
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
@@ -386,6 +390,17 @@ class AIDrawService:
                             current_image_b64_3=image_base64_3,
                             finish_callback=finish_callback,
                         )
+                    elif workflow_type == 'pixel_lab_animate':
+                        # PixelLab 像素动画生成
+                        if not image_base64:
+                            raise ValueError("像素动画工作流需要提供参考图")
+                        await self.generate_pixel_lab_animation(
+                            image_base64=image_base64,
+                            action=action,
+                            view=view,
+                            direction=direction,
+                            finish_callback=finish_callback,
+                        )
                     elif requires_image:
                         # 其他需要参考图的工作流（i2i, reference 等）
                         if not image_base64:
@@ -587,6 +602,78 @@ class AIDrawService:
 
         # 回调保存图片（取第一张，与 ComfyUI 路径行为一致）
         finish_callback(f"data:image/png;base64,{result_imgs[0]}")
+
+    async def generate_pixel_lab_animation(
+        self,
+        image_base64: str,
+        action: str,
+        view: str,
+        direction: str,
+        finish_callback,
+    ):
+        """使用 PixelLab 生成像素动画序列帧"""
+        import base64
+
+        from utils.config_loader import get_pixel_lab_config
+        from utils.pixel_lab import get_pixel_lab_service
+
+        pixel_lab_cfg = get_pixel_lab_config()
+        if not pixel_lab_cfg.api_key:
+            raise ValueError("未配置 PIXEL_LAB_API_KEY，无法调用 PixelLab")
+
+        # 解码参考图片
+        try:
+            image_bytes = base64.b64decode(image_base64)
+        except Exception as e:
+            raise ValueError(f"参考图片 Base64 解码失败: {e}")
+
+        # 获取 PixelLab 服务
+        pixel_lab = get_pixel_lab_service(pixel_lab_cfg.api_key)
+
+        # 在线程池中执行同步的 pixellab 调用
+        loop = asyncio.get_event_loop()
+        frames = await loop.run_in_executor(
+            None,
+            self._generate_pixel_lab_frames_sync,
+            pixel_lab,
+            image_bytes,
+            action,
+            view,
+            direction,
+        )
+
+        if not frames:
+            print("[AIDrawService] PixelLab 未返回任何帧")
+            finish_callback(None)
+            return
+
+        # 将所有帧转换为 base64 并返回第一帧（与现有 API 行为一致）
+        # 后续帧可以通过额外字段返回或单独处理
+        first_frame_b64 = base64.b64encode(frames[0]).decode('utf-8')
+        print(f"[AIDrawService] PixelLab 生成 {len(frames)} 帧动画")
+        finish_callback(f"data:image/png;base64,{first_frame_b64}")
+
+    def _generate_pixel_lab_frames_sync(
+        self,
+        pixel_lab,
+        image_bytes: bytes,
+        action: str,
+        view: str,
+        direction: str,
+    ) -> list:
+        """同步生成 PixelLab 动画帧"""
+        from utils.pixel_lab import PixelLabService
+
+        if not isinstance(pixel_lab, PixelLabService):
+            raise ValueError("pixel_lab 参数类型错误")
+
+        return pixel_lab.animate_with_text(
+            reference_image=image_bytes,
+            action=action,
+            view=view,
+            direction=direction,
+            no_background=True,
+        )
 
     def clear_previews(self):
         """清空预览图片"""
