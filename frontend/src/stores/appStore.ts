@@ -223,7 +223,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatHistory: [],
   loading: false,
   error: null,
-  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true' || (!isLoggedIn() && localStorage.getItem('sidebarCollapsed') === null),
+  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
   
   // Actions
   setServiceStatus: (status) => set({

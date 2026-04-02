@@ -108,7 +108,7 @@ export default function ChatSessionSidebar() {
 
       <div className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        {!sidebarCollapsed && (
+        {(!sidebarCollapsed || isMobileOpen) && (
           <Button
             type="primary"
             icon={<PlusOutlined />}
