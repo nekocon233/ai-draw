@@ -82,6 +82,9 @@ export interface WorkflowMetadata {
   supports_original_size?: boolean;
   supports_loop?: boolean;
   output_type?: string;   // 'image' | 'video'
+  category?: string;      // 工作流分组（同组在下拉折叠为一项，如 "图生图"）
+  method?: string;        // 同组内具体方式名（设置弹窗中展示，如 "Q-Image"）
+  supports_multi_image?: boolean;  // 是否支持多张参考图（图生图类目）
   parameters: WorkflowParameter[];
 }
 

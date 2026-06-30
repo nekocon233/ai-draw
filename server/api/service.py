@@ -51,6 +51,9 @@ async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_s
             "supports_original_size": metadata.get("supports_original_size", False),
             "supports_loop": metadata.get("supports_loop", False),
             "output_type": metadata.get("output_type", "image"),
+            "category": metadata.get("category", None),  # 工作流分组（下拉折叠用）
+            "method": metadata.get("method", None),      # 同组内具体方式名（设置里展示用）
+            "supports_multi_image": metadata.get("supports_multi_image", False),  # 是否支持多张参考图
             "parameters": metadata.get("parameters", [])  # 添加参数配置
         })
     

@@ -67,6 +67,15 @@ class PixelLabConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class GptImageConfig(BaseSettings):
+    """GPT Image（OpenAI 兼容 API，如 UniAPI 的 gpt-image）配置"""
+    api_key: str = Field(default="", validation_alias="GPT_IMAGE_API_KEY")
+    base_url: str = Field(default="https://api.uniapi.io/v1", validation_alias="GPT_IMAGE_BASE_URL")
+    model: str = Field(default="gpt-image-2-all", validation_alias="GPT_IMAGE_MODEL")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class ServerConfig(BaseSettings):
     """服务器配置"""
     host: str = Field(validation_alias="SERVER_HOST")
@@ -167,6 +176,7 @@ class Config(BaseSettings):
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
     nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
     pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
+    gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -255,6 +265,11 @@ def get_nano_banana_config() -> NanoBananaConfig:
 def get_pixel_lab_config() -> PixelLabConfig:
     """获取 PixelLab 配置"""
     return get_config().pixel_lab
+
+
+def get_gpt_image_config() -> GptImageConfig:
+    """获取 GPT Image 配置"""
+    return get_config().gpt_image
 
 
 def get_server_config() -> ServerConfig:

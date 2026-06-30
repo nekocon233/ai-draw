@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch } from 'antd';
+import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch, Select } from 'antd';
 import { useAppStore } from '../stores/appStore';
 
 interface SettingsModalProps {
@@ -10,6 +10,7 @@ interface SettingsModalProps {
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const {
     currentWorkflow,
+    setCurrentWorkflow,
     availableWorkflows,
     strength,
     count,
@@ -39,6 +40,11 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   // 获取当前工作流的参数配置
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+  // 同类工作流分组（如 图生图）：用于在设置里选择具体方式
+  const category = workflowMeta?.category;
+  const methodOptions = category
+    ? availableWorkflows.filter(w => w.category === category)
+    : [];
   const hasStrength = workflowMeta?.parameters.some(p => p.name === 'strength') || false;
   const hasCount = workflowMeta?.parameters.some(p => p.name === 'count') || false;
   const hasLoraPrompt = workflowMeta?.parameters.some(p => p.name === 'lora_prompt') || false;
@@ -118,6 +124,20 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           imagesPerRow: imagesPerRow,
         }}
       >
+        {methodOptions.length > 0 && (
+          <Form.Item label="生成方式">
+            <Select
+              value={currentWorkflow}
+              onChange={(val) => setCurrentWorkflow(val)}
+              options={methodOptions.map(m => ({
+                label: m.method || m.label,
+                value: m.key,
+              }))}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+        )}
+
         {hasStrength && (
           <Form.Item label="生成强度">
             <Row gutter={12} align="middle">

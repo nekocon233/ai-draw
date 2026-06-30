@@ -86,6 +86,9 @@ interface AppState {
   
   // Gemini 多轮对话开关（nano_banana_pro 专用）
   nanoBananaSendHistory: boolean;
+
+  // 各多方式分组（如图生图、图生视频）记住的上次所选方式：category -> workflow key
+  rememberedMethod: Record<string, string>;
   
   // 参考图片
   referenceImage: string | null;
@@ -215,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pixelLabView: 'sidescroller',
   pixelLabDirection: 'east',
   nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
+  rememberedMethod: (() => { try { return JSON.parse(localStorage.getItem('rememberedMethod') || '{}'); } catch { return {}; } })(),
   referenceImage: initialConfig.referenceImage,
   referenceImage2: null,
   referenceImage3: null,
@@ -338,7 +342,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ currentWorkflow: workflow });
     }
-    
+
+    // 反向同步：仅多种方式的分组（如图生图、图生视频）需要记住所选方式
+    const newMeta = state.availableWorkflows.find(w => w.key === workflow);
+    const sameCategoryCount = state.availableWorkflows.filter(w => w.category && w.category === newMeta?.category).length;
+    if (newMeta?.category && sameCategoryCount > 1) {
+      const updated = { ...state.rememberedMethod, [newMeta.category]: workflow };
+      set({ rememberedMethod: updated });
+      localStorage.setItem('rememberedMethod', JSON.stringify(updated));
+    }
+
     state.saveSessionConfig();
   },
   setPrompt: async (prompt) => {
@@ -917,6 +930,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const workflowKeys = workflows.map(w => w.key);
       if (workflows.length > 0 && !workflowKeys.includes(state.currentWorkflow)) {
         state.setCurrentWorkflow(defaultWorkflow || workflows[0].key);
+      }
+
+      // 会话恢复后，仅多种方式的分组（如图生图、图生视频）需要同步记住的方式
+      const curState = useAppStore.getState();
+      const curMeta = workflows.find(w => w.key === curState.currentWorkflow);
+      const curCategoryCount = workflows.filter(w => w.category && w.category === curMeta?.category).length;
+      if (curMeta?.category && curCategoryCount > 1) {
+        const updated = { ...curState.rememberedMethod, [curMeta.category]: curState.currentWorkflow };
+        set({ rememberedMethod: updated });
+        localStorage.setItem('rememberedMethod', JSON.stringify(updated));
       }
     } catch (error) {
       console.error('加载工作流列表失败:', error);

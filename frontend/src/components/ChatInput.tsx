@@ -29,6 +29,7 @@ export default function ChatInput() {
     loraPrompt,
     currentWorkflow,
     availableWorkflows,
+    rememberedMethod,
     referenceImage,
     referenceImage2,
     referenceImage3,
@@ -59,7 +60,28 @@ export default function ChatInput() {
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
   const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
   const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
-  const isT2I = !isRequiresImage && !isFlf2v && !isNanoBananaPro; // 文生图：不允许上传图片
+  const supportsMultiImage = workflowMeta?.supports_multi_image === true; // 多参考图工作流（图生图类目）
+  const isT2I = !isRequiresImage && !isFlf2v && !supportsMultiImage; // 文生图：不允许上传图片
+
+  // 下拉分组：同 category 的工作流折叠为一项（如 图生图：i2i / nano_banana_pro）
+  const groupedOptions = (() => {
+    const seen = new Set<string>();
+    const out: { label: string; value: string }[] = [];
+    for (const w of availableWorkflows) {
+      if (w.category) {
+        if (seen.has(w.category)) continue; // 同组只保留第一个成员
+        seen.add(w.category);
+        out.push({ label: w.category, value: w.key });
+      } else {
+        out.push({ label: w.label, value: w.key });
+      }
+    }
+    return out;
+  })();
+  // 下拉显示值：当前工作流属于某分组时，映射到该组首成员的 value，保证选中态正确
+  const selectValue = workflowMeta?.category
+    ? (groupedOptions.find(o => o.label === workflowMeta.category)?.value ?? currentWorkflow)
+    : currentWorkflow;
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aiPromptOpen, setAiPromptOpen] = useState(false);
@@ -295,8 +317,8 @@ export default function ChatInput() {
       // Q-Image (i2i) / Nano Banana Pro：最多 3 张；参考图工作流：仅 1 张
       const getNextSlot = () => {
         if (!currentState.referenceImage) return setReferenceImage;
-        if ((isI2I || isNanoBananaPro) && !currentState.referenceImage2) return setReferenceImage2;
-        if ((isI2I || isNanoBananaPro) && !currentState.referenceImage3) return setReferenceImage3;
+        if (supportsMultiImage && !currentState.referenceImage2) return setReferenceImage2;
+        if (supportsMultiImage && !currentState.referenceImage3) return setReferenceImage3;
         return setReferenceImage; // 全满时替换第 1 张
       };
 
@@ -305,7 +327,7 @@ export default function ChatInput() {
         if (fillEnd) {
           setReferenceImageEnd(res.image);
           message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
-        } else if (isRequiresImage || isNanoBananaPro) {
+        } else if (isRequiresImage || supportsMultiImage) {
           getNextSlot()(res.image);
           message.success('\u4e0a\u4f20\u6210\u529f!');
         } else {
@@ -325,10 +347,10 @@ export default function ChatInput() {
       if (fillEnd) {
         setReferenceImageEnd(url);
         message.success('尾帧已设置!');
-      } else if (isRequiresImage || isNanoBananaPro) {
+      } else if (isRequiresImage || supportsMultiImage) {
         if (!currentState.referenceImage) { setReferenceImage(url); }
-        else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage2) { setReferenceImage2(url); }
-        else if ((isI2I || isNanoBananaPro) && !currentState.referenceImage3) { setReferenceImage3(url); }
+        else if (supportsMultiImage && !currentState.referenceImage2) { setReferenceImage2(url); }
+        else if (supportsMultiImage && !currentState.referenceImage3) { setReferenceImage3(url); }
         else { setReferenceImage(url); }
         message.success('图片已设置!');
       } else {
@@ -555,13 +577,13 @@ export default function ChatInput() {
           <>
             {/* 输入框行（requires_image 时包含帧卡片） */}
             <div className="chat-input-row">
-              {(isRequiresImage || isNanoBananaPro) && (
+              {(isRequiresImage || supportsMultiImage) && (
                 <>
                   {/* ── 参考图 1（所有 requires_image 工作流都有，Nano Banana Pro 可选） ── */}
                   <div
                     className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
                     onClick={() => !referenceImage && fileInputRef.current?.click()}
-                    title={isI2I ? '上传参考图 1' : isNanoBananaPro ? '上传参考图（可选）' : '上传参考图'}
+                    title={isI2I ? '上传参考图 1' : supportsMultiImage ? '上传参考图（可选）' : '上传参考图'}
                     style={{ flexShrink: 0 }}
                   >
                     {referenceImage ? (
@@ -604,7 +626,7 @@ export default function ChatInput() {
 
                   {/* ── 参考图 2 / 3（i2i 和 Nano Banana Pro，逐张追加） ── */}
                   {/* 图 1 已上传后才显示图 2 槽位 */}
-                  {(isI2I || isNanoBananaPro) && referenceImage && (
+                  {supportsMultiImage && referenceImage && (
                     <div
                       className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
                       onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
@@ -648,7 +670,7 @@ export default function ChatInput() {
                     </div>
                   )}
                   {/* 图 2 已上传后才显示图 3 槽位 */}
-                  {(isI2I || isNanoBananaPro) && referenceImage2 && (
+                  {supportsMultiImage && referenceImage2 && (
                     <div
                       className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
                       onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
@@ -700,7 +722,7 @@ export default function ChatInput() {
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={isNanoBananaPro ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...'}
                   className="chat-textarea"
-                  autoSize={{ minRows: (isRequiresImage || isNanoBananaPro) ? 1 : 2, maxRows: 6 }}
+                  autoSize={{ minRows: (isRequiresImage || supportsMultiImage) ? 1 : 2, maxRows: 6 }}
                   onPressEnter={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -779,7 +801,7 @@ export default function ChatInput() {
             </button>
 
             {/* 快捷填充姿势提示词（i2i / nano_banana_pro） */}
-            {(isI2I || isNanoBananaPro) && (
+            {supportsMultiImage && (
               <Tooltip title="填充参考姿势提示词">
                 <button
                   className="chat-input-icon-button"
@@ -810,17 +832,29 @@ export default function ChatInput() {
               </div>
             )}
 
-            {/* 工作流选择器 */}
+            {/* 工作流选择器（图生图等同类工作流折叠为一项，具体方式在生成设置里选择） */}
             <Select
-              value={currentWorkflow}
-              onChange={setCurrentWorkflow}
+              value={selectValue}
+              onChange={(val) => {
+                const target = availableWorkflows.find(w => w.key === val);
+                if (target?.category) {
+                  // 多方式分组（如图生图、图生视频）：用该类目记住的方式；单方式分组：直接取该唯一成员
+                  const groupKeys = availableWorkflows
+                    .filter(w => w.category === target.category)
+                    .map(w => w.key);
+                  const remembered = rememberedMethod[target.category];
+                  const method = groupKeys.length > 1 && remembered && groupKeys.includes(remembered)
+                    ? remembered
+                    : (groupKeys[0] ?? val);
+                  setCurrentWorkflow(method);
+                } else {
+                  setCurrentWorkflow(val);
+                }
+              }}
               size="small"
               style={{ minWidth: 155, width: 'auto', maxWidth: 260 }}
               popupMatchSelectWidth={false}
-              options={availableWorkflows.map(w => ({
-                label: w.label,
-                value: w.key,
-              }))}
+              options={groupedOptions}
             />
           </div>
 

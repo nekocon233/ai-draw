@@ -401,6 +401,15 @@ class AIDrawService:
                             direction=direction,
                             finish_callback=finish_callback,
                         )
+                    elif workflow_type == 'gpt_image':
+                        # GPT Image（OpenAI 兼容 API）：有参考图走 edit，无图走 generate
+                        await self.generate_gpt_image(
+                            prompt=prompt,
+                            image_base64=image_base64,
+                            image_base64_2=image_base64_2,
+                            image_base64_3=image_base64_3,
+                            finish_callback=finish_callback,
+                        )
                     elif requires_image:
                         # 其他需要参考图的工作流（i2i, reference 等）
                         if not image_base64:
@@ -601,6 +610,42 @@ class AIDrawService:
             return
 
         # 回调保存图片（取第一张，与 ComfyUI 路径行为一致）
+        finish_callback(f"data:image/png;base64,{result_imgs[0]}")
+
+    async def generate_gpt_image(
+        self,
+        prompt: str,
+        image_base64: Optional[str],
+        image_base64_2: Optional[str],
+        image_base64_3: Optional[str],
+        finish_callback,
+    ):
+        """使用 OpenAI 兼容 API（gpt-image）生成/编辑图像
+
+        有参考图时走 images.edit（支持多图），无参考图时走 images.generate 兜底。
+        """
+        from utils.config_loader import get_gpt_image_config
+        from utils.openai_image import OpenAIImageGenerator
+
+        cfg = get_gpt_image_config()
+        if not cfg.api_key:
+            raise ValueError("未配置 GPT_IMAGE_API_KEY，无法调用 gpt-image")
+
+        input_images = [img for img in [image_base64, image_base64_2, image_base64_3] if img]
+
+        generator = OpenAIImageGenerator(
+            api_key=cfg.api_key,
+            base_url=cfg.base_url,
+            model=cfg.model,
+        )
+        result_imgs = await asyncio.to_thread(generator.generate, prompt, input_images)
+
+        if not result_imgs:
+            print("[AIDrawService] gpt-image 未返回任何图像")
+            finish_callback(None)
+            return
+
+        # 回调保存图片（取第一张，与 ComfyUI / Gemini 路径行为一致）
         finish_callback(f"data:image/png;base64,{result_imgs[0]}")
 
     async def generate_pixel_lab_animation(

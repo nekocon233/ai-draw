@@ -22,6 +22,8 @@ workflow_defaults:
     t2i:
       label: "文生图（Z-Image）"
       description: "纯文本生成图像"
+      category: "文生图"
+      method: "Z-Image"
       requires_image: false
       prompt_template: "你是一个 AI 图像生成提示词专家，当前使用 Z-Image（Lumina2 架构）模型，该模型擅长理解中文自然语言描述。请将以下描述扩写为详细的中文图像提示词，描述主体、外貌、服装、场景、光线、风格等细节，语言流畅自然，不要使用英文标签格式：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
@@ -43,7 +45,10 @@ workflow_defaults:
     i2i:
       label: "图生图（Q-Image）"
       description: "基于参考图重绘"
+      category: "图生图"
+      method: "Q-Image"
       requires_image: true
+      supports_multi_image: true
       supports_original_size: true
       prompt_template: "你是一个 AI 图像编辑提示词专家，当前使用 Qwen 图像编辑模型，支持中文自然语言指令。请将以下描述转换为简洁明确的中文图像编辑指令，说明对图像做什么修改（如改变颜色、调整风格、修改内容等）：\n描述：{desc}\n只输出提示词，不要解释："
       parameters:
@@ -82,7 +87,10 @@ workflow_defaults:
     nano_banana_pro:
       label: "图生图（Nano Banana Pro）"
       description: "基于 Nano Banana Pro 的图生图工作流"
+      category: "图生图"
+      method: "Nano Banana Pro"
       requires_image: false
+      supports_multi_image: true
       output_type: "image"
       prompt_template: "你是一个图像描述扩写专家，当前使用 Nano Banana Pro（Gemini）模型，能够理解极为丰富的中文细节描述。请将以下简短描述扩写为非常详细丰富的中文描述，涵盖人物外貌、表情、服装、姿势、场景环境、光线氛围、风格等所有细节：\n描述：{desc}\n只输出扩写后的中文描述，不要解释："
       parameters:
@@ -90,9 +98,25 @@ workflow_defaults:
           label: "描述 / 指令"
           type: "text"
           default: "一个女孩"
+    gpt_image:
+      label: "图生图（GPT Image 2.0）"
+      description: "基于 OpenAI 兼容 API 的图生图编辑"
+      category: "图生图"
+      method: "GPT Image 2.0"
+      requires_image: false
+      supports_multi_image: true
+      output_type: "image"
+      prompt_template: null
+      parameters:
+        - name: "prompt"
+          label: "提示词"
+          type: "text"
+          default: "一个女孩"
     flf2v:
       label: "首尾帧生视频（Wan FLF2V）"
       description: "基于首尾帧生成过渡视频"
+      category: "图生视频"
+      method: "Wan FLF2V"
       requires_image: true
       requires_end_image: true
       supports_original_size: true
@@ -142,6 +166,8 @@ workflow_defaults:
     i2v:
       label: "图生视频（Wan i2v）"
       description: "基于参考图生成视频"
+      category: "图生视频"
+      method: "Wan i2v"
       requires_image: true
       supports_original_size: true
       output_type: "video"
@@ -168,6 +194,8 @@ workflow_defaults:
     pixel_lab_animate:
       label: "像素动画（PixelLab）"
       description: "基于参考图生成像素角色动画序列帧"
+      category: "像素动画"
+      method: "PixelLab"
       requires_image: true
       output_type: "animation"
       prompt_template: null
