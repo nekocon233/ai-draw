@@ -59,10 +59,28 @@
       "title": "frameRate"
     }
   },
+  "137": {
+    "inputs": {
+      "image": [
+        "133",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
   "129:98": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": [
+        "137",
+        0
+      ],
+      "height": [
+        "137",
+        1
+      ],
       "length": [
         "134",
         0
