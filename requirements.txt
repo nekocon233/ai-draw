@@ -28,6 +28,9 @@ comfy_api_simplified
 # PixelLab integration
 pixellab
 
+# Kling video generation (HTTP client + video download)
+requests>=2.28.0
+
 # Database & ORM
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9

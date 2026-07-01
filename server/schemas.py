@@ -77,6 +77,8 @@ class GenerateMediaRequest(BaseModel):
     action: str = "walk"                      # 动画动作
     view: str = "sidescroller"               # 视角
     direction: str = "east"                   # 朝向
+    # Kling 首尾帧图生视频参数（kling_flf2v 专用）
+    kling_options: Optional[dict] = None      # 运行时选项，如 { "duration": "5" }
 
 
 class GenerateMediaResponse(BaseModel):

@@ -163,6 +163,21 @@ workflow_defaults:
           max: 60
           step: 1
           default: 16
+    kling_flf2v:
+      label: "首尾帧生视频（Kling）"
+      description: "基于 Kling API 的首尾帧图生视频"
+      category: "图生视频"
+      method: "Kling"
+      requires_image: true
+      requires_end_image: true
+      output_type: "video"
+      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Kling 视频模型，基于首帧和尾帧生成过渡视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出从首帧到尾帧的自然过渡和动态感：\n描述：{desc}\n只输出提示词，不要解释："
+      parameters:
+        - name: "duration"
+          label: "时长（秒）"
+          type: "select"
+          options: ["5", "10"]
+          default: "5"
     i2v:
       label: "图生视频（Wan i2v）"
       description: "基于参考图生成视频"

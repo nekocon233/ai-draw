@@ -23,6 +23,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     endFrameCount,
     frameRate,
     frameCount,
+    selectOptions,
     setStrength,
     setCount,
     setLoraPrompt,
@@ -34,6 +35,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setEndFrameCount,
     setFrameRate,
     setFrameCount,
+    setSelectOption,
   } = useAppStore();
 
   const [form] = Form.useForm();
@@ -55,6 +57,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasFrameRate = workflowMeta?.parameters.some(p => p.name === 'frameRate') || false;
   const hasFrameCount = workflowMeta?.parameters.some(p => p.name === 'frameCount') || false;
   const supportsOriginalSize = workflowMeta?.supports_original_size === true;
+  // select 类型参数（如 Kling 时长），直接绑定到 selectOptions（与「生成方式」一致，即时持久化）
+  const selectParams = workflowMeta?.parameters.filter(p => p.type === 'select') ?? [];
 
   // 获取 width 和 height 的参数配置
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
@@ -137,6 +141,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             />
           </Form.Item>
         )}
+
+        {selectParams.map(param => (
+          <Form.Item key={param.name} label={param.label}>
+            <Select
+              value={selectOptions[param.name] ?? param.default}
+              onChange={(val) => setSelectOption(param.name, val)}
+              options={(param.options || []).map(v => ({ label: v, value: v }))}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+        ))}
 
         {hasStrength && (
           <Form.Item label="生成强度">

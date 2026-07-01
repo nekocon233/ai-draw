@@ -17,7 +17,8 @@ export default function ParametersPanel() {
     endFrameCount,
     frameRate,
     frameCount,
-    setStrength, 
+    selectOptions,
+    setStrength,
     setCount,
     setLoraPrompt,
     setWidth,
@@ -27,6 +28,7 @@ export default function ParametersPanel() {
     setEndFrameCount,
     setFrameRate,
     setFrameCount,
+    setSelectOption,
   } = useAppStore();
 
   // 获取当前工作流的参数配置
@@ -365,6 +367,19 @@ export default function ParametersPanel() {
           />
         </div>
       )}
+
+      {/* 通用 select 参数（如 Kling 时长），绑定到 selectOptions */}
+      {workflowMeta.parameters.filter(p => p.type === 'select').map(param => (
+        <div key={param.name} style={{ marginBottom: 24 }}>
+          <Text strong style={{ fontSize: 13 }}>{param.label}</Text>
+          <Select
+            value={selectOptions[param.name] ?? param.default}
+            onChange={(val) => setSelectOption(param.name, val)}
+            style={{ width: '100%', marginTop: 12 }}
+            options={(param.options || []).map(v => ({ label: v, value: v }))}
+          />
+        </div>
+      ))}
     </div>
   );
 }

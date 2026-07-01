@@ -142,6 +142,8 @@ class AIDrawService:
         action: str = "walk",
         view: str = "sidescroller",
         direction: str = "east",
+        # Kling 首尾帧图生视频参数
+        kling_options: Optional[dict] = None,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
         try:
@@ -332,6 +334,45 @@ class AIDrawService:
 
                 images = [result_video]
                 print(f"[AIDrawService] i2v 视频生成成功")
+
+            # ── kling_flf2v：Kling 首尾帧生视频 ─────────────────────────────────────
+            elif workflow_type == 'kling_flf2v':
+                if not image_base64:
+                    raise ValueError("kling_flf2v 工作流需要提供首帧图片")
+                if not image_end_base64:
+                    raise ValueError("kling_flf2v 工作流需要提供尾帧图片")
+
+                # 调用 Kling API 生成视频（返回字节流）
+                video_bytes = await self.generate_kling_flf2v(
+                    start_b64=image_base64,
+                    end_b64=image_end_base64,
+                    prompt=prompt,
+                    options=kling_options or {},
+                )
+
+                # 落盘（放线程，避免阻塞事件循环）
+                save_dir = Path("uploads/video")
+                save_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"video_{uuid.uuid4().hex}.mp4"
+                filepath = save_dir / filename
+                try:
+                    def _write_kling_file():
+                        with open(filepath, "wb") as vf:
+                            vf.write(video_bytes)
+                    await asyncio.to_thread(_write_kling_file)
+                    result_video = f"/uploads/video/{filename}"
+                except Exception as e:
+                    print(f"[AIDrawService] 保存 Kling 视频文件失败: {e}")
+                    raise Exception(f"保存视频文件失败: {e}")
+
+                self._notify_state_change('media_generated', {
+                    'image': result_video,
+                    'index': 0,
+                    'total': 1
+                })
+
+                images = [result_video]
+                print(f"[AIDrawService] kling_flf2v 视频生成成功")
 
             # ── 图像类工作流 ────────────────────────────────────────────────
             else:
@@ -647,6 +688,48 @@ class AIDrawService:
 
         # 回调保存图片（取第一张，与 ComfyUI / Gemini 路径行为一致）
         finish_callback(f"data:image/png;base64,{result_imgs[0]}")
+
+    async def generate_kling_flf2v(
+        self,
+        start_b64: str,
+        end_b64: str,
+        prompt: str,
+        options: dict,
+    ) -> bytes:
+        """使用 Kling API 生成首尾帧视频，返回视频字节流。
+
+        在线程池中执行：创建任务 → 轮询至完成 → 下载视频。
+        """
+        from utils.config_loader import get_kling_config
+        from utils.kling_video import generate_image2video_flf2v, DEFAULT_BASE_URL
+        import requests as _requests
+
+        cfg = get_kling_config()
+        if not cfg.api_key:
+            raise ValueError("未配置 KLING_API_KEY，无法调用 Kling")
+
+        # 仅暴露 duration，其余参数服务端默认
+        duration = str((options or {}).get("duration") or "5")
+
+        # 创建任务并轮询至完成（阻塞调用，放线程池）
+        video_url = await asyncio.to_thread(
+            generate_image2video_flf2v,
+            api_key=cfg.api_key,
+            start_image=start_b64,
+            end_image=end_b64,
+            prompt=prompt,
+            model_name=cfg.model,
+            duration=duration,
+            base_url=cfg.base_url or DEFAULT_BASE_URL,
+        )
+
+        # 下载视频字节流（阻塞，放线程池）
+        def _download_video() -> bytes:
+            resp = _requests.get(video_url, timeout=120)
+            resp.raise_for_status()
+            return resp.content
+
+        return await asyncio.to_thread(_download_video)
 
     async def generate_pixel_lab_animation(
         self,

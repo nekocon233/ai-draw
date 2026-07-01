@@ -47,6 +47,8 @@ export interface GenerateMediaRequest {
   action?: string;
   view?: string;
   direction?: string;
+  // Kling 首尾帧图生视频参数（kling_flf2v 专用）
+  kling_options?: Record<string, any>;
 }
 
 export interface GenerateMediaResponse {
@@ -66,10 +68,11 @@ export interface UploadImageResponse {
 export interface WorkflowParameter {
   name: string;
   label: string;
-  type: 'number' | 'text';
+  type: 'number' | 'text' | 'select';
   min?: number;
   max?: number;
   step?: number;
+  options?: string[];  // type === 'select' 时的可选项
   default: string | number;
 }
 

@@ -83,6 +83,8 @@ interface AppState {
   pixelLabAction: string;        // 动画动作
   pixelLabView: string;          // 视角
   pixelLabDirection: string;      // 朝向
+  // select 类型参数的运行时值（按参数名存，如 { duration, aspect_ratio, resolution }），跨工作流共享；切换工作流时按当前可选项校验、必要时重置；仅前端 localStorage 持久化
+  selectOptions: Record<string, any>;
   
   // Gemini 多轮对话开关（nano_banana_pro 专用）
   nanoBananaSendHistory: boolean;
@@ -134,6 +136,7 @@ interface AppState {
   setPixelLabAction: (v: string) => void;
   setPixelLabView: (v: string) => void;
   setPixelLabDirection: (v: string) => void;
+  setSelectOption: (name: string, value: any) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
@@ -217,6 +220,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pixelLabAction: 'walk',
   pixelLabView: 'sidescroller',
   pixelLabDirection: 'east',
+  selectOptions: (() => { try { return JSON.parse(localStorage.getItem('selectOptions') || '{}'); } catch { return {}; } })(),
   nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
   rememberedMethod: (() => { try { return JSON.parse(localStorage.getItem('rememberedMethod') || '{}'); } catch { return {}; } })(),
   referenceImage: initialConfig.referenceImage,
@@ -338,6 +342,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       (updates as any).workflowImageStash = stash;
 
+      // select 类型参数初始化到 selectOptions（保留已选值；缺省或不在当前可选项内时填默认）
+      const newSelectOptions: Record<string, any> = { ...(state.selectOptions || {}) };
+      workflowMeta.parameters.forEach(param => {
+        if (param.type === 'select') {
+          const cur = newSelectOptions[param.name];
+          const valid = !param.options || param.options.includes(String(cur));
+          if (cur === undefined || !valid) {
+            newSelectOptions[param.name] = param.default;
+          }
+        }
+      });
+      (updates as any).selectOptions = newSelectOptions;
+      localStorage.setItem('selectOptions', JSON.stringify(newSelectOptions));
+
       set(updates);
     } else {
       set({ currentWorkflow: workflow });
@@ -457,6 +475,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPixelLabDirection: (v) => {
     set({ pixelLabDirection: v });
     get().saveSessionConfig();
+  },
+  setSelectOption: (name, value) => {
+    const updated = { ...get().selectOptions, [name]: value };
+    set({ selectOptions: updated });
+    localStorage.setItem('selectOptions', JSON.stringify(updated));
   },
   addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount }) => {
     const state = get();
@@ -806,6 +829,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         // 仅 nano_banana_pro + sendHistory=true 时传 session_id，与 ChatInput.tsx 逻辑一致
         send_history: isNanoBananaPro ? sendHistory : undefined,
         session_id: isNanoBananaPro && sendHistory ? sessionId : undefined,
+        // Kling 视频运行时选项（前端用 selectOptions 存储）
+        kling_options: params.workflow === 'kling_flf2v' ? get().selectOptions : undefined,
       });
     } catch (err) {
       console.error('重新生成失败:', err);

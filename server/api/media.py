@@ -46,6 +46,7 @@ async def generate_media(
                 action=request.action,
                 view=request.view,
                 direction=request.direction,
+                kling_options=request.kling_options,
             )
         except Exception as e:
             # 通过 WebSocket 推送错误信息

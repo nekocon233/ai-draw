@@ -76,6 +76,15 @@ class GptImageConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class KlingConfig(BaseSettings):
+    """Kling 视频生成（首尾帧图生视频）配置"""
+    api_key: str = Field(default="", validation_alias="KLING_API_KEY")
+    base_url: str = Field(default="https://api.uniapi.io/kling", validation_alias="KLING_BASE_URL")
+    model: str = Field(default="kling-v3", validation_alias="KLING_MODEL")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class ServerConfig(BaseSettings):
     """服务器配置"""
     host: str = Field(validation_alias="SERVER_HOST")
@@ -177,6 +186,7 @@ class Config(BaseSettings):
     nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
     pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
     gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
+    kling: KlingConfig = Field(default_factory=KlingConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -270,6 +280,11 @@ def get_pixel_lab_config() -> PixelLabConfig:
 def get_gpt_image_config() -> GptImageConfig:
     """获取 GPT Image 配置"""
     return get_config().gpt_image
+
+
+def get_kling_config() -> KlingConfig:
+    """获取 Kling 视频配置"""
+    return get_config().kling
 
 
 def get_server_config() -> ServerConfig:

@@ -60,6 +60,7 @@ export default function ChatInput() {
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
   const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
   const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
+  const isKlingFlf2v = currentWorkflow === 'kling_flf2v'; // Kling 首尾帧图生视频
   const supportsMultiImage = workflowMeta?.supports_multi_image === true; // 多参考图工作流（图生图类目）
   const isT2I = !isRequiresImage && !isFlf2v && !supportsMultiImage; // 文生图：不允许上传图片
 
@@ -237,6 +238,8 @@ export default function ChatInput() {
         action: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabAction : undefined,
         view: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabView : undefined,
         direction: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabDirection : undefined,
+        // Kling 视频运行时选项（前端用 selectOptions 存储）
+        kling_options: isKlingFlf2v ? state.selectOptions : undefined,
       });
       // 携带历史发送时清空输入框和参考图（普通模式下提示词随会话保留）
       if (isNanoBananaPro && nanoBananaSendHistory) {
