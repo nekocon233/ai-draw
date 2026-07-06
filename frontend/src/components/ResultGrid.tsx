@@ -3,12 +3,15 @@ import { Image, Spin, Tag, Button, Popconfirm, Input } from 'antd';
 import {
   DownloadOutlined, PictureOutlined, LoadingOutlined,
   DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
+import type { VideoFrameOutput } from '../api/services';
+import FrameExtractionModal from './FrameExtractionModal';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow, currentSessionId, isGenerating, deleteChatMessage, editAndRegenerateMessage } = useAppStore();
+  const { chatHistory, imagesPerRow, currentSessionId, isGenerating, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -17,6 +20,11 @@ export default function ResultGrid() {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editPromptEnd, setEditPromptEnd] = useState('');
+  const [frameEditor, setFrameEditor] = useState<{
+    videoUrl: string;
+    messageId: string;
+    initialOutput: VideoFrameOutput;
+  } | null>(null);
   const [editRefImages, setEditRefImages] = useState<{
     img1?: string | null;
     img2?: string | null;
@@ -91,6 +99,17 @@ export default function ResultGrid() {
     link.href = imageUrl;
     link.download = `ai-draw-${Date.now()}-${index + 1}.${isVideo(imageUrl) ? 'mp4' : 'png'}`;
     link.click();
+  };
+
+  const openFrameEditor = (messageId: string, videoUrl: string, initialOutput: VideoFrameOutput) => {
+    setFrameEditor({ messageId, videoUrl, initialOutput });
+  };
+
+  const handleSpritesheetGenerated = (url: string) => {
+    if (!frameEditor) return;
+    const msg = useAppStore.getState().chatHistory.find(m => m.id === frameEditor.messageId);
+    const idx = msg?.images?.length ?? 0;
+    appendChatMedia(frameEditor.messageId, url, idx);
   };
 
   if (chatHistory.length === 0) {
@@ -383,6 +402,18 @@ export default function ResultGrid() {
                             >
                               下载
                             </Button>
+                            {isVideo(image) && (
+                              <>
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={<AppstoreOutlined />}
+                                  onClick={() => openFrameEditor(message.id, image, 'spritesheet')}
+                                >
+                                  精灵图
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -401,6 +432,13 @@ export default function ResultGrid() {
         {/* 滚动锚点 */}
         <div ref={messagesEndRef} />
       </div>
+      <FrameExtractionModal
+        open={!!frameEditor}
+        videoUrl={frameEditor?.videoUrl ?? null}
+        initialOutput={frameEditor?.initialOutput ?? 'zip'}
+        onClose={() => setFrameEditor(null)}
+        onSpritesheetGenerated={handleSpritesheetGenerated}
+      />
     </div>
   );
 }

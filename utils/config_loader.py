@@ -85,6 +85,28 @@ class KlingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class VideoFramesConfig(BaseSettings):
+    """视频抽帧 / 透明精灵图配置（rembg 抠图）"""
+    background_mode: str = Field(default="inspyrenet", validation_alias="VIDEO_BACKGROUND_MODE")
+    rembg_model: str = Field(default="isnet-anime", validation_alias="REMBG_MODEL")
+    max_frames: int = Field(default=64, validation_alias="SPRITESHEET_MAX_FRAMES")
+    alpha_matting: bool = Field(default=True, validation_alias="REMBG_ALPHA_MATTING")
+    alpha_matting_foreground_threshold: int = Field(default=240, validation_alias="REMBG_ALPHA_FG_THRESHOLD")
+    alpha_matting_background_threshold: int = Field(default=10, validation_alias="REMBG_ALPHA_BG_THRESHOLD")
+    alpha_matting_erode_size: int = Field(default=10, validation_alias="REMBG_ALPHA_ERODE_SIZE")
+    post_process_mask: bool = Field(default=True, validation_alias="REMBG_POST_PROCESS_MASK")
+    inspyrenet_mode: str = Field(default="base", validation_alias="INSPYRENET_MODE")
+    inspyrenet_resize: str = Field(default="static", validation_alias="INSPYRENET_RESIZE")
+    birefnet_model: str = Field(default="ZhengPeng7/BiRefNet", validation_alias="BIREFNET_MODEL")
+    birefnet_image_size: int = Field(default=1024, validation_alias="BIREFNET_IMAGE_SIZE")
+    birefnet_device: str = Field(default="auto", validation_alias="BIREFNET_DEVICE")
+    birefnet_precision: str = Field(default="auto", validation_alias="BIREFNET_PRECISION")
+    edge_threshold: int = Field(default=32, validation_alias="VIDEO_EDGE_THRESHOLD")
+    edge_feather: int = Field(default=10, validation_alias="VIDEO_EDGE_FEATHER")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class ServerConfig(BaseSettings):
     """服务器配置"""
     host: str = Field(validation_alias="SERVER_HOST")
@@ -187,6 +209,7 @@ class Config(BaseSettings):
     pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
     gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
     kling: KlingConfig = Field(default_factory=KlingConfig)
+    video_frames: VideoFramesConfig = Field(default_factory=VideoFramesConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -285,6 +308,11 @@ def get_gpt_image_config() -> GptImageConfig:
 def get_kling_config() -> KlingConfig:
     """获取 Kling 视频配置"""
     return get_config().kling
+
+
+def get_video_frames_config() -> VideoFramesConfig:
+    """获取视频抽帧 / 精灵图配置"""
+    return get_config().video_frames
 
 
 def get_server_config() -> ServerConfig:

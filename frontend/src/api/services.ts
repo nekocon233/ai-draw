@@ -18,6 +18,53 @@ import type {
 
 import type { AuthResponse, UserConfig } from '../types/models';
 
+export type VideoBackgroundMode = 'none' | 'ai' | 'inspyrenet' | 'birefnet' | 'edge';
+export type VideoFrameOutput = 'zip' | 'spritesheet';
+
+export interface VideoBackgroundOptions {
+  background_mode?: VideoBackgroundMode;
+  rembg_model?: string;
+  alpha_matting?: boolean;
+  alpha_matting_foreground_threshold?: number;
+  alpha_matting_background_threshold?: number;
+  alpha_matting_erode_size?: number;
+  post_process_mask?: boolean;
+  inspyrenet_mode?: 'base' | 'fast' | 'base-nightly';
+  inspyrenet_resize?: 'static' | 'dynamic';
+  birefnet_model?: string;
+  birefnet_image_size?: number;
+  birefnet_device?: string;
+  birefnet_precision?: 'auto' | 'fp32' | 'fp16' | 'bf16';
+  edge_threshold?: number;
+  edge_feather?: number;
+}
+
+export interface VideoFramePreviewItem {
+  index: number;
+  url: string;
+  width: number;
+  height: number;
+}
+
+export interface VideoFramePreviewResponse {
+  success: boolean;
+  preview_id: string;
+  frames: VideoFramePreviewItem[];
+  width: number;
+  height: number;
+}
+
+export interface VideoFrameExportResponse {
+  success: boolean;
+  frames: number;
+  background_mode: VideoBackgroundMode;
+  zip_url?: string;
+  spritesheet_url?: string;
+  cols?: number;
+  rows?: number;
+  transparent?: boolean;
+}
+
 export const apiService = {
   // 用户认证
   register: (data: { username: string; password: string; invite_code: string }): Promise<AuthResponse> =>
@@ -180,6 +227,47 @@ export const apiService = {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
+
+  // 视频 → 透明精灵图（单张网格 PNG）
+  videoToSpritesheet: (data: {
+    video_url: string;
+    cols?: number;
+    max_frames?: number;
+  } & VideoBackgroundOptions): Promise<{ success: boolean; spritesheet_url: string; frames: number; cols: number; rows: number; background_mode: VideoBackgroundMode }> =>
+    client.post('/media/video-to-spritesheet', data, {
+      timeout: 300000, // rembg 逐帧抠图较慢，5 分钟
+    }),
+
+  // 视频 → 逐帧 PNG ZIP（transparent 决定是否透明抠图）
+  videoExtractFrames: (data: {
+    video_url: string;
+    transparent: boolean;
+    max_frames?: number;
+    fps?: number;
+  } & VideoBackgroundOptions): Promise<{ success: boolean; zip_url: string; frames: number; transparent: boolean; background_mode: VideoBackgroundMode }> =>
+    client.post('/media/video-extract-frames', data, {
+      timeout: 300000,
+    }),
+
+  // 视频 → 预览帧（独立编辑器使用）
+  videoFramePreview: (data: {
+    video_url: string;
+    max_frames?: number;
+    fps?: number;
+  }): Promise<VideoFramePreviewResponse> =>
+    client.post('/media/video-frame-preview', data, {
+      timeout: 300000,
+    }),
+
+  // 选中帧 → ZIP / 精灵图
+  exportVideoFrames: (data: {
+    frame_urls: string[];
+    output: VideoFrameOutput;
+    cols?: number;
+  } & VideoBackgroundOptions): Promise<VideoFrameExportResponse> =>
+    client.post('/media/export-video-frames', data, {
+      timeout: 300000,
+    }),
   
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>

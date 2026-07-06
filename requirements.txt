@@ -1,6 +1,25 @@
 # Core image processing
 pillow>=10.0.0
 
+# 视频抽帧 / 透明精灵图（逐帧 AI 抠图）
+# 注意：必须用 rembg[cpu] 才会带上 onnxruntime，否则运行时报 "No onnxruntime backend found"
+rembg[cpu]>=2.0.50
+# 高质量背景移除（InSPyReNet，依赖 PyTorch；CPU/GPU 版 torch 可按部署环境调整）
+transparent-background>=1.3.4
+# 高质量背景移除（BiRefNet；首次运行会从 HuggingFace 下载权重）
+torch>=2.5.0
+torchvision
+transformers>=4.45.0
+timm
+accelerate
+numpy<2
+opencv-python-headless
+scipy
+scikit-image
+kornia
+einops
+huggingface-hub>0.25
+
 # AI & OpenAI
 openai>=1.0.0
 google-genai>=1.14
