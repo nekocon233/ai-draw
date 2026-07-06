@@ -689,6 +689,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       
       return { chatHistory: newHistory };
     });
+
+    // 登录用户的后处理结果（如移除背景、精灵图）不会触发生成完成回调，
+    // 需要在追加后立即持久化，否则刷新会话时会从数据库恢复为旧的图片列表。
+    if (isLoggedIn()) {
+      const state = useAppStore.getState();
+      if (state.currentGeneratingMessageId === messageId) {
+        return;
+      }
+
+      const message = state.chatHistory.find(msg => msg.id === messageId);
+      if (message && message.type === 'assistant') {
+        apiService.saveChatMessage({
+          session_id: message.session_id,
+          message_id: messageId,
+          type: 'assistant',
+          content: message.content || '',
+          images: (message.images?.filter(img => typeof img === 'string') ?? []) as string[],
+        }).catch(err => console.error('保存追加媒体失败:', err));
+      }
+    }
   },
   deleteChatMessage: async (messageId: string) => {
     const state = get();
