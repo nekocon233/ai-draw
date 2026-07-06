@@ -238,6 +238,14 @@ export const apiService = {
       timeout: 300000, // rembg 逐帧抠图较慢，5 分钟
     }),
 
+  // 单图 → 移除背景（透明 PNG），复用视频抽帧那套抠图逻辑
+  removeBackground: (data: {
+    image_url: string;
+  } & VideoBackgroundOptions): Promise<{ success: boolean; image_url: string; background_mode: VideoBackgroundMode }> =>
+    client.post('/media/remove-background', data, {
+      timeout: 300000,
+    }),
+
   // 视频 → 逐帧 PNG ZIP（transparent 决定是否透明抠图）
   videoExtractFrames: (data: {
     video_url: string;

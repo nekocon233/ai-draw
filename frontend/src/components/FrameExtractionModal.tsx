@@ -6,8 +6,6 @@ import {
   InputNumber,
   Modal,
   Segmented,
-  Select,
-  Slider,
   Spin,
   message,
 } from 'antd';
@@ -20,10 +18,11 @@ import {
 } from '@ant-design/icons';
 import {
   apiService,
-  type VideoBackgroundMode,
   type VideoFrameOutput,
   type VideoFramePreviewItem,
 } from '../api/services';
+import { useBackgroundOptions } from '../hooks/useBackgroundOptions';
+import BackgroundOptionsFields from './BackgroundOptionsFields';
 
 interface FrameExtractionModalProps {
   open: boolean;
@@ -49,18 +48,7 @@ export default function FrameExtractionModal({
   const [maxFrames, setMaxFrames] = useState(DEFAULT_MAX_FRAMES);
   const [fps, setFps] = useState<number | null>(null);
   const [output, setOutput] = useState<VideoFrameOutput>(initialOutput);
-  const [backgroundMode, setBackgroundMode] = useState<VideoBackgroundMode>('inspyrenet');
-  const [rembgModel, setRembgModel] = useState('isnet-anime');
-  const [alphaMatting, setAlphaMatting] = useState(true);
-  const [postProcessMask, setPostProcessMask] = useState(true);
-  const [inspyrenetMode, setInspyrenetMode] = useState<'base' | 'fast' | 'base-nightly'>('base');
-  const [inspyrenetResize, setInspyrenetResize] = useState<'static' | 'dynamic'>('static');
-  const [birefnetModel, setBirefnetModel] = useState('ZhengPeng7/BiRefNet');
-  const [birefnetImageSize, setBirefnetImageSize] = useState(1024);
-  const [birefnetDevice, setBirefnetDevice] = useState('auto');
-  const [birefnetPrecision, setBirefnetPrecision] = useState<'auto' | 'fp32' | 'fp16' | 'bf16'>('auto');
-  const [edgeThreshold, setEdgeThreshold] = useState(32);
-  const [edgeFeather, setEdgeFeather] = useState(10);
+  const bg = useBackgroundOptions();
   const [cols, setCols] = useState<number | null>(null);
 
   const selectedFrames = useMemo(
@@ -99,18 +87,7 @@ export default function FrameExtractionModal({
     setMaxFrames(DEFAULT_MAX_FRAMES);
     setFps(null);
     setOutput(initialOutput);
-    setBackgroundMode('inspyrenet');
-    setRembgModel('isnet-anime');
-    setAlphaMatting(true);
-    setPostProcessMask(true);
-    setInspyrenetMode('base');
-    setInspyrenetResize('static');
-    setBirefnetModel('ZhengPeng7/BiRefNet');
-    setBirefnetImageSize(1024);
-    setBirefnetDevice('auto');
-    setBirefnetPrecision('auto');
-    setEdgeThreshold(32);
-    setEdgeFeather(10);
+    bg.reset();
     setCols(null);
     void loadPreview(DEFAULT_MAX_FRAMES, null);
   }, [initialOutput, loadPreview, open, videoUrl]);
@@ -153,18 +130,7 @@ export default function FrameExtractionModal({
         frame_urls: selectedFrames.map(frame => frame.url),
         output,
         cols: output === 'spritesheet' ? cols || undefined : undefined,
-        background_mode: backgroundMode,
-        rembg_model: rembgModel,
-        alpha_matting: alphaMatting,
-        post_process_mask: postProcessMask,
-        inspyrenet_mode: inspyrenetMode,
-        inspyrenet_resize: inspyrenetResize,
-        birefnet_model: birefnetModel,
-        birefnet_image_size: birefnetImageSize,
-        birefnet_device: birefnetDevice,
-        birefnet_precision: birefnetPrecision,
-        edge_threshold: edgeThreshold,
-        edge_feather: edgeFeather,
+        ...bg.toRequest(),
       });
 
       if (output === 'spritesheet' && res.spritesheet_url) {
@@ -181,7 +147,7 @@ export default function FrameExtractionModal({
       if (res.zip_url) {
         const link = document.createElement('a');
         link.href = res.zip_url;
-        link.download = `frames-${backgroundMode}-${Date.now()}.zip`;
+        link.download = `frames-${bg.state.background_mode}-${Date.now()}.zip`;
         link.click();
         message.success(`已导出 ${res.frames} 帧`);
       }
@@ -275,139 +241,7 @@ export default function FrameExtractionModal({
             )}
           </div>
 
-          <div className="frame-editor-section">
-            <div className="frame-editor-section-title">背景</div>
-            <Select
-              value={backgroundMode}
-              onChange={setBackgroundMode}
-              options={[
-                { value: 'inspyrenet', label: 'InSPyReNet' },
-                { value: 'birefnet', label: 'BiRefNet' },
-                { value: 'ai', label: 'rembg' },
-                { value: 'edge', label: '边缘色' },
-                { value: 'none', label: '原背景' },
-              ]}
-            />
-
-            {backgroundMode === 'inspyrenet' && (
-              <>
-                <label className="frame-editor-field">
-                  <span>模式</span>
-                  <Select
-                    value={inspyrenetMode}
-                    onChange={setInspyrenetMode}
-                    options={[
-                      { value: 'base', label: 'base' },
-                      { value: 'fast', label: 'fast' },
-                      { value: 'base-nightly', label: 'base-nightly' },
-                    ]}
-                  />
-                </label>
-                <label className="frame-editor-field">
-                  <span>尺寸</span>
-                  <Select
-                    value={inspyrenetResize}
-                    onChange={setInspyrenetResize}
-                    options={[
-                      { value: 'static', label: 'static' },
-                      { value: 'dynamic', label: 'dynamic' },
-                    ]}
-                  />
-                </label>
-              </>
-            )}
-
-            {backgroundMode === 'birefnet' && (
-              <>
-                <label className="frame-editor-field">
-                  <span>模型</span>
-                  <Select
-                    value={birefnetModel}
-                    onChange={setBirefnetModel}
-                    options={[
-                      { value: 'ZhengPeng7/BiRefNet', label: 'BiRefNet' },
-                      { value: 'ZhengPeng7/BiRefNet_HR-matting', label: 'HR-matting' },
-                      { value: 'ZhengPeng7/BiRefNet_dynamic', label: 'dynamic' },
-                      { value: 'ZhengPeng7/BiRefNet-matting', label: 'matting' },
-                    ]}
-                  />
-                </label>
-                <label className="frame-editor-field">
-                  <span>尺寸</span>
-                  <InputNumber
-                    min={256}
-                    max={2304}
-                    step={128}
-                    value={birefnetImageSize}
-                    onChange={value => setBirefnetImageSize(typeof value === 'number' ? value : 1024)}
-                  />
-                </label>
-                <label className="frame-editor-field">
-                  <span>设备</span>
-                  <Select
-                    value={birefnetDevice}
-                    onChange={setBirefnetDevice}
-                    options={[
-                      { value: 'auto', label: 'auto' },
-                      { value: 'cuda', label: 'cuda' },
-                      { value: 'cpu', label: 'cpu' },
-                    ]}
-                  />
-                </label>
-                <label className="frame-editor-field">
-                  <span>精度</span>
-                  <Select
-                    value={birefnetPrecision}
-                    onChange={setBirefnetPrecision}
-                    options={[
-                      { value: 'auto', label: 'auto' },
-                      { value: 'fp32', label: 'fp32' },
-                      { value: 'fp16', label: 'fp16' },
-                      { value: 'bf16', label: 'bf16' },
-                    ]}
-                  />
-                </label>
-              </>
-            )}
-
-            {backgroundMode === 'ai' && (
-              <>
-                <label className="frame-editor-field">
-                  <span>模型</span>
-                  <Select
-                    value={rembgModel}
-                    onChange={setRembgModel}
-                    options={[
-                      { value: 'isnet-anime', label: 'isnet-anime' },
-                      { value: 'isnet-general-use', label: 'isnet-general-use' },
-                      { value: 'u2net', label: 'u2net' },
-                      { value: 'u2netp', label: 'u2netp' },
-                      { value: 'u2net_human_seg', label: 'u2net_human_seg' },
-                    ]}
-                  />
-                </label>
-                <Checkbox checked={alphaMatting} onChange={e => setAlphaMatting(e.target.checked)}>
-                  Alpha matting
-                </Checkbox>
-                <Checkbox checked={postProcessMask} onChange={e => setPostProcessMask(e.target.checked)}>
-                  Mask 后处理
-                </Checkbox>
-              </>
-            )}
-
-            {backgroundMode === 'edge' && (
-              <>
-                <div className="frame-editor-slider">
-                  <span>容差 {edgeThreshold}</span>
-                  <Slider min={0} max={96} value={edgeThreshold} onChange={setEdgeThreshold} />
-                </div>
-                <div className="frame-editor-slider">
-                  <span>柔化 {edgeFeather}</span>
-                  <Slider min={1} max={40} value={edgeFeather} onChange={setEdgeFeather} />
-                </div>
-              </>
-            )}
-          </div>
+          <BackgroundOptionsFields opts={bg} />
         </div>
 
         <div className="frame-editor-main">

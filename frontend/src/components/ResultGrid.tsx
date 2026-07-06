@@ -3,11 +3,12 @@ import { Image, Spin, Tag, Button, Popconfirm, Input } from 'antd';
 import {
   DownloadOutlined, PictureOutlined, LoadingOutlined,
   DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
-  AppstoreOutlined,
+  AppstoreOutlined, ScissorOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import type { VideoFrameOutput } from '../api/services';
 import FrameExtractionModal from './FrameExtractionModal';
+import BackgroundRemovalModal from './BackgroundRemovalModal';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
@@ -25,6 +26,7 @@ export default function ResultGrid() {
     messageId: string;
     initialOutput: VideoFrameOutput;
   } | null>(null);
+  const [removeBg, setRemoveBg] = useState<{ messageId: string; imageUrl: string } | null>(null);
   const [editRefImages, setEditRefImages] = useState<{
     img1?: string | null;
     img2?: string | null;
@@ -110,6 +112,13 @@ export default function ResultGrid() {
     const msg = useAppStore.getState().chatHistory.find(m => m.id === frameEditor.messageId);
     const idx = msg?.images?.length ?? 0;
     appendChatMedia(frameEditor.messageId, url, idx);
+  };
+
+  const handleBackgroundRemoved = (url: string) => {
+    if (!removeBg) return;
+    const msg = useAppStore.getState().chatHistory.find(m => m.id === removeBg.messageId);
+    const idx = msg?.images?.length ?? 0;
+    appendChatMedia(removeBg.messageId, url, idx);
   };
 
   if (chatHistory.length === 0) {
@@ -414,6 +423,16 @@ export default function ResultGrid() {
                                 </Button>
                               </>
                             )}
+                            {!isVideo(image) && image.startsWith('/uploads/') && (
+                              <Button
+                                type="primary"
+                                size="small"
+                                icon={<ScissorOutlined />}
+                                onClick={() => setRemoveBg({ messageId: message.id, imageUrl: image })}
+                              >
+                                移除背景
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -438,6 +457,12 @@ export default function ResultGrid() {
         initialOutput={frameEditor?.initialOutput ?? 'zip'}
         onClose={() => setFrameEditor(null)}
         onSpritesheetGenerated={handleSpritesheetGenerated}
+      />
+      <BackgroundRemovalModal
+        open={!!removeBg}
+        imageUrl={removeBg?.imageUrl ?? null}
+        onClose={() => setRemoveBg(null)}
+        onRemoved={handleBackgroundRemoved}
       />
     </div>
   );

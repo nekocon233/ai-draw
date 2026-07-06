@@ -16,6 +16,7 @@ from server.schemas import GenerateMediaRequest, GenerateMediaResponse
 from utils.config_loader import get_config, get_video_frames_config
 from utils.video_frames import (
     BackgroundRemovalOptions,
+    apply_background_removal,
     build_spritesheet,
     export_processed_frames,
     extract_frames as extract_video_frames,
@@ -73,6 +74,11 @@ class VideoFrameExportRequest(BackgroundOptionsRequest):
     frame_urls: List[str]
     output: Literal['zip', 'spritesheet'] = 'zip'
     cols: Optional[int] = None
+
+
+class RemoveBackgroundRequest(BackgroundOptionsRequest):
+    """单图移除背景请求"""
+    image_url: str
 
 
 def _resolve_upload_path(upload_url: str, label: str = '文件') -> Path:
@@ -387,5 +393,34 @@ async def export_video_frames(request: VideoFrameExportRequest) -> dict:
         'zip_url': f'/uploads/frames/{filename}',
         'frames': len(processed),
         'transparent': transparent,
+        'background_mode': bg_options.mode,
+    }
+
+
+@router.post("/remove-background")
+async def remove_background(request: RemoveBackgroundRequest) -> dict:
+    """单图移除背景 → 透明 PNG。复用视频抽帧那套 apply_background_removal 抠图逻辑。"""
+    image_path = _resolve_upload_path(request.image_url, label='图片')
+    cfg = get_video_frames_config()
+    bg_options = _background_options(request, fallback_mode=cfg.background_mode)
+
+    try:
+        with Image.open(image_path) as img:
+            frame = img.convert('RGB')
+        [result] = await asyncio.to_thread(apply_background_removal, [frame], bg_options)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'移除背景失败: {e}')
+
+    save_dir = Path(get_config().paths.upload_dir) / 'transparent'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    filename = f'transparent_{uuid.uuid4().hex}.png'
+    try:
+        result.convert('RGBA').save(save_dir / filename, format='PNG')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'保存透明图失败: {e}')
+
+    return {
+        'success': True,
+        'image_url': f'/uploads/transparent/{filename}',
         'background_mode': bg_options.mode,
     }
