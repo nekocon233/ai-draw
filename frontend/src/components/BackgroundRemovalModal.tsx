@@ -58,6 +58,7 @@ export default function BackgroundRemovalModal({
       open={open}
       onCancel={onClose}
       width={380}
+      centered
       className="frame-editor-modal"
       destroyOnHidden
       footer={[
