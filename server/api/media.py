@@ -4,6 +4,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 import asyncio
 import base64
+import re
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -17,10 +18,13 @@ from utils.config_loader import get_config, get_video_frames_config
 from utils.video_frames import (
     BackgroundRemovalOptions,
     apply_background_removal,
+    build_apng,
+    build_gif,
     build_spritesheet,
-    export_processed_frames,
-    extract_frames as extract_video_frames,
-    video_extract_frames,
+    extract_frame_items,
+    probe_video_duration,
+    probe_video_fps,
+    resize_frames,
     video_to_spritesheet,
     zip_frames,
 )
@@ -50,30 +54,49 @@ class BackgroundOptionsRequest(BaseModel):
 class VideoToSpritesheetRequest(BackgroundOptionsRequest):
     """视频转透明精灵图请求"""
     video_url: str            # 形如 /uploads/video/xxx.mp4
-    cols: Optional[int] = None
-    max_frames: Optional[int] = None
-
-
-class VideoExtractFramesRequest(BackgroundOptionsRequest):
-    """视频抽帧请求"""
-    video_url: str
-    transparent: bool = True   # True→rembg 抠图（透明）；False→原背景
-    max_frames: Optional[int] = None
-    fps: Optional[float] = None
+    rows: Optional[int] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
 
 
 class VideoFramePreviewRequest(BaseModel):
     """视频抽帧预览请求"""
     video_url: str
-    max_frames: Optional[int] = 64
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
     fps: Optional[float] = None
+    max_frames: Optional[int] = None
 
 
-class VideoFrameExportRequest(BackgroundOptionsRequest):
-    """抽帧编辑器导出请求"""
+class VideoMetaRequest(BaseModel):
+    """视频元信息探测请求（仅 ffprobe，不抽帧）"""
+    video_url: str
+
+
+class VideoFrameExportRequest(BaseModel):
+    """抽帧工作台导出请求"""
     frame_urls: List[str]
-    output: Literal['zip', 'spritesheet'] = 'zip'
+    output: Literal['zip', 'spritesheet', 'gif', 'apng'] = 'spritesheet'
+    rows: Optional[int] = None
     cols: Optional[int] = None
+    cell_width: Optional[int] = None
+    cell_height: Optional[int] = None
+    gif_fps: Optional[float] = None
+    filename: Optional[str] = None
+    name_template: Optional[str] = None
+    progress_id: Optional[str] = None
+
+
+class VideoFrameBackgroundBatchRequest(BackgroundOptionsRequest):
+    """批量帧背景处理请求"""
+    frame_urls: List[str]
+
+
+class SaveEditedVideoFrameRequest(BaseModel):
+    """保存 canvas 编辑后的 PNG。"""
+    image: str
+    base_frame_url: Optional[str] = None
+    preview_id: Optional[str] = None
 
 
 class RemoveBackgroundRequest(BackgroundOptionsRequest):
@@ -135,7 +158,7 @@ def _background_options(request: BackgroundOptionsRequest, fallback_mode: str = 
     )
 
 
-def _load_frame_urls(frame_urls: List[str]) -> List[Image.Image]:
+def _load_frame_urls(frame_urls: List[str], mode: str = 'RGBA') -> List[Image.Image]:
     if not frame_urls:
         raise HTTPException(status_code=400, detail='请至少选择一帧')
     if len(frame_urls) > 600:
@@ -146,10 +169,71 @@ def _load_frame_urls(frame_urls: List[str]) -> List[Image.Image]:
         frame_path = _resolve_upload_path(url, label='帧文件')
         try:
             with Image.open(frame_path) as img:
-                frames.append(img.convert('RGB'))
+                frames.append(img.convert(mode))
         except Exception as e:
             raise HTTPException(status_code=400, detail=f'帧文件读取失败: {e}')
     return frames
+
+
+def _safe_export_dimension(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    return max(1, min(int(value), 4096))
+
+
+def _safe_time_range(start: Optional[float], end: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+    safe_start = max(0, float(start)) if start is not None else None
+    safe_end = max(0, float(end)) if end is not None else None
+    if safe_start is not None and safe_end is not None and safe_end <= safe_start:
+        raise HTTPException(status_code=400, detail='结束时间必须大于开始时间')
+    if safe_start is None and safe_end == 0:
+        safe_end = None
+    return safe_start, safe_end
+
+
+def _safe_filename_stem(value: Optional[str], fallback: str) -> str:
+    stem = (value or fallback).strip()
+    stem = re.sub(r'[\\/:*?"<>|\s]+', '_', stem)
+    stem = re.sub(r'_+', '_', stem).strip('._')
+    return stem[:80] or fallback
+
+
+def _decode_data_png(data_url: str) -> Image.Image:
+    if ',' not in data_url or not data_url.startswith('data:image/png;base64,'):
+        raise HTTPException(status_code=400, detail='仅支持 PNG data URL')
+    try:
+        raw = base64.b64decode(data_url.split(',', 1)[1], validate=True)
+        image = Image.open(BytesIO(raw)).convert('RGBA')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f'PNG 解码失败: {e}')
+    return image
+
+
+_export_progress: dict[str, dict] = {}
+
+
+def _set_export_progress(
+    progress_id: Optional[str],
+    stage: str,
+    percent: int,
+    message: str,
+    current: Optional[int] = None,
+    total: Optional[int] = None,
+    done: bool = False,
+    error: Optional[str] = None,
+) -> None:
+    if not progress_id:
+        return
+    _export_progress[progress_id] = {
+        'progress_id': progress_id,
+        'stage': stage,
+        'percent': max(0, min(100, percent)),
+        'message': message,
+        'current': current,
+        'total': total,
+        'done': done,
+        'error': error,
+    }
 
 
 @router.post("/generate", response_model=GenerateMediaResponse)
@@ -203,19 +287,13 @@ async def generate_media(
 async def upload_reference_media(file: UploadFile = File(...)) -> dict:
     """上传参考图"""
     try:
-        # 读取图片
         contents = await file.read()
         image = Image.open(BytesIO(contents))
-        
-        # 转换为 RGB
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        # 转换为 base64
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
-        
         return {
             "success": True,
             "image": f"data:image/png;base64,{img_str}"
@@ -237,13 +315,16 @@ async def to_spritesheet(request: VideoToSpritesheetRequest) -> dict:
     video_path = _resolve_upload_path(request.video_url, label='视频')
     cfg = get_video_frames_config()
     bg_options = _background_options(request, fallback_mode=cfg.background_mode)
+    start_time, end_time = _safe_time_range(request.start_time, request.end_time)
 
     try:
         png_bytes, meta = await asyncio.to_thread(
             video_to_spritesheet,
             video_path,
-            cols=request.cols,
-            max_frames=request.max_frames if request.max_frames is not None else cfg.max_frames,
+            rows=request.rows,
+            max_frames=cfg.max_frames,
+            start_time=start_time,
+            end_time=end_time,
             model=cfg.rembg_model,
             background_options=bg_options,
         )
@@ -265,59 +346,30 @@ async def to_spritesheet(request: VideoToSpritesheetRequest) -> dict:
     }
 
 
-@router.post("/video-extract-frames")
-async def extract_frames(request: VideoExtractFramesRequest) -> dict:
-    """视频 → 逐帧 PNG ZIP。transparent 决定是否 rembg 抠图。"""
-    video_path = _resolve_upload_path(request.video_url, label='视频')
-    cfg = get_video_frames_config()
-    bg_options = _background_options(request, fallback_mode=cfg.background_mode if request.transparent else 'none')
-    transparent = bg_options.mode != 'none'
-
-    try:
-        zip_bytes, meta = await asyncio.to_thread(
-            video_extract_frames,
-            video_path,
-            transparent=transparent,
-            max_frames=request.max_frames,
-            fps=request.fps,
-            model=bg_options.rembg_model,
-            background_options=bg_options,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'抽帧失败: {e}')
-
-    save_dir = Path(get_config().paths.upload_dir) / 'frames'
-    save_dir.mkdir(parents=True, exist_ok=True)
-    filename = f'frames_{uuid.uuid4().hex}.zip'
-    (save_dir / filename).write_bytes(zip_bytes)
-
-    return {
-        'success': True,
-        'zip_url': f'/uploads/frames/{filename}',
-        'frames': meta['frames'],
-        'transparent': meta['transparent'],
-        'background_mode': bg_options.mode,
-    }
-
-
 @router.post("/video-frame-preview")
 async def preview_video_frames(request: VideoFramePreviewRequest) -> dict:
-    """视频 → 预览帧。供前端编辑器选择帧后再导出。"""
+    """视频 → 原始预览帧。供工作台第 1 步抽取原始帧。"""
     video_path = _resolve_upload_path(request.video_url, label='视频')
-    max_frames = request.max_frames or get_video_frames_config().max_frames
+    cfg = get_video_frames_config()
+    max_frames = request.max_frames or cfg.max_frames
     max_frames = max(1, min(max_frames, 600))
+    source_fps = await asyncio.to_thread(probe_video_fps, video_path)
+    source_duration = await asyncio.to_thread(probe_video_duration, video_path)
+    start_time, end_time = _safe_time_range(request.start_time, request.end_time)
 
     try:
-        frames = await asyncio.to_thread(
-            extract_video_frames,
+        frame_items_raw = await asyncio.to_thread(
+            extract_frame_items,
             video_path,
             max_frames=max_frames,
             fps=request.fps,
+            start_time=start_time,
+            end_time=end_time,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'预览帧抽取失败: {e}')
 
-    if not frames:
+    if not frame_items_raw:
         raise HTTPException(status_code=500, detail='未抽取到任何预览帧')
 
     preview_id = f'preview_{uuid.uuid4().hex}'
@@ -325,76 +377,214 @@ async def preview_video_frames(request: VideoFramePreviewRequest) -> dict:
     save_dir.mkdir(parents=True, exist_ok=True)
 
     frame_items = []
-    for i, frame in enumerate(frames):
+    for i, item in enumerate(frame_items_raw):
         filename = f'frame_{i + 1:04d}.png'
-        frame.save(save_dir / filename, format='PNG')
+        item.image.save(save_dir / filename, format='PNG')
         frame_items.append({
             'index': i,
             'url': f'/uploads/frames/previews/{preview_id}/{filename}',
-            'width': frame.width,
-            'height': frame.height,
+            'width': item.image.width,
+            'height': item.image.height,
+            'time': item.time,
         })
 
     return {
         'success': True,
         'preview_id': preview_id,
         'frames': frame_items,
-        'width': frames[0].width,
-        'height': frames[0].height,
+        'width': frame_items_raw[0].image.width,
+        'height': frame_items_raw[0].image.height,
+        'source_fps': source_fps,
+        'source_duration': source_duration,
+    }
+
+
+@router.post("/video-meta")
+async def probe_video_meta(request: VideoMetaRequest) -> dict:
+    """探测视频帧率与时长（ffprobe），不抽帧。供工作台默认帧率使用。"""
+    video_path = _resolve_upload_path(request.video_url, label='视频')
+    source_fps = await asyncio.to_thread(probe_video_fps, video_path)
+    source_duration = await asyncio.to_thread(probe_video_duration, video_path)
+    return {
+        'success': True,
+        'source_fps': source_fps,
+        'source_duration': source_duration,
+    }
+
+
+@router.post("/video-frame-backgrounds")
+async def remove_video_frame_backgrounds(request: VideoFrameBackgroundBatchRequest) -> dict:
+    """批量帧移除背景，结果写入透明 PNG，供工作台第 2 步使用。"""
+    frames = _load_frame_urls(request.frame_urls, mode='RGB')
+    cfg = get_video_frames_config()
+    bg_options = _background_options(request, fallback_mode=cfg.background_mode)
+
+    try:
+        processed = await asyncio.to_thread(apply_background_removal, frames, bg_options)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'批量移除背景失败: {e}')
+
+    save_dir = Path(get_config().paths.upload_dir) / 'transparent'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    items = []
+    for i, (source_url, result) in enumerate(zip(request.frame_urls, processed), start=1):
+        filename = f'frame_transparent_{uuid.uuid4().hex}_{i:04d}.png'
+        try:
+            result.convert('RGBA').save(save_dir / filename, format='PNG')
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'保存透明帧失败: {e}')
+        items.append({
+            'source_url': source_url,
+            'image_url': f'/uploads/transparent/{filename}',
+        })
+
+    return {
+        'success': True,
+        'background_mode': bg_options.mode,
+        'frames': items,
+    }
+
+
+@router.post("/video-frame-edited")
+async def save_edited_video_frame(request: SaveEditedVideoFrameRequest) -> dict:
+    """保存 canvas 编辑后的 PNG，返回可用于导出的上传 URL。"""
+    if request.base_frame_url:
+        _resolve_upload_path(request.base_frame_url, label='基础帧')
+    image = _decode_data_png(request.image)
+    save_dir = Path(get_config().paths.upload_dir) / 'frames' / 'edited'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    filename = f'edited_{uuid.uuid4().hex}.png'
+    try:
+        image.save(save_dir / filename, format='PNG')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'保存编辑帧失败: {e}')
+    return {
+        'success': True,
+        'image_url': f'/uploads/frames/edited/{filename}',
     }
 
 
 @router.post("/export-video-frames")
 async def export_video_frames(request: VideoFrameExportRequest) -> dict:
-    """按编辑器选择的帧导出 ZIP 或精灵图。"""
-    frames = _load_frame_urls(request.frame_urls)
-    bg_options = _background_options(request, fallback_mode='none')
-    transparent = bg_options.mode != 'none'
+    """按工作台最终帧 URL 导出 ZIP、精灵图、GIF 或兼容 APNG。"""
+    _set_export_progress(request.progress_id, 'reading', 5, '正在读取工作集帧')
+    processed = _load_frame_urls(request.frame_urls, mode='RGBA')
+    _set_export_progress(request.progress_id, 'reading', 18, f'已读取 {len(processed)} 帧', len(processed), len(processed))
 
-    try:
-        processed = await asyncio.to_thread(
-            export_processed_frames,
-            frames,
-            background_options=bg_options,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'背景处理失败: {e}')
+    cell_width = _safe_export_dimension(request.cell_width)
+    cell_height = _safe_export_dimension(request.cell_height)
+    if cell_width or cell_height:
+        _set_export_progress(request.progress_id, 'resize', 40, '正在调整帧尺寸')
+        processed = await asyncio.to_thread(resize_frames, processed, cell_width, cell_height)
 
-    if request.output == 'spritesheet':
+    frame_width = processed[0].width
+    frame_height = processed[0].height
+    safe_stem = _safe_filename_stem(request.filename, 'video_frames')
+
+    if request.output == 'zip':
         try:
-            png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.cols)
+            _set_export_progress(request.progress_id, 'packing', 72, '正在生成 ZIP')
+            zip_bytes = await asyncio.to_thread(zip_frames, processed, request.name_template or '{n:03}')
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f'精灵图生成失败: {e}')
-
-        save_dir = Path(get_config().paths.upload_dir) / 'spritesheet'
+            _set_export_progress(request.progress_id, 'error', 100, 'ZIP 生成失败', error=str(e), done=True)
+            raise HTTPException(status_code=500, detail=f'ZIP 生成失败: {e}')
+        save_dir = Path(get_config().paths.upload_dir) / 'frames'
         save_dir.mkdir(parents=True, exist_ok=True)
-        filename = f'sheet_{uuid.uuid4().hex}.png'
-        (save_dir / filename).write_bytes(png_bytes)
+        filename = f'{safe_stem}_{uuid.uuid4().hex}.zip'
+        (save_dir / filename).write_bytes(zip_bytes)
+        _set_export_progress(request.progress_id, 'done', 100, 'ZIP 已生成', len(processed), len(processed), done=True)
         return {
             'success': True,
-            'spritesheet_url': f'/uploads/spritesheet/{filename}',
+            'output': 'zip',
+            'zip_url': f'/uploads/frames/{filename}',
             'frames': len(processed),
-            'cols': cols,
-            'rows': rows,
-            'background_mode': bg_options.mode,
+            'width': frame_width,
+            'height': frame_height,
+        }
+
+    if request.output == 'gif':
+        try:
+            _set_export_progress(request.progress_id, 'packing', 72, '正在生成 GIF')
+            gif_bytes, duration_ms = await asyncio.to_thread(build_gif, processed, request.gif_fps)
+        except Exception as e:
+            _set_export_progress(request.progress_id, 'error', 100, 'GIF 生成失败', error=str(e), done=True)
+            raise HTTPException(status_code=500, detail=f'GIF 生成失败: {e}')
+        save_dir = Path(get_config().paths.upload_dir) / 'gif'
+        save_dir.mkdir(parents=True, exist_ok=True)
+        filename = f'{safe_stem}_{uuid.uuid4().hex}.gif'
+        (save_dir / filename).write_bytes(gif_bytes)
+        _set_export_progress(request.progress_id, 'done', 100, 'GIF 已生成', len(processed), len(processed), done=True)
+        return {
+            'success': True,
+            'output': 'gif',
+            'gif_url': f'/uploads/gif/{filename}',
+            'frames': len(processed),
+            'width': frame_width,
+            'height': frame_height,
+            'duration_ms': duration_ms,
+        }
+
+    if request.output == 'apng':
+        try:
+            _set_export_progress(request.progress_id, 'packing', 72, '正在生成 APNG')
+            apng_bytes, duration_ms = await asyncio.to_thread(build_apng, processed, request.gif_fps)
+        except Exception as e:
+            _set_export_progress(request.progress_id, 'error', 100, 'APNG 生成失败', error=str(e), done=True)
+            raise HTTPException(status_code=500, detail=f'APNG 生成失败: {e}')
+        save_dir = Path(get_config().paths.upload_dir) / 'apng'
+        save_dir.mkdir(parents=True, exist_ok=True)
+        filename = f'{safe_stem}_{uuid.uuid4().hex}.png'
+        (save_dir / filename).write_bytes(apng_bytes)
+        _set_export_progress(request.progress_id, 'done', 100, 'APNG 已生成', len(processed), len(processed), done=True)
+        return {
+            'success': True,
+            'output': 'apng',
+            'apng_url': f'/uploads/apng/{filename}',
+            'frames': len(processed),
+            'width': frame_width,
+            'height': frame_height,
+            'duration_ms': duration_ms,
         }
 
     try:
-        zip_bytes = await asyncio.to_thread(zip_frames, processed, transparent)
+        _set_export_progress(request.progress_id, 'packing', 72, '正在生成精灵图')
+        png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.cols, request.rows)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'ZIP 打包失败: {e}')
+        _set_export_progress(request.progress_id, 'error', 100, '精灵图生成失败', error=str(e), done=True)
+        raise HTTPException(status_code=500, detail=f'精灵图生成失败: {e}')
 
-    save_dir = Path(get_config().paths.upload_dir) / 'frames'
+    save_dir = Path(get_config().paths.upload_dir) / 'spritesheet'
     save_dir.mkdir(parents=True, exist_ok=True)
-    filename = f'frames_{uuid.uuid4().hex}.zip'
-    (save_dir / filename).write_bytes(zip_bytes)
+    filename = f'{safe_stem}_{uuid.uuid4().hex}.png'
+    (save_dir / filename).write_bytes(png_bytes)
+    _set_export_progress(request.progress_id, 'done', 100, '精灵图已生成', len(processed), len(processed), done=True)
     return {
         'success': True,
-        'zip_url': f'/uploads/frames/{filename}',
+        'output': 'spritesheet',
+        'spritesheet_url': f'/uploads/spritesheet/{filename}',
         'frames': len(processed),
-        'transparent': transparent,
-        'background_mode': bg_options.mode,
+        'cols': cols,
+        'rows': rows,
+        'width': frame_width,
+        'height': frame_height,
+        'sheet_width': cols * frame_width,
+        'sheet_height': rows * frame_height,
     }
+
+
+@router.get("/export-progress/{progress_id}")
+async def get_export_progress(progress_id: str) -> dict:
+    """查询抽帧导出进度。"""
+    return _export_progress.get(progress_id, {
+        'progress_id': progress_id,
+        'stage': 'waiting',
+        'percent': 0,
+        'message': '等待导出开始',
+        'current': None,
+        'total': None,
+        'done': False,
+        'error': None,
+    })
 
 
 @router.post("/remove-background")

@@ -16,6 +16,7 @@ import {
   deleteGuestSessionConfig
 } from '../utils/helpers';
 import { saveImages, deleteMessageImages } from '../utils/indexedDB';
+import { clearScrollPosition } from '../utils/scrollPosition';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
 import type { WorkflowMetadata } from '../types/api';
@@ -1259,6 +1260,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       deleteGuestSession(sessionId);
       deleteGuestSessionConfig(sessionId);
     }
+
+    // 清理该会话的滚动位置记录
+    clearScrollPosition(sessionId);
   },
   
   // 切换会话

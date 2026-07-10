@@ -6,7 +6,7 @@
 # ============================================
 # Stage 1: 前端构建阶段
 # ============================================
-FROM node:18-alpine as frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /frontend
 
@@ -14,7 +14,7 @@ WORKDIR /frontend
 COPY frontend/package*.json ./
 
 # 安装依赖
-RUN npm ci --only=production=false
+RUN npm ci --include=dev
 
 # 复制前端源码
 COPY frontend/ ./
@@ -25,7 +25,7 @@ RUN npm run build
 # ============================================
 # Stage 2: 后端依赖构建阶段
 # ============================================
-FROM python:3.10-slim as backend-builder
+FROM python:3.10-slim AS backend-builder
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -1,4 +1,6 @@
-version: '3.8'
+# AI-Draw 生产/SSH 部署 Compose 配置
+# 用于 DOCKER_HOST=ssh://nekocon-server 的远程 Docker Engine 部署。
+# 注意：这里不能使用本机路径 bind mount，否则远程 Docker 会收到 Windows 路径并启动失败。
 
 services:
   # ============================================
@@ -13,15 +15,7 @@ services:
     ports:
       - "${SERVER_PORT:-14600}:${SERVER_PORT:-14600}"
     volumes:
-      # 开发模式：挂载源代码实现热重载
-      # 生产模式：注释掉以下挂载，使用容器内代码
-      - ./server:/app/server
-      - ./comfyui:/app/comfyui
-      - ./utils:/app/utils
-      - ./configs:/app/configs
-      # 环境配置文件
-      - ./.env:/app/.env:ro
-      # 前端构建产物共享给 Nginx
+      # 前端构建产物共享给 Nginx；部署前会删除该卷以刷新静态资源
       - frontend-dist:/app/frontend/dist
       # 用户上传文件和生成图片持久化存储
       - uploads-data:/app/uploads
@@ -111,7 +105,9 @@ services:
   # Nginx 反向代理
   # ============================================
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
     container_name: ai-draw-nginx
     restart: unless-stopped
     ports:
@@ -120,13 +116,10 @@ services:
     environment:
       - BACKEND_PORT=${SERVER_PORT:-14600}
     volumes:
-      - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
-      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
-      # 从后端容器复制前端构建产物
+      # 从后端镜像初始化出来的前端构建产物
       - frontend-dist:/usr/share/nginx/html:ro
       # 共享上传文件给 Nginx 静态文件服务
       - uploads-data:/usr/share/nginx/uploads:ro
-    entrypoint: ["/docker-entrypoint.sh"]
     networks:
       - ai-draw-network
     depends_on:

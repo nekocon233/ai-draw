@@ -57,11 +57,11 @@ AI-Draw 是一个现代化的 AI 辅助绘画 Web 应用，为插画师、设计
 - PostgreSQL 15+
 - ComfyUI（本地或云端）
 
-### Docker 部署（推荐）🐳
+### SSH 远程 Docker 部署（推荐）🐳
 
 **快速启动**
 
-```bash
+```powershell
 # 1. 克隆项目
 git clone https://github.com/nekocon233/ai-draw.git
 cd ai-draw
@@ -70,28 +70,34 @@ cd ai-draw
 cp .env.example .env
 # 编辑 .env 文件，填入必要配置（API密钥、数据库密码等）
 
-# 3. 启动所有服务
+# 3. 使用远程 Docker Engine
+$env:DOCKER_HOST = "ssh://nekocon-server"
+
+# 4. 启动所有服务
 docker compose up -d
 
-# 4. 查看运行状态
+# 5. 查看运行状态
 docker compose ps
 
-# 5. 访问应用
-# 前端：http://localhost:14601
-# 后端 API：http://localhost:14600/docs
+# 6. 访问应用
+# 前端：https://aidraw.nekocon.cn/
+# 后端 API：http://<server>:14600/docs
 ```
 
 **常用命令**
 
-```bash
+```powershell
 # 查看日志
 docker compose logs -f ai-draw-backend
 
 # 停止服务
 docker compose down
 
-# 重新构建（代码更新后）
-docker compose down && docker compose build --no-cache ai-draw-backend && docker compose up -d
+# 重新构建并刷新前端静态资源（代码更新后）
+docker compose down
+docker volume rm ai-draw_frontend-dist 2>$null
+docker compose build
+docker compose up -d
 ```
 
 ### 本地开发
@@ -132,9 +138,9 @@ docker compose down && docker compose build --no-cache ai-draw-backend && docker
 
 AI-Draw 需要 ComfyUI 作为图像生成后端：
 
-**Docker 环境访问宿主机 ComfyUI**
-- Windows/Mac: 在 docker-compose.yml 中 `COMFYUI_HOST=host.docker.internal`
-- Linux: 在 docker-compose.yml 中 `COMFYUI_HOST=172.17.0.1`
+**远程 Docker 环境访问 ComfyUI**
+- 默认在 `docker-compose.yml` 中使用 `COMFYUI_HOST=comfyui`
+- 如果 ComfyUI 不在同一 Docker 网络中，改成远程服务器可访问的主机名或 IP
 
 **本地开发**
 - 确保 ComfyUI 运行在 8188 端口
@@ -220,8 +226,7 @@ environment:
 ai-draw/
 ├── run.py                    # 应用启动入口
 ├── requirements.txt          # Python 依赖
-├── docker-compose.yml        # Docker 开发环境配置
-├── docker-compose.prod.yml   # Docker 生产环境配置
+├── docker-compose.yml        # SSH 远程 Docker 部署配置
 ├── Dockerfile                # 后端容器构建文件
 │
 ├── server/                   # FastAPI 后端
@@ -460,11 +465,14 @@ React Application
 
 ## Docker 高级配置
 
-### 生产环境部署
+### SSH 远程部署
 
-```bash
-# 使用生产配置（多 worker、资源限制）
-docker compose -f docker-compose.prod.yml up -d
+```powershell
+$env:DOCKER_HOST = "ssh://nekocon-server"
+docker compose down
+docker volume rm ai-draw_frontend-dist 2>$null
+docker compose build
+docker compose up -d
 ```
 
 ### 常用运维命令
@@ -482,9 +490,9 @@ docker stats
 
 ### 网络配置
 
-**访问宿主机 ComfyUI**:
-- Windows/Mac: `COMFYUI_HOST=host.docker.internal`
-- Linux: `COMFYUI_HOST=172.17.0.1`
+**访问 ComfyUI**:
+- 默认：`COMFYUI_HOST=comfyui`
+- 访问远程服务器上的独立 ComfyUI 时，配置为服务器 Docker 网络可访问的主机名或 IP
 
 ## 路线图
 

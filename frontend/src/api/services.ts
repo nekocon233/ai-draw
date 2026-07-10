@@ -19,7 +19,7 @@ import type {
 import type { AuthResponse, UserConfig } from '../types/models';
 
 export type VideoBackgroundMode = 'none' | 'ai' | 'inspyrenet' | 'birefnet' | 'edge';
-export type VideoFrameOutput = 'zip' | 'spritesheet';
+export type VideoFrameExportOutput = 'zip' | 'spritesheet' | 'gif' | 'apng';
 
 export interface VideoBackgroundOptions {
   background_mode?: VideoBackgroundMode;
@@ -44,6 +44,7 @@ export interface VideoFramePreviewItem {
   url: string;
   width: number;
   height: number;
+  time?: number | null;
 }
 
 export interface VideoFramePreviewResponse {
@@ -52,17 +53,49 @@ export interface VideoFramePreviewResponse {
   frames: VideoFramePreviewItem[];
   width: number;
   height: number;
+  source_fps?: number | null;
+  source_duration?: number | null;
+}
+
+export interface VideoMetaResponse {
+  success: boolean;
+  source_fps?: number | null;
+  source_duration?: number | null;
 }
 
 export interface VideoFrameExportResponse {
   success: boolean;
+  output?: VideoFrameExportOutput;
   frames: number;
-  background_mode: VideoBackgroundMode;
-  zip_url?: string;
+  background_mode?: VideoBackgroundMode;
   spritesheet_url?: string;
+  apng_url?: string;
+  gif_url?: string;
+  zip_url?: string;
   cols?: number;
   rows?: number;
-  transparent?: boolean;
+  width?: number;
+  height?: number;
+  sheet_width?: number;
+  sheet_height?: number;
+  duration_ms?: number;
+}
+
+export interface VideoFrameBackgroundBatchResponse {
+  success: boolean;
+  background_mode: VideoBackgroundMode;
+  frames: Array<{ source_url: string; image_url: string }>;
+}
+
+export interface VideoFrameExportProgress {
+  progress_id: string;
+  stage: string;
+  percent: number;
+  message: string;
+  current?: number | null;
+  total?: number | null;
+  done?: boolean;
+  error?: string | null;
 }
 
 export const apiService = {
@@ -231,8 +264,9 @@ export const apiService = {
   // 视频 → 透明精灵图（单张网格 PNG）
   videoToSpritesheet: (data: {
     video_url: string;
-    cols?: number;
-    max_frames?: number;
+    rows?: number;
+    start_time?: number;
+    end_time?: number;
   } & VideoBackgroundOptions): Promise<{ success: boolean; spritesheet_url: string; frames: number; cols: number; rows: number; background_mode: VideoBackgroundMode }> =>
     client.post('/media/video-to-spritesheet', data, {
       timeout: 300000, // rembg 逐帧抠图较慢，5 分钟
@@ -246,36 +280,61 @@ export const apiService = {
       timeout: 300000,
     }),
 
-  // 视频 → 逐帧 PNG ZIP（transparent 决定是否透明抠图）
-  videoExtractFrames: (data: {
-    video_url: string;
-    transparent: boolean;
-    max_frames?: number;
-    fps?: number;
-  } & VideoBackgroundOptions): Promise<{ success: boolean; zip_url: string; frames: number; transparent: boolean; background_mode: VideoBackgroundMode }> =>
-    client.post('/media/video-extract-frames', data, {
-      timeout: 300000,
-    }),
-
   // 视频 → 预览帧（独立编辑器使用）
   videoFramePreview: (data: {
     video_url: string;
-    max_frames?: number;
+    start_time?: number;
+    end_time?: number;
     fps?: number;
+    max_frames?: number;
   }): Promise<VideoFramePreviewResponse> =>
     client.post('/media/video-frame-preview', data, {
       timeout: 300000,
     }),
 
-  // 选中帧 → ZIP / 精灵图
+  // 视频元信息探测（ffprobe，仅帧率/时长，不抽帧）
+  getVideoMeta: (data: { video_url: string }): Promise<VideoMetaResponse> =>
+    client.post('/media/video-meta', data, {
+      timeout: 30000,
+    }),
+
+  // 批量帧 → 移除背景（工作台编辑与整理步骤使用）
+  removeVideoFrameBackgrounds: (data: {
+    frame_urls: string[];
+  } & VideoBackgroundOptions): Promise<VideoFrameBackgroundBatchResponse> =>
+    client.post('/media/video-frame-backgrounds', data, {
+      timeout: 300000,
+    }),
+
+  // 保存 canvas 编辑帧
+  saveEditedVideoFrame: (data: {
+    image: string;
+    base_frame_url?: string;
+    preview_id?: string;
+  }): Promise<{ success: boolean; image_url: string }> =>
+    client.post('/media/video-frame-edited', data, {
+      timeout: 300000,
+    }),
+
+  // 选中帧 → ZIP / 精灵图 / GIF / APNG
   exportVideoFrames: (data: {
     frame_urls: string[];
-    output: VideoFrameOutput;
+    output: VideoFrameExportOutput;
+    rows?: number;
     cols?: number;
-  } & VideoBackgroundOptions): Promise<VideoFrameExportResponse> =>
+    cell_width?: number;
+    cell_height?: number;
+    gif_fps?: number;
+    filename?: string;
+    name_template?: string;
+    progress_id?: string;
+  }): Promise<VideoFrameExportResponse> =>
     client.post('/media/export-video-frames', data, {
       timeout: 300000,
     }),
+
+  getVideoFrameExportProgress: (progressId: string): Promise<VideoFrameExportProgress> =>
+    client.get(`/media/export-progress/${progressId}`),
   
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>

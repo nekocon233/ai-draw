@@ -4,7 +4,7 @@
  * 由 useBackgroundOptions 驱动，FrameExtractionModal 与 BackgroundRemovalModal 共用，
  * 复用 .frame-editor-* 样式。
  */
-import { Checkbox, InputNumber, Select, Slider } from 'antd';
+import { Checkbox, Select, Slider } from 'antd';
 import type { useBackgroundOptions } from '../hooks/useBackgroundOptions';
 
 interface BackgroundOptionsFieldsProps {
@@ -25,8 +25,6 @@ export default function BackgroundOptionsFields({ opts, title = '背景', inline
         { value: 'inspyrenet', label: 'InSPyReNet' },
         { value: 'birefnet', label: 'BiRefNet' },
         { value: 'ai', label: 'rembg' },
-        { value: 'edge', label: '边缘色' },
-        { value: 'none', label: '原背景' },
       ]}
     />
   );
@@ -88,16 +86,16 @@ export default function BackgroundOptionsFields({ opts, title = '背景', inline
               ]}
             />
           </label>
-          <label className="frame-editor-field">
-            <span>尺寸</span>
-            <InputNumber
+          <div className="frame-editor-slider">
+            <span>尺寸 {state.birefnet_image_size}</span>
+            <Slider
               min={256}
               max={2304}
               step={128}
               value={state.birefnet_image_size}
-              onChange={value => set('birefnet_image_size', typeof value === 'number' ? value : 1024)}
+              onChange={value => set('birefnet_image_size', value)}
             />
-          </label>
+          </div>
           <label className="frame-editor-field">
             <span>设备</span>
             <Select
@@ -154,29 +152,6 @@ export default function BackgroundOptionsFields({ opts, title = '背景', inline
           >
             Mask 后处理
           </Checkbox>
-        </>
-      )}
-
-      {state.background_mode === 'edge' && (
-        <>
-          <div className="frame-editor-slider">
-            <span>容差 {state.edge_threshold}</span>
-            <Slider
-              min={0}
-              max={96}
-              value={state.edge_threshold}
-              onChange={value => set('edge_threshold', value)}
-            />
-          </div>
-          <div className="frame-editor-slider">
-            <span>柔化 {state.edge_feather}</span>
-            <Slider
-              min={1}
-              max={40}
-              value={state.edge_feather}
-              onChange={value => set('edge_feather', value)}
-            />
-          </div>
         </>
       )}
     </div>

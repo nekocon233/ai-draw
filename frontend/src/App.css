@@ -107,6 +107,8 @@
 .results-area {
   flex: 1;
   overflow-y: auto;
+  /* 禁用浏览器滚动锚定：恢复指定 scrollTop 时，避免上方图片加载导致浏览器自动改写 scrollTop */
+  overflow-anchor: none;
   padding: 40px 24px;
   background: var(--bg-primary);
   display: flex;

@@ -2,115 +2,225 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "启动所有服务",
-      "type": "shell",
-      "command": "docker compose up -d",
-      "problemMatcher": [],
+      "label": "deploy: remote",
+      "detail": "Rebuilds and starts the project through the remote Docker Engine.",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "stop: remote",
+        "clean: frontend volume",
+        "build: remote",
+        "up: remote"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
       "presentation": {
-        "echo": true,
-        "reveal": "always",
+        "reveal": "never",
         "focus": false,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "close": true
       }
     },
     {
-      "label": "停止所有服务",
-      "type": "shell",
-      "command": "docker compose down",
-      "problemMatcher": [],
+      "label": "deploy: remote (no cache)",
+      "detail": "Rebuilds without cache and starts the project through the remote Docker Engine.",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "stop: remote",
+        "clean: frontend volume",
+        "build: remote (no cache)",
+        "up: remote"
+      ],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
+        "reveal": "never",
         "focus": false,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "close": true
       }
     },
     {
-      "label": "重启所有服务",
-      "type": "shell",
-      "command": "docker compose restart",
+      "label": "clean: frontend volume",
+      "detail": "Removes stale frontend assets before rebuilding the project.",
+      "hide": true,
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "volume",
+        "rm",
+        "--force",
+        "ai-draw_frontend-dist"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
+        "reveal": "never",
         "focus": false,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "close": true
       }
     },
     {
-      "label": "首次部署（构建并启动）",
-      "type": "shell",
-      "command": "docker compose build --no-cache && docker compose up -d",
+      "label": "build: remote",
+      "detail": "Builds project images on the remote Docker Engine.",
+      "hide": true,
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "reveal": "never",
+        "focus": false,
+        "close": true
       }
     },
     {
-      "label": "重新构建并启动（无缓存，保留数据库）",
-      "type": "shell",
-      "command": "docker compose down && docker volume rm ai-draw_frontend-dist 2>/dev/null || true && docker compose build --no-cache ai-draw-backend && docker compose up -d",
+      "label": "build: remote (no cache)",
+      "detail": "Builds project images without cache on the remote Docker Engine.",
+      "hide": true,
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "build",
+        "--no-cache"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "reveal": "never",
+        "focus": false,
+        "close": true
       }
     },
     {
-      "label": "重新构建并启动（有缓存，保留数据库）",
-      "type": "shell",
-      "command": "docker compose down && docker volume rm ai-draw_frontend-dist 2>/dev/null || true && docker compose build ai-draw-backend && docker compose up -d",
+      "label": "up: remote",
+      "detail": "Starts project services on the remote Docker Engine.",
+      "hide": true,
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "up",
+        "-d"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "reveal": "never",
+        "focus": false,
+        "close": true
       }
     },
     {
-      "label": "重新构建并启动（无缓存，清空所有数据）",
-      "type": "shell",
-      "command": "docker compose down -v && docker compose build --no-cache ai-draw-backend && docker compose up -d",
+      "label": "status: remote",
+      "detail": "Shows project service status from the remote Docker Engine.",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "ps"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": false
+        "reveal": "never",
+        "focus": false,
+        "close": true
       }
     },
     {
-      "label": "查看服务状态",
-      "type": "shell",
-      "command": "docker compose ps",
+      "label": "logs: remote",
+      "detail": "Follows project logs from the remote Docker Engine.",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "logs",
+        "-f",
+        "--tail=200"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
       "problemMatcher": [],
       "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "shared",
-        "showReuseMessage": false,
-        "clear": true
+        "reveal": "never",
+        "focus": false,
+        "close": true
+      }
+    },
+    {
+      "label": "stop: remote",
+      "detail": "Stops project services on the remote Docker Engine.",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "down"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "never",
+        "focus": false,
+        "close": true
+      }
+    },
+    {
+      "label": "restart: remote",
+      "detail": "Restarts project services on the remote Docker Engine.",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "compose",
+        "restart"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOCKER_HOST": "ssh://nekocon-server"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "never",
+        "focus": false,
+        "close": true
       }
     }
   ]
