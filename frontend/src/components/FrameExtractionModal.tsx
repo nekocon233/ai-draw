@@ -23,6 +23,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   EyeOutlined,
+  ExclamationCircleOutlined,
   FilterOutlined,
   LeftOutlined,
   PauseCircleOutlined,
@@ -97,6 +98,7 @@ const MAX_CANVAS_HISTORY_BYTES = 96 * 1024 * 1024;
 
 interface CanvasHistoryEntry {
   image: ImageData;
+  contentDirty: boolean;
 }
 
 function trimCanvasHistory(entries: CanvasHistoryEntry[]) {
@@ -907,7 +909,7 @@ export default function FrameExtractionModal({
   };
 
   const saveEditedFrame = (frameId: string, imageUrl: string) => {
-    commitFrames('保存单帧编辑', prev => prev.map(frame => frame.id === frameId ? {
+    commitFrames('保存图片编辑', prev => prev.map(frame => frame.id === frameId ? {
       ...frame,
       editedUrl: imageUrl,
       markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
@@ -1292,7 +1294,7 @@ export default function FrameExtractionModal({
                             <span className="frame-editor-check"><Checkbox aria-label={frame.included ? '移出工作集' : '加入工作集'} checked={frame.included} onClick={event => event.stopPropagation()} onChange={() => toggleWorksetFrame(frame.id)} /></span>
                             <button type="button" className="frame-editor-delete-button" aria-label="删除此帧" onClick={event => { event.stopPropagation(); deleteFrame(frame); }}><DeleteOutlined /></button>
                             <button type="button" className="frame-editor-preview-button" aria-label="放大预览" onClick={event => { event.stopPropagation(); setImagePreview({ url: getFrameDisplayUrl(frame, previewMode), alt: `第 ${frame.index + 1} 帧预览` }); }}><EyeOutlined /></button>
-                            <button type="button" className="frame-editor-edit-button" aria-label="编辑此帧" onClick={event => { event.stopPropagation(); setEditorFrameId(frame.id); }}><EditOutlined /></button>
+                            <button type="button" className="frame-editor-edit-button" aria-label="编辑此图片" onClick={event => { event.stopPropagation(); setEditorFrameId(frame.id); }}><EditOutlined /></button>
                             {!!frame.markers.length && <span className="frame-editor-markers">{frame.markers.map(marker => <b key={marker}>{markerText[marker]}</b>)}</span>}
                             {frame.backgroundRemovedUrl && <span className="frame-editor-badge bg"><BgColorsOutlined /></span>}
                             {frame.editedUrl && <span className="frame-editor-badge edit"><EditOutlined /></span>}
@@ -1354,7 +1356,7 @@ export default function FrameExtractionModal({
                     <span>尺寸 <b>{activeFrame ? `${activeFrame.width}×${activeFrame.height}` : '--'}</b></span>
                     <span>状态 <b>{activeFrame?.editedUrl ? '已手动编辑' : activeFrame?.backgroundRemovedUrl ? '已处理背景' : '原始帧'}</b></span>
                   </div>
-                  <Button type="primary" block icon={<EditOutlined />} disabled={!activeFrame} onClick={() => activeFrame && setEditorFrameId(activeFrame.id)}>打开单帧编辑</Button>
+                  <Button type="primary" block icon={<EditOutlined />} disabled={!activeFrame} onClick={() => activeFrame && setEditorFrameId(activeFrame.id)}>打开图片编辑</Button>
                 </div>
 
                 <div className="frame-organize-side-section">
@@ -1541,6 +1543,47 @@ export default function FrameExtractionModal({
   );
 }
 
+interface ImageEditorModalProps {
+  open: boolean;
+  imageUrl: string | null;
+  onClose: () => void;
+  onSaved?: (url: string) => void;
+}
+
+export function ImageEditorModal({ open, imageUrl, onClose, onSaved }: ImageEditorModalProps) {
+  const backgroundOptions = useBackgroundOptions();
+
+  const frame = useMemo<VideoSpriteFrame | null>(() => imageUrl ? {
+    id: `image-editor-${imageUrl}`,
+    index: 0,
+    sourceUrl: imageUrl,
+    included: true,
+    time: null,
+    width: 0,
+    height: 0,
+    markers: [],
+  } : null, [imageUrl]);
+
+  if (!frame) return null;
+
+  return (
+    <FrameCanvasEditor
+      frame={frame}
+      previewId={null}
+      open={open}
+      backgroundOptions={backgroundOptions}
+      backgroundLoading={false}
+      worksetFrameCount={1}
+      showBatchActions={false}
+      contextLabel="聊天结果"
+      onClose={onClose}
+      onSaved={url => onSaved?.(url)}
+      onApplyBackgroundWorkset={() => undefined}
+      onRestoreBackgroundWorkset={() => undefined}
+    />
+  );
+}
+
 async function loadImageVector(url: string): Promise<number[]> {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new window.Image();
@@ -1582,6 +1625,8 @@ interface FrameCanvasEditorProps {
   onSaved: (url: string) => void;
   onApplyBackgroundWorkset: () => void;
   onRestoreBackgroundWorkset: () => void;
+  showBatchActions?: boolean;
+  contextLabel?: string;
 }
 
 function FrameCanvasEditor({
@@ -1595,6 +1640,8 @@ function FrameCanvasEditor({
   onSaved,
   onApplyBackgroundWorkset,
   onRestoreBackgroundWorkset,
+  showBatchActions = true,
+  contextLabel,
 }: FrameCanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1611,6 +1658,10 @@ function FrameCanvasEditor({
   const skipReloadUrlRef = useRef<string | null>(null);
   const historyRef = useRef<CanvasHistoryEntry[]>([]);
   const redoRef = useRef<CanvasHistoryEntry[]>([]);
+  const contentDirtyRef = useRef(false);
+  const parameterDirtyRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const closeConfirmOpenRef = useRef(false);
   const liveFloodRef = useRef<{ tool: 'fill' | 'replace'; x: number; y: number; source: ImageData } | null>(null);
   const floodOutputRef = useRef<ImageData | null>(null);
   const floodSeenRef = useRef<Uint8Array | null>(null);
@@ -1645,6 +1696,8 @@ function FrameCanvasEditor({
   const [backgroundPreviewPending, setBackgroundPreviewPending] = useState(false);
   const [backgroundPreviewLoading, setBackgroundPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const baseUrl = getFrameExportUrl(frame);
   const frameLabel = `#${String(frame.index + 1).padStart(3, '0')}`;
   const backgroundOptionsState = backgroundOptions.state;
@@ -1662,6 +1715,49 @@ function FrameCanvasEditor({
       : !worksetFrameCount
         ? '工作集为空'
         : undefined;
+
+  const syncDirty = useCallback(() => {
+    const dirty = contentDirtyRef.current || parameterDirtyRef.current;
+    dirtyRef.current = dirty;
+    setIsDirty(dirty);
+  }, []);
+
+  const updateContentDirty = useCallback((dirty: boolean) => {
+    contentDirtyRef.current = dirty;
+    syncDirty();
+  }, [syncDirty]);
+
+  const markParameterDirty = useCallback(() => {
+    parameterDirtyRef.current = true;
+    syncDirty();
+  }, [syncDirty]);
+
+  const clearDirty = useCallback(() => {
+    contentDirtyRef.current = false;
+    parameterDirtyRef.current = false;
+    syncDirty();
+  }, [syncDirty]);
+
+  const requestClose = useCallback(() => {
+    if (!dirtyRef.current) {
+      onClose();
+      return;
+    }
+    if (closeConfirmOpenRef.current) return;
+    closeConfirmOpenRef.current = true;
+    setCloseConfirmOpen(true);
+  }, [onClose]);
+
+  const cancelClose = () => {
+    closeConfirmOpenRef.current = false;
+    setCloseConfirmOpen(false);
+  };
+
+  const confirmClose = () => {
+    closeConfirmOpenRef.current = false;
+    setCloseConfirmOpen(false);
+    onClose();
+  };
 
   const cancelPendingPreviewRender = useCallback(() => {
     if (floodRenderTimerRef.current !== null) {
@@ -1709,6 +1805,7 @@ function FrameCanvasEditor({
     if (!canvas || !ctx) return;
     historyRef.current.push({
       image: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      contentDirty: contentDirtyRef.current,
     });
     trimCanvasHistory(historyRef.current);
     redoRef.current = [];
@@ -1785,6 +1882,7 @@ function FrameCanvasEditor({
       setImageReady(true);
       historyRef.current = [];
       redoRef.current = [];
+      updateContentDirty(false);
       liveFloodRef.current = null;
       softenSourceRef.current = null;
       autoFitRef.current = true;
@@ -1797,7 +1895,7 @@ function FrameCanvasEditor({
     } finally {
       if (loadId === imageLoadIdRef.current) setImageLoading(false);
     }
-  }, [baseUrl, cancelPendingPreviewRender, fitCanvasToStage, resetBackgroundPreview]);
+  }, [baseUrl, cancelPendingPreviewRender, fitCanvasToStage, resetBackgroundPreview, updateContentDirty]);
 
   const requestImageLoad = useCallback(() => {
     void loadImage().catch((err: unknown) => message.error(getErrorMessage(err, '编辑器载入图片失败')));
@@ -1832,6 +1930,7 @@ function FrameCanvasEditor({
       canvas.height = image.naturalHeight;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(image, 0, 0);
+      updateContentDirty(true);
       setCanvasSize({ width: image.naturalWidth, height: image.naturalHeight });
       liveFloodRef.current = null;
       softenSourceRef.current = null;
@@ -1844,7 +1943,7 @@ function FrameCanvasEditor({
         setBackgroundPreviewLoading(false);
       }
     }
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, frame.sourceUrl, pushHistory]);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, frame.sourceUrl, pushHistory, updateContentDirty]);
 
   const applyBackgroundPreview = () => {
     cancelBackgroundPreviewActivity();
@@ -1910,13 +2009,24 @@ function FrameCanvasEditor({
     if (!open) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isVisiblePopupOpen()) return;
+      if (closeConfirmOpenRef.current) return;
       if (editorBusy) return;
       event.preventDefault();
-      onClose();
+      requestClose();
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [editorBusy, onClose, open]);
+  }, [editorBusy, open, requestClose]);
+
+  useEffect(() => {
+    if (!open || !isDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty, open]);
 
   const getPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
@@ -2177,6 +2287,7 @@ function FrameCanvasEditor({
     if (!softenSourceRef.current) {
       liveFloodRef.current = null;
       pushHistory();
+      updateContentDirty(true);
       softenSourceRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
     }
     if (softenRenderFrameRef.current !== null) window.cancelAnimationFrame(softenRenderFrameRef.current);
@@ -2185,7 +2296,7 @@ function FrameCanvasEditor({
       renderSoftenedEdges(source, radiusValue);
       softenRenderFrameRef.current = null;
     });
-  }, [pushHistory, renderSoftenedEdges]);
+  }, [pushHistory, renderSoftenedEdges, updateContentDirty]);
 
   const updateBrushPreview = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (tool !== 'brush' && tool !== 'eraser') return;
@@ -2214,6 +2325,7 @@ function FrameCanvasEditor({
       cancelPendingPreviewRender();
       cancelBackgroundPreviewActivity();
       pushHistory();
+      updateContentDirty(true);
       softenSourceRef.current = null;
       liveFloodRef.current = { tool, x, y, source };
       floodFill(x, y, tool === 'replace', source);
@@ -2222,6 +2334,7 @@ function FrameCanvasEditor({
     cancelPendingPreviewRender();
     cancelBackgroundPreviewActivity();
     pushHistory();
+    updateContentDirty(true);
     liveFloodRef.current = null;
     softenSourceRef.current = null;
     if (tool === 'brush') {
@@ -2316,12 +2429,14 @@ function FrameCanvasEditor({
     if (!previous) return;
     const current: CanvasHistoryEntry = {
       image: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      contentDirty: contentDirtyRef.current,
     };
     redoRef.current.push(current);
     ctx.putImageData(previous.image, 0, 0);
+    updateContentDirty(previous.contentDirty);
     liveFloodRef.current = null;
     softenSourceRef.current = null;
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender]);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
 
   const redo = useCallback(() => {
     if (drawingRef.current) return;
@@ -2333,12 +2448,14 @@ function FrameCanvasEditor({
     if (!canvas || !ctx || !next) return;
     historyRef.current.push({
       image: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      contentDirty: contentDirtyRef.current,
     });
     trimCanvasHistory(historyRef.current);
     ctx.putImageData(next.image, 0, 0);
+    updateContentDirty(next.contentDirty);
     liveFloodRef.current = null;
     softenSourceRef.current = null;
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender]);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
 
   useEffect(() => {
     if (!open) return;
@@ -2386,43 +2503,49 @@ function FrameCanvasEditor({
       softenSourceRef.current = null;
       historyRef.current = [];
       redoRef.current = [];
-      message.success('编辑帧已保存');
+      clearDirty();
+      message.success('图片编辑已保存');
       if (closeAfter) onClose();
     } catch (err: unknown) {
-      message.error(getErrorMessage(err, '保存编辑帧失败'));
+      message.error(getErrorMessage(err, '保存图片编辑失败'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Modal
+    <>
+      <Modal
       open={open}
       centered
       keyboard={false}
       closable={!editorBusy}
       maskClosable={!editorBusy}
-      onCancel={() => { if (!editorBusy) onClose(); }}
+      onCancel={() => { if (!editorBusy) requestClose(); }}
       title={(
         <div className="frame-canvas-editor-title">
-          <span>编辑帧 {frameLabel}</span>
-          <small>{frame.width}×{frame.height} · {formatTimestamp(frame.time)}</small>
+          <span>图片编辑</span>
+          <small>
+            {[contextLabel ?? `帧 ${frameLabel}`, canvasSize.width && canvasSize.height ? `${canvasSize.width}×${canvasSize.height}` : null, frame.time == null ? null : formatTimestamp(frame.time)].filter(Boolean).join(' · ')}
+          </small>
         </div>
       )}
       width={1180}
       className="frame-canvas-editor-modal"
       footer={(
         <div className="frame-canvas-footer">
-          <div className="frame-canvas-footer-background-actions">
-            <Tooltip title={batchApplyDisabledReason}>
-              <span>
-                <Button loading={backgroundLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={onApplyBackgroundWorkset}>应用工作集 ({worksetFrameCount})</Button>
-              </span>
-            </Tooltip>
-            <Button disabled={!editorInteractive || !worksetFrameCount} onClick={restoreBackgroundWorkset}>恢复工作集</Button>
-          </div>
+          {showBatchActions ? (
+            <div className="frame-canvas-footer-background-actions">
+              <Tooltip title={batchApplyDisabledReason}>
+                <span>
+                  <Button loading={backgroundLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={onApplyBackgroundWorkset}>应用工作集 ({worksetFrameCount})</Button>
+                </span>
+              </Tooltip>
+              <Button disabled={!editorInteractive || !worksetFrameCount} onClick={restoreBackgroundWorkset}>恢复工作集</Button>
+            </div>
+          ) : <div />}
           <div className="frame-canvas-footer-save-actions">
-            <Button disabled={editorBusy} onClick={onClose}>关闭</Button>
+            <Button disabled={editorBusy} onClick={requestClose}>关闭</Button>
             <Button loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading} onClick={() => save(false)}>保存</Button>
             <Button type="primary" loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading} onClick={() => save(true)}>保存并关闭</Button>
           </div>
@@ -2525,15 +2648,15 @@ function FrameCanvasEditor({
                 <div className="frame-editor-section-title">画笔参数</div>
                 <label className="frame-editor-field">
                   <span>颜色</span>
-                  <Input type="color" value={color} onChange={event => setColor(event.target.value)} />
+                  <Input type="color" value={color} onChange={event => { setColor(event.target.value); markParameterDirty(); }} />
                 </label>
                 <div className="frame-editor-slider">
                   <span>笔刷大小 {brushSize}</span>
-                  <Slider min={1} max={200} value={brushSize} onChange={setBrushSize} />
+                  <Slider min={1} max={200} value={brushSize} onChange={value => { setBrushSize(value); markParameterDirty(); }} />
                 </div>
                 <div className="frame-editor-slider">
                   <span>透明度 {Math.round(opacity * 100)}%</span>
-                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={setOpacity} />
+                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={value => { setOpacity(value); markParameterDirty(); }} />
                 </div>
                 <p className="frame-editor-help">参数变化会立即更新画布上的笔刷预览，新笔触使用当前参数。</p>
               </div>
@@ -2543,7 +2666,7 @@ function FrameCanvasEditor({
                 <div className="frame-editor-section-title">橡皮擦参数</div>
                 <div className="frame-editor-slider">
                   <span>笔刷大小 {brushSize}</span>
-                  <Slider min={1} max={200} value={brushSize} onChange={setBrushSize} />
+                  <Slider min={1} max={200} value={brushSize} onChange={value => { setBrushSize(value); markParameterDirty(); }} />
                 </div>
                 <p className="frame-editor-help">笔刷大小会立即同步到画布预览。</p>
               </div>
@@ -2553,15 +2676,15 @@ function FrameCanvasEditor({
                 <div className="frame-editor-section-title">填充参数</div>
                 <label className="frame-editor-field">
                   <span>颜色</span>
-                  <Input type="color" value={color} onChange={event => setColor(event.target.value)} />
+                  <Input type="color" value={color} onChange={event => { setColor(event.target.value); markParameterDirty(); }} />
                 </label>
                 <div className="frame-editor-slider">
                   <span>容差 {fillTolerance}</span>
-                  <Slider min={0} max={255} value={fillTolerance} onChange={setFillTolerance} />
+                  <Slider min={0} max={255} value={fillTolerance} onChange={value => { setFillTolerance(value); markParameterDirty(); }} />
                 </div>
                 <div className="frame-editor-slider">
                   <span>透明度 {Math.round(opacity * 100)}%</span>
-                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={setOpacity} />
+                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={value => { setOpacity(value); markParameterDirty(); }} />
                 </div>
                 <p className="frame-editor-help">点击目标区域后，参数变化会实时重新计算填充结果。</p>
               </div>
@@ -2569,11 +2692,11 @@ function FrameCanvasEditor({
             {tool === 'replace' && (
             <div className="frame-canvas-replace-settings">
               <div className="frame-editor-section-title">换色参数</div>
-              <Checkbox checked={replaceWithTransparency} onChange={event => setReplaceWithTransparency(event.target.checked)}>替换为透明</Checkbox>
+              <Checkbox checked={replaceWithTransparency} onChange={event => { setReplaceWithTransparency(event.target.checked); markParameterDirty(); }}>替换为透明</Checkbox>
               {!replaceWithTransparency && (
                 <label className="frame-editor-field">
                   <span>目标颜色</span>
-                  <Input type="color" value={color} onChange={event => setColor(event.target.value)} />
+                  <Input type="color" value={color} onChange={event => { setColor(event.target.value); markParameterDirty(); }} />
                 </label>
               )}
               {replaceWithTransparency && (
@@ -2582,19 +2705,19 @@ function FrameCanvasEditor({
                   <Select
                     value={replaceMatchMode}
                     options={transparentReplaceMatchModeOptions}
-                    onChange={value => setReplaceMatchMode(value)}
+                    onChange={value => { setReplaceMatchMode(value); markParameterDirty(); }}
                   />
                 </label>
               )}
               {replaceWithTransparency ? (
                 <div className="frame-editor-slider">
                   <span>颜色容差 {replaceTolerance}</span>
-                  <Slider min={0} max={50} value={replaceTolerance} onChange={setReplaceTolerance} />
+                  <Slider min={0} max={50} value={replaceTolerance} onChange={value => { setReplaceTolerance(value); markParameterDirty(); }} />
                 </div>
               ) : (
                 <div className="frame-editor-slider">
                   <span>颜色容差 {colorReplaceTolerance}</span>
-                  <Slider min={0} max={255} value={colorReplaceTolerance} onChange={setColorReplaceTolerance} />
+                  <Slider min={0} max={255} value={colorReplaceTolerance} onChange={value => { setColorReplaceTolerance(value); markParameterDirty(); }} />
                 </div>
               )}
               {replaceWithTransparency && (
@@ -2604,21 +2727,21 @@ function FrameCanvasEditor({
                     <Select
                       value={replaceEdgeEnhancementMode}
                       options={transparentEdgeEnhancementModeOptions}
-                      onChange={value => setReplaceEdgeEnhancementMode(value)}
+                      onChange={value => { setReplaceEdgeEnhancementMode(value); markParameterDirty(); }}
                     />
                   </label>
                   <div className="frame-editor-slider">
                     <span>
                       边缘清除增强 {replaceEdgeCleanup}{replaceEdgeEnhancementMode === 'dilate' ? 'px' : ''}
                     </span>
-                    <Slider min={0} max={50} value={replaceEdgeCleanup} onChange={setReplaceEdgeCleanup} />
+                    <Slider min={0} max={50} value={replaceEdgeCleanup} onChange={value => { setReplaceEdgeCleanup(value); markParameterDirty(); }} />
                   </div>
                 </>
               )}
               {!replaceWithTransparency && (
                 <div className="frame-editor-slider">
                   <span>目标透明度 {Math.round(opacity * 100)}%</span>
-                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={setOpacity} />
+                  <Slider min={0.05} max={1} step={0.05} value={opacity} onChange={value => { setOpacity(value); markParameterDirty(); }} />
                 </div>
               )}
               <p className="frame-editor-help">
@@ -2630,7 +2753,7 @@ function FrameCanvasEditor({
             )}
             {tool === 'background' && (
               <>
-                <BackgroundOptionsFields opts={backgroundOptions} title="背景处理" inline />
+                <BackgroundOptionsFields opts={backgroundOptions} title="背景处理" inline onChange={markParameterDirty} />
                 <Button
                   block
                   type="primary"
@@ -2663,6 +2786,7 @@ function FrameCanvasEditor({
                     value={softenRadius}
                     onChange={value => {
                       setSoftenRadius(value);
+                      markParameterDirty();
                       previewSoftenedEdges(value);
                     }}
                   />
@@ -2673,7 +2797,31 @@ function FrameCanvasEditor({
           </aside>
         </div>
       </div>
-    </Modal>
+      </Modal>
+      <Modal
+        open={closeConfirmOpen}
+        centered
+        width={420}
+        zIndex={1300}
+        rootClassName="image-editor-close-confirm-root"
+        className="image-editor-close-confirm"
+        title={(
+          <div className="image-editor-close-confirm-title">
+            <ExclamationCircleOutlined aria-hidden="true" />
+            <span>放弃未保存的更改？</span>
+          </div>
+        )}
+        okText="放弃更改"
+        cancelText="继续编辑"
+        okButtonProps={{ danger: true }}
+        maskClosable={false}
+        onOk={confirmClose}
+        onCancel={cancelClose}
+        destroyOnHidden
+      >
+        <p className="image-editor-close-confirm-copy">当前图片的编辑内容尚未保存，关闭后将无法恢复。</p>
+      </Modal>
+    </>
   );
 }
 

@@ -3,12 +3,11 @@ import { Image, Spin, Tag, Button, Popconfirm, Input } from 'antd';
 import {
   DownloadOutlined, PictureOutlined, LoadingOutlined,
   DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
-  AppstoreOutlined, EyeOutlined, ScissorOutlined,
+  AppstoreOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { getScrollPosition, setScrollPosition, type StoredScrollPosition } from '../utils/scrollPosition';
-import FrameExtractionModal from './FrameExtractionModal';
-import BackgroundRemovalModal from './BackgroundRemovalModal';
+import FrameExtractionModal, { ImageEditorModal } from './FrameExtractionModal';
 import './ResultGrid.css';
 
 export default function ResultGrid() {
@@ -131,7 +130,7 @@ export default function ResultGrid() {
     videoUrl: string;
     messageId: string;
   } | null>(null);
-  const [removeBg, setRemoveBg] = useState<{ messageId: string; imageUrl: string } | null>(null);
+  const [imageEditor, setImageEditor] = useState<{ messageId: string; imageUrl: string } | null>(null);
   const [stripImageKeys, setStripImageKeys] = useState<Set<string>>(new Set());
   const [activePreviewImage, setActivePreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const [editRefImages, setEditRefImages] = useState<{
@@ -347,11 +346,11 @@ export default function ResultGrid() {
     appendChatMedia(frameEditor.messageId, url, idx);
   };
 
-  const handleBackgroundRemoved = (url: string) => {
-    if (!removeBg) return;
-    const msg = useAppStore.getState().chatHistory.find(m => m.id === removeBg.messageId);
+  const handleImageEdited = (url: string) => {
+    if (!imageEditor) return;
+    const msg = useAppStore.getState().chatHistory.find(m => m.id === imageEditor.messageId);
     const idx = msg?.images?.length ?? 0;
-    appendChatMedia(removeBg.messageId, url, idx);
+    appendChatMedia(imageEditor.messageId, url, idx);
   };
 
   if (chatHistory.length === 0) {
@@ -680,10 +679,10 @@ export default function ResultGrid() {
                               <Button
                                 type="primary"
                                 size="small"
-                                icon={<ScissorOutlined />}
-                                onClick={() => setRemoveBg({ messageId: message.id, imageUrl: image })}
+                                icon={<EditOutlined />}
+                                onClick={() => setImageEditor({ messageId: message.id, imageUrl: image })}
                               >
-                                移除背景
+                                编辑
                               </Button>
                             )}
                           </div>
@@ -725,12 +724,14 @@ export default function ResultGrid() {
         onClose={() => setFrameEditor(null)}
         onFrameExportGenerated={handleFrameExportGenerated}
       />
-      <BackgroundRemovalModal
-        open={!!removeBg}
-        imageUrl={removeBg?.imageUrl ?? null}
-        onClose={() => setRemoveBg(null)}
-        onRemoved={handleBackgroundRemoved}
-      />
+      {imageEditor && (
+        <ImageEditorModal
+          open
+          imageUrl={imageEditor.imageUrl}
+          onClose={() => setImageEditor(null)}
+          onSaved={handleImageEdited}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 /**
  * 背景抠除选项共享状态
  *
- * 抽帧编辑（FrameExtractionModal）与单图移除背景（BackgroundRemovalModal）共用，
+ * 视频帧与聊天结果的图片编辑器共用，
  * 保证两处「背景」参数 UI 与请求体始终一致。默认值与原 FrameExtractionModal 内联值相同。
  */
 import { useCallback, useState } from 'react';
