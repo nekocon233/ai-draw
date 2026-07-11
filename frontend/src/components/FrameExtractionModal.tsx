@@ -1955,7 +1955,6 @@ export default function FrameExtractionModal({
                     <span>尺寸 <b>{activeFrame ? `${activeFrame.width}×${activeFrame.height}` : '--'}</b></span>
                     <span>状态 <b>{activeFrame?.editedUrl ? '已手动编辑' : activeFrame?.backgroundRemovedUrl ? '已处理背景' : '原始帧'}</b></span>
                   </div>
-                  <Button type="primary" block icon={<EditOutlined />} disabled={!activeFrame} onClick={() => activeFrame && setEditorFrameId(activeFrame.id)}>打开图片编辑</Button>
                 </div>
 
                 <div className="frame-organize-side-section">
