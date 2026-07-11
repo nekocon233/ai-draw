@@ -20,6 +20,61 @@ import type { AuthResponse, UserConfig } from '../types/models';
 
 export type VideoBackgroundMode = 'none' | 'ai' | 'inspyrenet' | 'birefnet' | 'edge';
 export type VideoFrameExportOutput = 'zip' | 'spritesheet' | 'gif' | 'apng';
+export type ImageUpscaleMethodId = 'lanczos' | 'apisr' | 'real_cugan' | 'realesrgan_general' | 'realesrgan_anime' | 'invsr';
+
+export interface ImageUpscaleScaleAvailability {
+  scale: 2 | 4;
+  available: boolean;
+  unavailable_reason?: string | null;
+  model?: string | null;
+  native_scale: number;
+  processing_scale: number;
+}
+
+export interface ImageUpscaleMethod {
+  id: ImageUpscaleMethodId;
+  algorithm_id: string;
+  algorithm_name: string;
+  label: string;
+  description: string;
+  architecture: string;
+  behavior: string;
+  license_notice?: string | null;
+  kind: 'local' | 'ai';
+  available: boolean;
+  supported_scales: Array<2 | 4>;
+  scale_availability: ImageUpscaleScaleAvailability[];
+  unavailable_reason?: string | null;
+}
+
+export interface ImageUpscaleMethodsResponse {
+  methods: ImageUpscaleMethod[];
+  scales: Array<2 | 4>;
+  max_edge: number;
+  max_pixels: number;
+}
+
+export interface ImageUpscaleResponse {
+  success: boolean;
+  image_url: string;
+  width: number;
+  height: number;
+  method: ImageUpscaleMethodId;
+  algorithm: string;
+  scale: 2 | 4;
+}
+
+export interface ImageUpscaleBatchResponse {
+  success: boolean;
+  method: ImageUpscaleMethodId;
+  scale: 2 | 4;
+  frames: Array<{
+    source_url: string;
+    image_url: string;
+    width: number;
+    height: number;
+  }>;
+}
 
 export interface VideoBackgroundOptions {
   background_mode?: VideoBackgroundMode;
@@ -311,9 +366,32 @@ export const apiService = {
     image: string;
     base_frame_url?: string;
     preview_id?: string;
-  }): Promise<{ success: boolean; image_url: string }> =>
+  }): Promise<{ success: boolean; image_url: string; width: number; height: number }> =>
     client.post('/media/video-frame-edited', data, {
       timeout: 300000,
+    }),
+
+  getImageUpscaleMethods: (): Promise<ImageUpscaleMethodsResponse> =>
+    client.get('/media/image-upscale-methods', {
+      timeout: 15000,
+    }),
+
+  upscaleImage: (data: {
+    image: string;
+    method: ImageUpscaleMethodId;
+    scale: 2 | 4;
+  }): Promise<ImageUpscaleResponse> =>
+    client.post('/media/image-upscale', data, {
+      timeout: 600000,
+    }),
+
+  upscaleImageBatch: (data: {
+    frame_urls: string[];
+    method: ImageUpscaleMethodId;
+    scale: 2 | 4;
+  }): Promise<ImageUpscaleBatchResponse> =>
+    client.post('/media/image-upscale-batch', data, {
+      timeout: 1200000,
     }),
 
   // 选中帧 → ZIP / 精灵图 / GIF / APNG
@@ -321,7 +399,6 @@ export const apiService = {
     frame_urls: string[];
     output: VideoFrameExportOutput;
     rows?: number;
-    cols?: number;
     cell_width?: number;
     cell_height?: number;
     gif_fps?: number;

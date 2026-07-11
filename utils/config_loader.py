@@ -8,7 +8,7 @@
 import os
 import json
 import yaml
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -103,6 +103,28 @@ class VideoFramesConfig(BaseSettings):
     birefnet_precision: str = Field(default="auto", validation_alias="BIREFNET_PRECISION")
     edge_threshold: int = Field(default=32, validation_alias="VIDEO_EDGE_THRESHOLD")
     edge_feather: int = Field(default=10, validation_alias="VIDEO_EDGE_FEATHER")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class ImageUpscaleConfig(BaseSettings):
+    """图片放大增强配置。模型名必须与 ComfyUI upscale_models 目录一致。"""
+    general_model: str = Field(default="RealESRGAN_x4plus.pth", validation_alias="UPSCALE_GENERAL_MODEL")
+    anime_model: str = Field(default="RealESRGAN_x4plus_anime_6B.pth", validation_alias="UPSCALE_ANIME_MODEL")
+    realesrgan_2x_model: str = Field(default="RealESRGAN_x2plus.pth", validation_alias="UPSCALE_REALESRGAN_2X_MODEL")
+    apisr_2x_model: str = Field(default="2x_APISR_RRDB_GAN_generator.pth", validation_alias="UPSCALE_APISR_2X_MODEL")
+    apisr_4x_model: str = Field(default="4x_APISR_DAT_GAN_generator.pth", validation_alias="UPSCALE_APISR_4X_MODEL")
+    real_cugan_2x_model: str = Field(default="pro-no-denoise-up2x.pth", validation_alias="UPSCALE_REAL_CUGAN_2X_MODEL")
+    real_cugan_4x_model: str = Field(default="up4x-latest-conservative.pth", validation_alias="UPSCALE_REAL_CUGAN_4X_MODEL")
+    invsr_sd_model: str = Field(default="stabilityai/sd-turbo", validation_alias="UPSCALE_INVSR_SD_MODEL")
+    invsr_model: str = Field(default="noise_predictor_sd_turbo_v5.pth", validation_alias="UPSCALE_INVSR_MODEL")
+    invsr_dtype: Literal['fp16', 'fp32', 'bf16'] = Field(default="fp16", validation_alias="UPSCALE_INVSR_DTYPE")
+    invsr_chopping_size: Literal[128, 256, 512] = Field(default=128, validation_alias="UPSCALE_INVSR_CHOPPING_SIZE")
+    general_native_scale: int = Field(default=4, ge=1, validation_alias="UPSCALE_GENERAL_NATIVE_SCALE")
+    anime_native_scale: int = Field(default=4, ge=1, validation_alias="UPSCALE_ANIME_NATIVE_SCALE")
+    max_edge: int = Field(default=4096, ge=1, validation_alias="UPSCALE_MAX_EDGE")
+    max_pixels: int = Field(default=16777216, ge=1, validation_alias="UPSCALE_MAX_PIXELS")
+    max_input_bytes: int = Field(default=52428800, ge=1, validation_alias="UPSCALE_MAX_INPUT_BYTES")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -210,6 +232,7 @@ class Config(BaseSettings):
     gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
     kling: KlingConfig = Field(default_factory=KlingConfig)
     video_frames: VideoFramesConfig = Field(default_factory=VideoFramesConfig)
+    image_upscale: ImageUpscaleConfig = Field(default_factory=ImageUpscaleConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
@@ -313,6 +336,11 @@ def get_kling_config() -> KlingConfig:
 def get_video_frames_config() -> VideoFramesConfig:
     """获取视频抽帧 / 精灵图配置"""
     return get_config().video_frames
+
+
+def get_image_upscale_config() -> ImageUpscaleConfig:
+    """获取图片放大增强配置"""
+    return get_config().image_upscale
 
 
 def get_server_config() -> ServerConfig:

@@ -217,6 +217,54 @@ class ComfyUIService:
             print(f"[ComfyUIService] I2I生成失败: {result.error}")
             finish_callback(None)
 
+    async def get_upscale_models(self) -> list[str]:
+        """返回远端 ComfyUI 已安装的放大模型。"""
+        return await self.request.get_upscale_models()
+
+    async def get_object_info(self, node_name: str) -> dict:
+        """返回远端 ComfyUI 节点定义。"""
+        return await self.request.get_object_info(node_name)
+
+    async def upscale_image(self, image_base64: str, model_name: str, scale: int, native_scale: int) -> str:
+        """使用独立工作流放大图片，不切换当前生成工作流。"""
+        workflow_file = self.workflow_configs.get("image_upscale")
+        if not workflow_file:
+            raise RuntimeError("未配置图片放大工作流")
+        workflow_path = os.path.join(self.config_dir, workflow_file)
+        workflow = ComfyWorkflowWrapper(workflow_path)
+        result = await self.request.upscale_image(workflow, image_base64, model_name, scale, native_scale)
+        if not result.is_success or not result.data:
+            raise RuntimeError(result.error or "AI 放大未返回图片")
+        return result.data
+
+    async def upscale_image_invsr(
+        self,
+        image_base64: str,
+        scale: int,
+        sd_model: str,
+        invsr_model: str,
+        dtype: str,
+        chopping_size: int,
+    ) -> str:
+        """使用 InvSR 独立扩散工作流放大图片。"""
+        workflow_file = self.workflow_configs.get("image_upscale_invsr")
+        if not workflow_file:
+            raise RuntimeError("未配置 InvSR 放大工作流")
+        workflow_path = os.path.join(self.config_dir, workflow_file)
+        workflow = ComfyWorkflowWrapper(workflow_path)
+        result = await self.request.upscale_image_invsr(
+            workflow,
+            image_base64,
+            scale,
+            sd_model,
+            invsr_model,
+            dtype,
+            chopping_size,
+        )
+        if not result.is_success or not result.data:
+            raise RuntimeError(result.error or "InvSR 未返回图片")
+        return result.data
+
     async def generate_flf2v(
         self,
         finish_callback,

@@ -6,6 +6,12 @@ import tempfile
 from PIL import Image
 
 
+class ImageUpscaleValidationError(ValueError):
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def resize_video_bytes(video_bytes: bytes, width: int, height: int) -> bytes:
     """
     使用 ffmpeg 将视频缩放裁剪到指定尺寸（cover 模式，与 resize_image_base64 行为一致）：
@@ -95,3 +101,65 @@ def resize_image_base64(image_b64: str, width: int, height: int) -> str:
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+
+def upscale_image_lanczos(image: Image.Image, scale: int) -> Image.Image:
+    """使用 Lanczos 按整数倍率放大，保留原始颜色模式和透明通道。"""
+    return image.resize((image.width * scale, image.height * scale), Image.Resampling.LANCZOS)
+
+
+def merge_upscaled_alpha(source: Image.Image, upscaled_rgb: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """将 AI 放大的 RGB 与按相同尺寸插值的源 Alpha 合并。"""
+    rgb = upscaled_rgb.convert('RGB')
+    if rgb.size != size:
+        rgb = rgb.resize(size, Image.Resampling.LANCZOS)
+    if source.mode not in {'RGBA', 'LA'} and 'transparency' not in source.info:
+        return rgb
+    alpha = source.convert('RGBA').getchannel('A').resize(size, Image.Resampling.LANCZOS)
+    result = rgb.convert('RGBA')
+    result.putalpha(alpha)
+    return result
+
+
+def decode_upscale_png_data_url(
+    data_url: str,
+    scale: int,
+    max_edge: int,
+    max_pixels: int,
+    max_input_bytes: int,
+    processing_scale: int | None = None,
+) -> tuple[Image.Image, int, int]:
+    """在解压像素前限制请求体和目标尺寸，避免压缩炸弹占满内存。"""
+    prefix = 'data:image/png;base64,'
+    if not data_url.startswith(prefix):
+        raise ImageUpscaleValidationError('仅支持 PNG data URL')
+    encoded = data_url[len(prefix):]
+    max_encoded_length = ((max_input_bytes + 2) // 3) * 4
+    if len(encoded) > max_encoded_length:
+        raise ImageUpscaleValidationError('图片数据过大', status_code=413)
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        if len(raw) > max_input_bytes:
+            raise ImageUpscaleValidationError('图片数据过大', status_code=413)
+        with Image.open(io.BytesIO(raw)) as source:
+            width = source.width * scale
+            height = source.height * scale
+            if width > max_edge or height > max_edge:
+                raise ImageUpscaleValidationError(f'输出最长边不能超过 {max_edge}px')
+            if width * height > max_pixels:
+                raise ImageUpscaleValidationError(f'输出总像素不能超过 {max_pixels} pixels')
+            internal_scale = processing_scale or scale
+            processing_width = source.width * internal_scale
+            processing_height = source.height * internal_scale
+            if processing_width > max_edge or processing_height > max_edge:
+                raise ImageUpscaleValidationError(
+                    f'算法中间图像 {processing_width}x{processing_height} 超过 {max_edge}px 限制'
+                )
+            if processing_width * processing_height > max_pixels:
+                raise ImageUpscaleValidationError(f'算法中间图像超过 {max_pixels} pixels 限制')
+            source.load()
+            return source.convert('RGBA'), width, height
+    except ImageUpscaleValidationError:
+        raise
+    except Exception as e:
+        raise ImageUpscaleValidationError(f'PNG 解码失败: {e}') from e

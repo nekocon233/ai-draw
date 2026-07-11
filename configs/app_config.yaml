@@ -17,6 +17,8 @@ workflow_defaults:
     i2i: "qwen_image_edit_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
     i2v: "i2v_workflow_api.json"
+    image_upscale: "image_upscale_workflow_api.json"
+    image_upscale_invsr: "image_upscale_invsr_workflow_api.json"
   # 工作流元数据
   workflow_metadata:
     t2i:

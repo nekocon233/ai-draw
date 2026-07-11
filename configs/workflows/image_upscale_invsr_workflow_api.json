@@ -1,0 +1,73 @@
+{
+  "1": {
+    "inputs": {
+      "image": "input.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "main_image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "sd_model": "stabilityai/sd-turbo",
+      "invsr_model": "noise_predictor_sd_turbo_v5.pth",
+      "dtype": "fp16",
+      "tiled_vae": true
+    },
+    "class_type": "LoadInvSRModels",
+    "_meta": {
+      "title": "invsr_loader"
+    }
+  },
+  "3": {
+    "inputs": {
+      "num_steps": 1,
+      "cfg": 1.0,
+      "batch_size": 1,
+      "chopping_batch_size": 1,
+      "chopping_size": 128,
+      "color_fix": "wavelet",
+      "seed": 123,
+      "invsr_pipe": [
+        "2",
+        0
+      ],
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "InvSRSampler",
+    "_meta": {
+      "title": "invsr_sampler"
+    }
+  },
+  "4": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 1.0,
+      "image": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "output_scale"
+    }
+  },
+  "5": {
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  }
+}

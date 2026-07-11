@@ -39,6 +39,8 @@ import {
 } from '@ant-design/icons';
 import {
   apiService,
+  type ImageUpscaleMethod,
+  type ImageUpscaleMethodId,
   type VideoBackgroundOptions,
   type VideoFrameExportOutput,
   type VideoFrameExportProgress,
@@ -58,6 +60,7 @@ import {
   type TransparentEdgeEnhancementMode,
   type TransparentReplaceMatchMode,
 } from '../utils/frameColorReplacement';
+import { getImageUpscaleTarget } from '../utils/imageUpscale';
 import BackgroundOptionsFields from './BackgroundOptionsFields';
 
 interface FrameExtractionModalProps {
@@ -72,8 +75,111 @@ type PreviewMode = 'raw' | 'final';
 type VideoSpriteMarker = 'loop' | 'jump' | 'duplicate' | 'manual';
 type SimilarityMarker = Exclude<VideoSpriteMarker, 'manual'>;
 type ReduceKeepPosition = 'first' | 'last';
-type CanvasTool = 'brush' | 'eraser' | 'fill' | 'replace' | 'background' | 'soften';
+type CanvasTool = 'brush' | 'eraser' | 'fill' | 'replace' | 'background' | 'soften' | 'upscale';
 type EraserMode = 'restore' | 'transparent';
+const pendingUpscaleScales = ([2, 4] as const).map(scale => ({
+  scale,
+  available: false,
+  unavailable_reason: '正在检测 ComfyUI 模型',
+  model: null,
+  native_scale: scale,
+  processing_scale: scale,
+}));
+const defaultUpscaleMethods: ImageUpscaleMethod[] = [
+  {
+    id: 'lanczos',
+    algorithm_id: 'lanczos',
+    algorithm_name: 'Lanczos',
+    label: 'Lanczos 快速放大',
+    description: '高阶 sinc 重采样，速度快，只改变像素尺寸，不生成新细节。',
+    architecture: 'Lanczos 重采样（非神经网络）',
+    behavior: '非 AI 插值',
+    kind: 'local',
+    available: true,
+    supported_scales: [2, 4],
+    scale_availability: ([2, 4] as const).map(scale => ({
+      scale,
+      available: true,
+      native_scale: scale,
+      processing_scale: scale,
+    })),
+  },
+  {
+    id: 'apisr',
+    algorithm_id: 'apisr',
+    algorithm_name: 'APISR',
+    label: 'APISR 动漫增强',
+    description: '面向真实退化动漫素材，强化线条并修复压缩、模糊和缩放损伤。',
+    architecture: '显式动漫退化建模 + GAN；2x RRDB / 4x DAT',
+    behavior: '感知增强，可能重建纹理',
+    license_notice: 'GPL-3.0 代码；官方项目与权重另有“仅限学术用途”声明',
+    kind: 'ai',
+    available: false,
+    supported_scales: [],
+    scale_availability: pendingUpscaleScales,
+    unavailable_reason: '正在检测 ComfyUI 模型',
+  },
+  {
+    id: 'real_cugan',
+    algorithm_id: 'real_cugan',
+    algorithm_name: 'Real-CUGAN',
+    label: 'Real-CUGAN 动漫保真',
+    description: '适合动漫、插画和线稿，增强线条并尽量保留平涂、虚化和原有画风。',
+    architecture: 'Cascade U-Net / CUNet + SE 通道注意力',
+    behavior: '保真修复',
+    license_notice: 'MIT License',
+    kind: 'ai',
+    available: false,
+    supported_scales: [],
+    scale_availability: pendingUpscaleScales,
+    unavailable_reason: '正在检测 ComfyUI 模型',
+  },
+  {
+    id: 'realesrgan_general',
+    algorithm_id: 'realesrgan',
+    algorithm_name: 'Real-ESRGAN',
+    label: 'Real-ESRGAN 通用',
+    description: '适合照片、扫描图和混合内容，去模糊、锐化及纹理重建较强。',
+    architecture: 'RRDBNet + 高阶真实退化建模 + GAN',
+    behavior: '感知增强，可能改变细小纹理',
+    license_notice: 'BSD 3-Clause',
+    kind: 'ai',
+    available: false,
+    supported_scales: [],
+    scale_availability: pendingUpscaleScales,
+    unavailable_reason: '正在检测 ComfyUI 模型',
+  },
+  {
+    id: 'realesrgan_anime',
+    algorithm_id: 'realesrgan',
+    algorithm_name: 'Real-ESRGAN',
+    label: 'Real-ESRGAN 动漫',
+    description: '适合需要明显锐化的动漫和插画；2x 由原生 4x 推理后精确缩小。',
+    architecture: '精简 RRDBNet 6B + GAN',
+    behavior: '感知增强，线条更强',
+    license_notice: 'BSD 3-Clause',
+    kind: 'ai',
+    available: false,
+    supported_scales: [],
+    scale_availability: pendingUpscaleScales,
+    unavailable_reason: '正在检测 ComfyUI 模型',
+  },
+  {
+    id: 'invsr',
+    algorithm_id: 'invsr',
+    algorithm_name: 'InvSR',
+    label: 'InvSR 生成式修复',
+    description: '使用 SD-Turbo 扩散反演重建细节；可能改变文字、脸部、纹理和细小结构。',
+    architecture: 'SD-Turbo Diffusion Inversion + Noise Predictor',
+    behavior: '生成式修复',
+    license_notice: 'NTU S-Lab 1.0，仅限非商业使用',
+    kind: 'ai',
+    available: false,
+    supported_scales: [],
+    scale_availability: pendingUpscaleScales,
+    unavailable_reason: '正在检测 ComfyUI 模型',
+  },
+];
 const transparentReplaceMatchModeOptions: Array<{ label: string; value: TransparentReplaceMatchMode }> = [
   { label: '全图基础色', value: 'global' },
   { label: '点击连通', value: 'connected' },
@@ -119,7 +225,23 @@ interface VideoSpriteFrame {
   time: number | null;
   width: number;
   height: number;
+  sourceWidth: number;
+  sourceHeight: number;
   markers: VideoSpriteMarker[];
+}
+
+interface WorksetColorReplacementOptions {
+  targetColor: readonly [number, number, number];
+  targetXRatio: number;
+  targetYRatio: number;
+  replaceWithTransparency: boolean;
+  replacementColor: string;
+  opacity: number;
+  replaceTolerance: number;
+  colorReplaceTolerance: number;
+  replaceMatchMode: TransparentReplaceMatchMode;
+  replaceEdgeCleanup: number;
+  replaceEdgeEnhancementMode: TransparentEdgeEnhancementMode;
 }
 
 interface FrameDocument {
@@ -146,6 +268,7 @@ type FrameHistoryAction =
 
 const MAX_EXPORT_SIZE = 4096;
 const MAX_FRAME_HISTORY = 50;
+const WORKSET_MULTI_SELECT_HOLD_MS = 250;
 
 const createFrameHistoryState = (): FrameHistoryState => ({
   past: [],
@@ -168,6 +291,8 @@ const frameDocumentsEqual = (left: FrameDocument, right: FrameDocument) => {
       && frame.time === other.time
       && frame.width === other.width
       && frame.height === other.height
+      && frame.sourceWidth === other.sourceWidth
+      && frame.sourceHeight === other.sourceHeight
       && frame.markers.length === other.markers.length
       && frame.markers.every((marker, markerIndex) => marker === other.markers[markerIndex])
     );
@@ -239,6 +364,152 @@ const getFrameDisplayUrl = (frame: VideoSpriteFrame, mode: PreviewMode) => {
 
 const getFrameExportUrl = (frame: VideoSpriteFrame) => frame.editedUrl || frame.backgroundRemovedUrl || frame.sourceUrl;
 
+const findClosestReplacementPoint = (
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  targetColor: readonly [number, number, number],
+  expectedX: number,
+  expectedY: number,
+  tolerance: number,
+  euclidean: boolean,
+) => {
+  let closest: { x: number; y: number; distance: number } | null = null;
+  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex += 1) {
+    const offset = pixelIndex * 4;
+    if (source[offset + 3] === 0) continue;
+    const redDistance = Math.abs(source[offset] - targetColor[0]);
+    const greenDistance = Math.abs(source[offset + 1] - targetColor[1]);
+    const blueDistance = Math.abs(source[offset + 2] - targetColor[2]);
+    const colorDistance = euclidean
+      ? Math.hypot(redDistance, greenDistance, blueDistance)
+      : Math.max(redDistance, greenDistance, blueDistance);
+    if (colorDistance > tolerance) continue;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    const distance = (x - expectedX) ** 2 + (y - expectedY) ** 2;
+    if (!closest || distance < closest.distance) closest = { x, y, distance };
+  }
+  return closest;
+};
+
+const applyEdgeConnectedColorReplacement = (
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  targetColor: readonly [number, number, number],
+  replacementColor: string,
+  tolerance: number,
+  opacity: number,
+) => {
+  const result = new Uint8ClampedArray(source);
+  const seen = new Uint8Array(width * height);
+  const selected = new Uint8Array(width * height);
+  const stack = new Int32Array(width * height);
+  let stackSize = 0;
+  let selectedCount = 0;
+  const enqueue = (pixelIndex: number) => {
+    if (seen[pixelIndex]) return;
+    seen[pixelIndex] = 1;
+    const offset = pixelIndex * 4;
+    const distance = Math.max(
+      Math.abs(source[offset] - targetColor[0]),
+      Math.abs(source[offset + 1] - targetColor[1]),
+      Math.abs(source[offset + 2] - targetColor[2]),
+    );
+    if (source[offset + 3] === 0 || distance > tolerance) return;
+    selected[pixelIndex] = 1;
+    selectedCount += 1;
+    stack[stackSize++] = pixelIndex;
+  };
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x);
+    enqueue((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(y * width);
+    enqueue(y * width + width - 1);
+  }
+  while (stackSize) {
+    const pixelIndex = stack[--stackSize];
+    const x = pixelIndex % width;
+    if (x < width - 1) enqueue(pixelIndex + 1);
+    if (x > 0) enqueue(pixelIndex - 1);
+    if (pixelIndex < width * height - width) enqueue(pixelIndex + width);
+    if (pixelIndex >= width) enqueue(pixelIndex - width);
+  }
+  if (!selectedCount) return null;
+  const rgb = hexToRgb(replacementColor);
+  for (let pixelIndex = 0; pixelIndex < selected.length; pixelIndex += 1) {
+    if (!selected[pixelIndex]) continue;
+    const offset = pixelIndex * 4;
+    result[offset] = rgb.r;
+    result[offset + 1] = rgb.g;
+    result[offset + 2] = rgb.b;
+    result[offset + 3] = Math.round(opacity * 255);
+  }
+  return result;
+};
+
+const replaceImageColors = async (url: string, options: WorksetColorReplacementOptions) => {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const nextImage = new window.Image();
+    nextImage.crossOrigin = 'anonymous';
+    nextImage.onload = () => resolve(nextImage);
+    nextImage.onerror = () => reject(new Error('工作集图片加载失败'));
+    nextImage.src = url;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('无法创建换色画布');
+  ctx.drawImage(image, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const expectedX = Math.min(canvas.width - 1, Math.max(0, Math.round(options.targetXRatio * (canvas.width - 1))));
+  const expectedY = Math.min(canvas.height - 1, Math.max(0, Math.round(options.targetYRatio * (canvas.height - 1))));
+  const matchTolerance = options.replaceWithTransparency
+    ? options.replaceTolerance * 255 / 50
+    : options.colorReplaceTolerance;
+  const targetPoint = findClosestReplacementPoint(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    options.targetColor,
+    expectedX,
+    expectedY,
+    matchTolerance,
+    options.replaceWithTransparency,
+  );
+  if (!targetPoint) return null;
+  const result = options.replaceWithTransparency
+    ? applyHardTransparentReplacement(
+        imageData.data,
+        canvas.width,
+        canvas.height,
+        targetPoint.x,
+        targetPoint.y,
+        options.replaceTolerance,
+        options.replaceEdgeCleanup,
+        options.replaceMatchMode,
+        options.replaceEdgeEnhancementMode,
+        options.targetColor,
+      )
+    : applyEdgeConnectedColorReplacement(
+        imageData.data,
+        canvas.width,
+        canvas.height,
+        options.targetColor,
+        options.replacementColor,
+        options.colorReplaceTolerance,
+        options.opacity,
+      );
+  if (!result) return null;
+  imageData.data.set(result);
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+};
+
 const mapPreviewFrame = (frame: VideoFramePreviewItem): VideoSpriteFrame => ({
   id: makeFrameId('video-frame'),
   index: frame.index,
@@ -247,6 +518,8 @@ const mapPreviewFrame = (frame: VideoFramePreviewItem): VideoSpriteFrame => ({
   time: frame.time ?? null,
   width: frame.width,
   height: frame.height,
+  sourceWidth: frame.width,
+  sourceHeight: frame.height,
   markers: [],
 });
 
@@ -254,7 +527,7 @@ const markerText: Record<VideoSpriteMarker, string> = {
   loop: '循环',
   jump: '跳变',
   duplicate: '重复',
-  manual: '编辑',
+  manual: '已编辑',
 };
 
 const getErrorMessage = (err: unknown, fallback: string) => {
@@ -298,6 +571,7 @@ export default function FrameExtractionModal({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
+  const [worksetEditLoading, setWorksetEditLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [fps, setFps] = useState<number>(12);
   const [startTime, setStartTime] = useState<number>(0);
@@ -317,23 +591,37 @@ export default function FrameExtractionModal({
   const [similarityModalOpen, setSimilarityModalOpen] = useState(false);
   const [editorFrameId, setEditorFrameId] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; alt: string } | null>(null);
+  const [workbenchCloseConfirmOpen, setWorkbenchCloseConfirmOpen] = useState(false);
   const [output, setOutput] = useState<VideoFrameExportOutput>('spritesheet');
   const [filename, setFilename] = useState('sprite');
   const [useVideoName, setUseVideoName] = useState(true);
   const [rows, setRows] = useState<number | null>(null);
-  const [cols, setCols] = useState<number | null>(null);
   const [cellWidth, setCellWidth] = useState<number | null>(null);
   const [cellHeight, setCellHeight] = useState<number | null>(null);
   const [nameTemplate, setNameTemplate] = useState('{n:03}');
   const [exportProgress, setExportProgress] = useState<VideoFrameExportProgress | null>(null);
+  const [exportPreviewViewport, setExportPreviewViewport] = useState({ width: 0, height: 0 });
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const exportPreviewStageRef = useRef<HTMLDivElement>(null);
   const previewTimerRef = useRef<number | null>(null);
   const previewIndexRef = useRef(0);
   const exportProgressTimerRef = useRef<number | null>(null);
   const previousOpenStepRef = useRef<WorkbenchStep | null>(null);
   const workspaceEpochRef = useRef(0);
   const documentRevisionRef = useRef(0);
+  const framesRef = useRef(frames);
+  const worksetMultiSelectRef = useRef({
+    pointerId: null as number | null,
+    timer: null as number | null,
+    active: false,
+    historyRecorded: false,
+    originFrameId: null as string | null,
+    visitedFrameIds: new Set<string>(),
+  });
+  const suppressWorksetClickRef = useRef<string | null>(null);
+  const [worksetMultiSelecting, setWorksetMultiSelecting] = useState(false);
+  framesRef.current = frames;
   const bg = useBackgroundOptions();
   const resetBackgroundOptions = bg.reset;
 
@@ -359,36 +647,73 @@ export default function FrameExtractionModal({
 
   const exportPlan = useMemo(() => {
     const count = worksetFrames.length;
-    const first = worksetFrames[0] || frames[0];
-    let frameWidth = cellWidth || first?.width || 0;
-    let frameHeight = cellHeight || first?.height || 0;
-    if (first && cellWidth && !cellHeight) frameHeight = Math.max(1, Math.round(cellWidth * first.height / first.width));
-    if (first && cellHeight && !cellWidth) frameWidth = Math.max(1, Math.round(cellHeight * first.width / first.height));
-    const exportCols = output === 'spritesheet'
-      ? cols || (rows && count ? Math.ceil(count / rows) : Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count)))))
+    const naturalFrameWidth = Math.max(0, ...worksetFrames.map(frame => frame.width));
+    const naturalFrameHeight = Math.max(0, ...worksetFrames.map(frame => frame.height));
+    const hasMixedFrameSizes = new Set(worksetFrames.map(frame => `${frame.width}x${frame.height}`)).size > 1;
+    const autoAdaptsFrameSizes = output !== 'zip' && hasMixedFrameSizes && !cellWidth && !cellHeight;
+    let frameWidth = cellWidth || naturalFrameWidth;
+    let frameHeight = cellHeight || naturalFrameHeight;
+    if (naturalFrameWidth && naturalFrameHeight && cellWidth && !cellHeight) {
+      frameHeight = Math.max(1, Math.round(cellWidth * naturalFrameHeight / naturalFrameWidth));
+    }
+    if (naturalFrameWidth && naturalFrameHeight && cellHeight && !cellWidth) {
+      frameWidth = Math.max(1, Math.round(cellHeight * naturalFrameWidth / naturalFrameHeight));
+    }
+    const exportRows = output === 'spritesheet' && count
+      ? Math.min(Math.max(1, rows ?? 1), count)
       : 0;
-    const exportRows = output === 'spritesheet'
-      ? rows || (exportCols ? Math.ceil(count / exportCols) : 0)
-      : 0;
+    const exportCols = exportRows ? Math.ceil(count / exportRows) : 0;
     return {
       count,
       edited: worksetFrames.filter(frame => frame.editedUrl).length,
       backgroundRemoved: worksetFrames.filter(frame => frame.backgroundRemovedUrl).length,
       raw: worksetFrames.filter(frame => !frame.editedUrl && !frame.backgroundRemovedUrl).length,
-      frameSize: frameWidth && frameHeight ? `${frameWidth}×${frameHeight}` : '--',
+      frameSize: hasMixedFrameSizes && output === 'zip' && !cellWidth && !cellHeight
+        ? '多种尺寸'
+        : frameWidth && frameHeight
+          ? `${frameWidth}×${frameHeight}${autoAdaptsFrameSizes ? '（自动适配）' : ''}`
+        : '--',
       sheetSize: output === 'spritesheet' && frameWidth && frameHeight && exportCols && exportRows
         ? `${exportCols * frameWidth}×${exportRows * frameHeight}`
         : '--',
       grid: output === 'spritesheet' && exportCols && exportRows ? `${exportRows} 行 × ${exportCols} 列` : '--',
+      columns: exportCols,
+      rows: exportRows,
+      frameWidth,
+      frameHeight,
+      sheetWidth: exportCols * frameWidth,
+      sheetHeight: exportRows * frameHeight,
+      hasMixedFrameSizes,
+      autoAdaptsFrameSizes,
+      naturalFrameWidth,
+      naturalFrameHeight,
       duration: count && effectivePlaybackFps ? `${(count / effectivePlaybackFps).toFixed(2)} 秒` : '--',
     };
-  }, [cellHeight, cellWidth, cols, effectivePlaybackFps, frames, output, rows, worksetFrames]);
+  }, [cellHeight, cellWidth, effectivePlaybackFps, output, rows, worksetFrames]);
 
   const currentFilename = useMemo(() => {
     if (!useVideoName || !videoUrl) return filename || 'sprite';
     const raw = decodeURIComponent(videoUrl.split('/').pop() || 'sprite').replace(/\.[a-z0-9]+$/i, '');
     return raw || filename || 'sprite';
   }, [filename, useVideoName, videoUrl]);
+
+  const fittedSheetPreviewSize = useMemo(() => {
+    if (
+      output !== 'spritesheet'
+      || !exportPlan.sheetWidth
+      || !exportPlan.sheetHeight
+      || !exportPreviewViewport.width
+      || !exportPreviewViewport.height
+    ) return null;
+    const scale = Math.min(
+      exportPreviewViewport.width / exportPlan.sheetWidth,
+      exportPreviewViewport.height / exportPlan.sheetHeight,
+    );
+    return {
+      width: Math.max(1, Math.floor(exportPlan.sheetWidth * scale)),
+      height: Math.max(1, Math.floor(exportPlan.sheetHeight * scale)),
+    };
+  }, [exportPlan.sheetHeight, exportPlan.sheetWidth, exportPreviewViewport, output]);
 
   const sourceFilename = useMemo(() => {
     if (!videoUrl) return '--';
@@ -431,6 +756,16 @@ export default function FrameExtractionModal({
     dispatchFrameHistory({ type: 'redo' });
   }, [canRedo, clearPreviewTimer]);
 
+  const requestWorkbenchClose = useCallback(() => {
+    setWorkbenchCloseConfirmOpen(true);
+  }, []);
+
+  const cancelWorkbenchClose = () => setWorkbenchCloseConfirmOpen(false);
+  const confirmWorkbenchClose = () => {
+    setWorkbenchCloseConfirmOpen(false);
+    onClose();
+  };
+
   useEffect(() => {
     if (!open || step !== 1 || collapsedStep === 1 || editorFrameId || imagePreview || reduceModalOpen || similarityModalOpen) return;
     const handleHistoryShortcut = (event: KeyboardEvent) => {
@@ -457,13 +792,13 @@ export default function FrameExtractionModal({
     if (!open) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (editorFrameId || imagePreview || reduceModalOpen || similarityModalOpen || isVisiblePopupOpen()) return;
+      if (workbenchCloseConfirmOpen || editorFrameId || imagePreview || reduceModalOpen || similarityModalOpen || isVisiblePopupOpen()) return;
       event.preventDefault();
-      onClose();
+      requestWorkbenchClose();
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [editorFrameId, imagePreview, onClose, open, reduceModalOpen, similarityModalOpen]);
+  }, [editorFrameId, imagePreview, open, reduceModalOpen, requestWorkbenchClose, similarityModalOpen, workbenchCloseConfirmOpen]);
 
   const makeProgressId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -507,6 +842,23 @@ export default function FrameExtractionModal({
   }, [previewIndex]);
 
   useEffect(() => {
+    if (output !== 'spritesheet' || step !== 2 || collapsedStep === 2) return;
+    const stage = exportPreviewStageRef.current;
+    if (!stage) return;
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setExportPreviewViewport(current => {
+        const width = Math.max(0, Math.floor(rect.width));
+        const height = Math.max(0, Math.floor(rect.height));
+        return current.width === width && current.height === height ? current : { width, height };
+      });
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [collapsedStep, output, step]);
+
+  useEffect(() => {
     if (!worksetFrames.length) {
       setPreviewIndex(0);
       return;
@@ -531,6 +883,7 @@ export default function FrameExtractionModal({
     setPreviewMode('final');
     setLoadingPreview(false);
     setBackgroundLoading(false);
+    setWorksetEditLoading(false);
     setExporting(false);
     setFps(12);
     setStartTime(0);
@@ -550,11 +903,11 @@ export default function FrameExtractionModal({
     setSimilarityModalOpen(false);
     setEditorFrameId(null);
     setImagePreview(null);
+    setWorkbenchCloseConfirmOpen(false);
     setOutput('spritesheet');
     setFilename('sprite');
     setUseVideoName(true);
     setRows(null);
-    setCols(null);
     setCellWidth(null);
     setCellHeight(null);
     setNameTemplate('{n:03}');
@@ -757,6 +1110,93 @@ export default function FrameExtractionModal({
     )));
   };
 
+  const toggleWorksetFrameDuringMultiSelect = useCallback((id: string) => {
+    const target = framesRef.current.find(frame => frame.id === id);
+    const selection = worksetMultiSelectRef.current;
+    if (!target || selection.visitedFrameIds.has(id)) return;
+    selection.visitedFrameIds.add(id);
+    const recordHistory = !selection.historyRecorded;
+    selection.historyRecorded = true;
+    documentRevisionRef.current += 1;
+    dispatchFrameHistory({
+      type: 'update',
+      label: '连续反选工作集',
+      recordHistory,
+      updater: document => ({
+        ...document,
+        frames: document.frames.map(frame => frame.id === id
+          ? { ...frame, included: !frame.included }
+          : frame),
+      }),
+    });
+  }, []);
+
+  const finishWorksetMultiSelect = useCallback((suppressClick: boolean) => {
+    const selection = worksetMultiSelectRef.current;
+    if (selection.timer !== null) window.clearTimeout(selection.timer);
+    if (suppressClick && selection.active && selection.originFrameId) {
+      suppressWorksetClickRef.current = selection.originFrameId;
+    }
+    selection.pointerId = null;
+    selection.timer = null;
+    selection.active = false;
+    selection.historyRecorded = false;
+    selection.originFrameId = null;
+    selection.visitedFrameIds.clear();
+    setWorksetMultiSelecting(false);
+  }, []);
+
+  const startWorksetMultiSelect = useCallback((event: React.PointerEvent<HTMLSpanElement>, frameId: string) => {
+    if (event.button !== 0 || event.pointerType === 'touch') return;
+    finishWorksetMultiSelect(false);
+    suppressWorksetClickRef.current = null;
+    const selection = worksetMultiSelectRef.current;
+    selection.pointerId = event.pointerId;
+    selection.originFrameId = frameId;
+    selection.visitedFrameIds.clear();
+    selection.timer = window.setTimeout(() => {
+      selection.timer = null;
+      selection.active = true;
+      setWorksetMultiSelecting(true);
+      toggleWorksetFrameDuringMultiSelect(frameId);
+    }, WORKSET_MULTI_SELECT_HOLD_MS);
+  }, [finishWorksetMultiSelect, toggleWorksetFrameDuringMultiSelect]);
+
+  const enterFrameDuringWorksetMultiSelect = useCallback((event: React.PointerEvent<HTMLDivElement>, frameId: string) => {
+    const selection = worksetMultiSelectRef.current;
+    if (!selection.active || selection.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      finishWorksetMultiSelect(false);
+      return;
+    }
+    toggleWorksetFrameDuringMultiSelect(frameId);
+  }, [finishWorksetMultiSelect, toggleWorksetFrameDuringMultiSelect]);
+
+  useEffect(() => {
+    const selection = worksetMultiSelectRef.current;
+    const handlePointerUp = (event: PointerEvent) => {
+      const pointerId = selection.pointerId;
+      if (pointerId === null || pointerId !== event.pointerId) return;
+      finishWorksetMultiSelect(true);
+    };
+    const handlePointerCancel = (event: PointerEvent) => {
+      const pointerId = selection.pointerId;
+      if (pointerId === null || pointerId !== event.pointerId) return;
+      finishWorksetMultiSelect(false);
+    };
+    const handleWindowBlur = () => finishWorksetMultiSelect(false);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerCancel, true);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerCancel, true);
+      window.removeEventListener('blur', handleWindowBlur);
+      const timer = selection.timer;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [finishWorksetMultiSelect]);
+
   const invertWorkset = () => commitFrames('反选工作集', prev => prev.map(frame => ({ ...frame, included: !frame.included })));
   const selectAllWorkset = () => commitFrames('全选工作集', prev => prev.map(frame => (
     frame.included ? frame : { ...frame, included: true }
@@ -851,18 +1291,19 @@ export default function FrameExtractionModal({
   const applyBackgroundToFrames = async (targets: VideoSpriteFrame[]) => {
     if (!targets.length) {
       message.warning('没有可处理的帧');
-      return;
+      return false;
     }
     const requestEpoch = workspaceEpochRef.current;
     const requestRevision = documentRevisionRef.current;
+    const sourceUrlByFrameId = new Map(targets.map(frame => [frame.id, getFrameExportUrl(frame)]));
     const editedTargetIds = new Set(targets.filter(frame => frame.editedUrl).map(frame => frame.id));
     setBackgroundLoading(true);
     try {
       const res = await apiService.removeVideoFrameBackgrounds({
-        frame_urls: targets.map(frame => frame.sourceUrl),
+        frame_urls: targets.map(frame => sourceUrlByFrameId.get(frame.id)!),
         ...bg.toRequest(),
       });
-      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return;
+      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
       const resultQueues = new Map<string, string[]>();
       res.frames.forEach(item => {
         const queue = resultQueues.get(item.source_url) || [];
@@ -871,7 +1312,7 @@ export default function FrameExtractionModal({
       });
       const resultByFrameId = new Map<string, string>();
       targets.forEach(frame => {
-        const nextUrl = resultQueues.get(frame.sourceUrl)?.shift();
+        const nextUrl = resultQueues.get(sourceUrlByFrameId.get(frame.id)!)?.shift();
         if (nextUrl) resultByFrameId.set(frame.id, nextUrl);
       });
       commitFrames(`处理 ${resultByFrameId.size} 帧背景`, prev => prev.map(frame => {
@@ -880,19 +1321,151 @@ export default function FrameExtractionModal({
           ...frame,
           backgroundRemovedUrl: nextUrl,
           editedUrl: undefined,
+          width: frame.width,
+          height: frame.height,
           markers: frame.markers.filter(marker => marker !== 'manual'),
         } : frame;
       }));
       const replacedEdits = Array.from(resultByFrameId.keys()).filter(id => editedTargetIds.has(id)).length;
       message.success(replacedEdits
-        ? `已处理 ${res.frames.length} 帧背景，并替换 ${replacedEdits} 个手动编辑结果（可撤销）`
+        ? `已基于当前画面处理 ${res.frames.length} 帧背景，并合并 ${replacedEdits} 个编辑结果（可撤销）`
         : `已处理 ${res.frames.length} 帧背景`);
+      return true;
     } catch (err: unknown) {
       if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
         message.error(getErrorMessage(err, '批量背景处理失败'));
       }
+      return false;
     } finally {
       if (requestEpoch === workspaceEpochRef.current) setBackgroundLoading(false);
+    }
+  };
+
+  const applyUpscaleToFrames = async (
+    targets: VideoSpriteFrame[],
+    method: ImageUpscaleMethodId,
+    scale: 2 | 4,
+    colorReplacement?: WorksetColorReplacementOptions,
+  ) => {
+    if (!targets.length) {
+      message.warning('没有可处理的帧');
+      return false;
+    }
+    const requestEpoch = workspaceEpochRef.current;
+    const requestRevision = documentRevisionRef.current;
+    const sourceUrlByFrameId = new Map(targets.map(frame => [frame.id, getFrameExportUrl(frame)]));
+    setWorksetEditLoading(true);
+    try {
+      let colorReplacementCount = 0;
+      if (colorReplacement) {
+        for (const frame of targets) {
+          if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
+          const sourceUrl = sourceUrlByFrameId.get(frame.id)!;
+          const image = await replaceImageColors(sourceUrl, colorReplacement);
+          if (!image) continue;
+          const saved = await apiService.saveEditedVideoFrame({
+            image,
+            base_frame_url: sourceUrl,
+            preview_id: previewId ?? undefined,
+          });
+          sourceUrlByFrameId.set(frame.id, saved.image_url);
+          colorReplacementCount += 1;
+        }
+      }
+      const res = await apiService.upscaleImageBatch({
+        frame_urls: targets.map(frame => sourceUrlByFrameId.get(frame.id)!),
+        method,
+        scale,
+      });
+      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
+      const resultQueues = new Map<string, typeof res.frames>();
+      res.frames.forEach(item => {
+        const queue = resultQueues.get(item.source_url) || [];
+        queue.push(item);
+        resultQueues.set(item.source_url, queue);
+      });
+      const resultByFrameId = new Map<string, (typeof res.frames)[number]>();
+      targets.forEach(frame => {
+        const result = resultQueues.get(sourceUrlByFrameId.get(frame.id)!)?.shift();
+        if (result) resultByFrameId.set(frame.id, result);
+      });
+      commitFrames(`放大增强 ${resultByFrameId.size} 帧`, prev => prev.map(frame => {
+        const result = resultByFrameId.get(frame.id);
+        return result ? {
+          ...frame,
+          editedUrl: result.image_url,
+          width: result.width,
+          height: result.height,
+          markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
+        } : frame;
+      }));
+      message.success(colorReplacementCount
+        ? `已先对 ${colorReplacementCount} 帧应用换色，再将 ${scale}x 放大增强应用到 ${resultByFrameId.size} 帧`
+        : `已将 ${scale}x 放大增强应用到 ${resultByFrameId.size} 帧`);
+      return true;
+    } catch (err: unknown) {
+      if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
+        message.error(getErrorMessage(err, '批量放大增强失败'));
+      }
+      return false;
+    } finally {
+      if (requestEpoch === workspaceEpochRef.current) setWorksetEditLoading(false);
+    }
+  };
+
+  const applyColorReplacementToFrames = async (
+    targets: VideoSpriteFrame[],
+    options: WorksetColorReplacementOptions,
+  ) => {
+    if (!targets.length) {
+      message.warning('没有可处理的帧');
+      return false;
+    }
+    const requestEpoch = workspaceEpochRef.current;
+    const requestRevision = documentRevisionRef.current;
+    setWorksetEditLoading(true);
+    try {
+      const results = new Map<string, { imageUrl: string; width: number; height: number }>();
+      for (const frame of targets) {
+        if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
+        const sourceUrl = getFrameExportUrl(frame);
+        const image = await replaceImageColors(sourceUrl, options);
+        if (!image) continue;
+        const saved = await apiService.saveEditedVideoFrame({
+          image,
+          base_frame_url: sourceUrl,
+          preview_id: previewId ?? undefined,
+        });
+        results.set(frame.id, {
+          imageUrl: saved.image_url,
+          width: saved.width,
+          height: saved.height,
+        });
+      }
+      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
+      if (!results.size) {
+        message.warning('工作集中未找到匹配的目标颜色');
+        return false;
+      }
+      commitFrames(`换色 ${results.size} 帧`, prev => prev.map(frame => {
+        const result = results.get(frame.id);
+        return result ? {
+          ...frame,
+          editedUrl: result.imageUrl,
+          width: result.width,
+          height: result.height,
+          markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
+        } : frame;
+      }));
+      message.success(`已将换色应用到 ${results.size} 帧`);
+      return true;
+    } catch (err: unknown) {
+      if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
+        message.error(getErrorMessage(err, '批量换色失败'));
+      }
+      return false;
+    } finally {
+      if (requestEpoch === workspaceEpochRef.current) setWorksetEditLoading(false);
     }
   };
 
@@ -900,19 +1473,24 @@ export default function FrameExtractionModal({
     const ids = new Set(targets.map(frame => frame.id));
     commitFrames(includeEdited ? '恢复原始帧' : '恢复帧背景', prev => prev.map(frame => {
       if (!ids.has(frame.id)) return frame;
+      const keepsEditedResult = !includeEdited && Boolean(frame.editedUrl);
       return {
         ...frame,
         backgroundRemovedUrl: undefined,
         editedUrl: includeEdited ? undefined : frame.editedUrl,
+        width: keepsEditedResult ? frame.width : frame.sourceWidth,
+        height: keepsEditedResult ? frame.height : frame.sourceHeight,
         markers: includeEdited ? frame.markers.filter(marker => marker !== 'manual') : frame.markers,
       };
     }));
   };
 
-  const saveEditedFrame = (frameId: string, imageUrl: string) => {
+  const saveEditedFrame = (frameId: string, imageUrl: string, width: number, height: number) => {
     commitFrames('保存图片编辑', prev => prev.map(frame => frame.id === frameId ? {
       ...frame,
       editedUrl: imageUrl,
+      width,
+      height,
       markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
     } : frame));
   };
@@ -984,8 +1562,7 @@ export default function FrameExtractionModal({
       const res = await apiService.exportVideoFrames({
         frame_urls: worksetFrames.map(getFrameExportUrl),
         output,
-        rows: output === 'spritesheet' ? rows || undefined : undefined,
-        cols: output === 'spritesheet' ? cols || undefined : undefined,
+        rows: output === 'spritesheet' ? rows ?? 1 : undefined,
         cell_width: cellWidth || undefined,
         cell_height: cellHeight || undefined,
         gif_fps: output === 'gif' || output === 'apng' ? effectivePlaybackFps : undefined,
@@ -1082,6 +1659,7 @@ export default function FrameExtractionModal({
   };
 
   return (
+    <>
     <Modal
       title={(
         <div className="frame-editor-title">
@@ -1091,7 +1669,7 @@ export default function FrameExtractionModal({
       )}
       open={open}
       keyboard={false}
-      onCancel={onClose}
+      onCancel={requestWorkbenchClose}
       width="100%"
       rootClassName="frame-editor-modal-root"
       className="frame-editor-modal"
@@ -1266,14 +1844,18 @@ export default function FrameExtractionModal({
                 <div className="frame-organize-panel-head">
                   <div className="frame-editor-motion-title">
                     <span>帧缩略图</span>
-                    <small>已加入工作集: {worksetFrames.length} / {frames.length} 帧</small>
+                    <small aria-live="polite">
+                      {worksetMultiSelecting
+                        ? '连续反选中：经过的图片将切换选中状态，松开鼠标结束'
+                        : `已加入工作集: ${worksetFrames.length} / ${frames.length} 帧 · 按住勾选框后拖动可连续反选`}
+                    </small>
                   </div>
                   <Segmented size="small" value={previewMode} onChange={value => setPreviewMode(value as PreviewMode)} options={[{ label: '编辑画面', value: 'final' }, { label: '原始画面', value: 'raw' }]} />
                 </div>
 
                 <Spin spinning={loadingPreview || backgroundLoading}>
                   {frames.length ? (
-                    <div className="frame-editor-grid frame-organize-grid">
+                    <div className={`frame-editor-grid frame-organize-grid ${worksetMultiSelecting ? 'is-multi-selecting' : ''}`}>
                       {frames.map(frame => {
                         const isCurrent = activeFrame?.id === frame.id;
                         return (
@@ -1284,6 +1866,7 @@ export default function FrameExtractionModal({
                             aria-label={`第 ${frame.index + 1} 帧${frame.included ? '，已加入工作集' : '，未加入工作集'}`}
                             className={`frame-editor-tile ${frame.included ? 'workset' : ''} ${isCurrent ? 'preview-current' : ''} ${!frame.included ? 'excluded' : ''}`}
                             onClick={() => setActiveFrame(frame)}
+                            onPointerEnter={event => enterFrameDuringWorksetMultiSelect(event, frame.id)}
                             onKeyDown={event => {
                               if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                                 event.preventDefault();
@@ -1292,13 +1875,28 @@ export default function FrameExtractionModal({
                             }}
                           >
                             <AntImage src={getFrameDisplayUrl(frame, previewMode)} alt={`第 ${frame.index + 1} 帧`} preview={false} />
-                            <span className="frame-editor-check"><Checkbox aria-label={frame.included ? '移出工作集' : '加入工作集'} checked={frame.included} onClick={event => event.stopPropagation()} onChange={() => toggleWorksetFrame(frame.id)} /></span>
+                            <span className="frame-editor-check" onPointerDown={event => startWorksetMultiSelect(event, frame.id)}>
+                              <Checkbox
+                                aria-label={frame.included ? '移出工作集' : '加入工作集'}
+                                checked={frame.included}
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  if (suppressWorksetClickRef.current !== frame.id) return;
+                                  event.preventDefault();
+                                  window.setTimeout(() => {
+                                    if (suppressWorksetClickRef.current === frame.id) suppressWorksetClickRef.current = null;
+                                  }, 0);
+                                }}
+                                onChange={() => {
+                                  if (suppressWorksetClickRef.current !== frame.id) toggleWorksetFrame(frame.id);
+                                }}
+                              />
+                            </span>
                             <button type="button" className="frame-editor-delete-button" aria-label="删除此帧" onClick={event => { event.stopPropagation(); deleteFrame(frame); }}><DeleteOutlined /></button>
                             <button type="button" className="frame-editor-preview-button" aria-label="放大预览" onClick={event => { event.stopPropagation(); setImagePreview({ url: getFrameDisplayUrl(frame, previewMode), alt: `第 ${frame.index + 1} 帧预览` }); }}><EyeOutlined /></button>
                             <button type="button" className="frame-editor-edit-button" aria-label="编辑此图片" onClick={event => { event.stopPropagation(); setEditorFrameId(frame.id); }}><EditOutlined /></button>
                             {!!frame.markers.length && <span className="frame-editor-markers">{frame.markers.map(marker => <b key={marker}>{markerText[marker]}</b>)}</span>}
                             {frame.backgroundRemovedUrl && <span className="frame-editor-badge bg"><BgColorsOutlined /></span>}
-                            {frame.editedUrl && <span className="frame-editor-badge edit"><EditOutlined /></span>}
                           </div>
                         );
                       })}
@@ -1411,16 +2009,19 @@ export default function FrameExtractionModal({
               {output === 'spritesheet' && (
                 <div className="frame-editor-section">
                   <div className="frame-editor-section-title">布局</div>
-                  <label className="frame-editor-field"><span>列数</span><InputNumber min={1} max={128} value={cols ?? undefined} placeholder="自动" onChange={value => setCols(typeof value === 'number' ? value : null)} /></label>
-                  <label className="frame-editor-field"><span>行数</span><InputNumber min={1} max={128} value={rows ?? undefined} placeholder="自动" onChange={value => setRows(typeof value === 'number' ? value : null)} /></label>
+                  <label className="frame-editor-field"><span>行数</span><InputNumber min={1} max={128} value={rows ?? undefined} placeholder="1" onChange={value => setRows(typeof value === 'number' ? value : null)} /></label>
+                  <p className="frame-editor-help">留空时按 1 行排列，列数根据工作集帧数自动计算。</p>
                 </div>
               )}
               <div className="frame-editor-section">
                 <div className="frame-editor-section-title">尺寸</div>
                 <div className="frame-editor-size-row">
-                  <label className="frame-editor-field compact"><span>宽</span><InputNumber min={1} max={MAX_EXPORT_SIZE} value={cellWidth ?? undefined} placeholder={worksetFrames[0]?.width ? `${worksetFrames[0].width}` : '原宽'} onChange={value => setCellWidth(typeof value === 'number' ? value : null)} /></label>
-                  <label className="frame-editor-field compact"><span>高</span><InputNumber min={1} max={MAX_EXPORT_SIZE} value={cellHeight ?? undefined} placeholder={worksetFrames[0]?.height ? `${worksetFrames[0].height}` : '原高'} onChange={value => setCellHeight(typeof value === 'number' ? value : null)} /></label>
+                  <label className="frame-editor-field compact"><span>宽</span><InputNumber min={1} max={MAX_EXPORT_SIZE} value={cellWidth ?? undefined} placeholder={exportPlan.naturalFrameWidth ? `${exportPlan.naturalFrameWidth}` : '原宽'} onChange={value => setCellWidth(typeof value === 'number' ? value : null)} /></label>
+                  <label className="frame-editor-field compact"><span>高</span><InputNumber min={1} max={MAX_EXPORT_SIZE} value={cellHeight ?? undefined} placeholder={exportPlan.naturalFrameHeight ? `${exportPlan.naturalFrameHeight}` : '原高'} onChange={value => setCellHeight(typeof value === 'number' ? value : null)} /></label>
                 </div>
+                {exportPlan.autoAdaptsFrameSizes && (
+                  <p className="frame-editor-help">检测到不同单帧尺寸，导出时将按比例适配到 {exportPlan.naturalFrameWidth}×{exportPlan.naturalFrameHeight}。</p>
+                )}
                 {output === 'gif' && <p className="frame-editor-help">GIF 透明支持有限，透明素材推荐 ZIP 或 Sprite Sheet。</p>}
               </div>
               <div className="frame-editor-section">
@@ -1447,12 +2048,34 @@ export default function FrameExtractionModal({
             <div className="frame-editor-main">
               <div className="frame-workbench-export-preview">
                 <div className="frame-editor-motion-head">
-                  <div className="frame-editor-motion-title"><span>导出预览</span><small>{currentFilename} · {output.toUpperCase()}</small></div>
+                  <div className="frame-editor-motion-title">
+                    <span>导出预览</span>
+                    <small>
+                      {output === 'spritesheet'
+                        ? `${currentFilename}.png · ${exportPlan.grid} · ${exportPlan.frameSize}`
+                        : `${currentFilename} · ${output.toUpperCase()}`}
+                    </small>
+                  </div>
                 </div>
-                <div className={`frame-workbench-export-grid ${output === 'spritesheet' ? 'sheet' : ''}`}>
-                  {worksetFrames.slice(0, 120).map(frame => <img key={frame.id} src={getFrameExportUrl(frame)} alt={`export ${frame.index + 1}`} />)}
+                <div ref={exportPreviewStageRef} className={`frame-workbench-export-stage ${output === 'spritesheet' ? 'sheet' : ''}`}>
+                  <div
+                    className={`frame-workbench-export-grid ${output === 'spritesheet' ? `sheet ${cellWidth || cellHeight ? 'manual-size' : ''}` : ''}`}
+                    style={output === 'spritesheet' && exportPlan.columns && exportPlan.rows && exportPlan.sheetWidth && exportPlan.sheetHeight
+                      ? {
+                          gridTemplateColumns: `repeat(${exportPlan.columns}, minmax(0, 1fr))`,
+                          gridTemplateRows: `repeat(${exportPlan.rows}, minmax(0, 1fr))`,
+                          aspectRatio: `${exportPlan.sheetWidth} / ${exportPlan.sheetHeight}`,
+                          width: fittedSheetPreviewSize ? `${fittedSheetPreviewSize.width}px` : '100%',
+                          height: fittedSheetPreviewSize ? `${fittedSheetPreviewSize.height}px` : undefined,
+                        }
+                      : undefined}
+                  >
+                    {(output === 'spritesheet' ? worksetFrames : worksetFrames.slice(0, 120)).map(frame => (
+                      <img key={frame.id} src={getFrameExportUrl(frame)} alt={`export ${frame.index + 1}`} />
+                    ))}
+                  </div>
                 </div>
-                {worksetFrames.length > 120 && <p className="frame-editor-help">仅预览前 120 帧，导出仍包含全部工作集帧。</p>}
+                {output !== 'spritesheet' && worksetFrames.length > 120 && <p className="frame-editor-help">仅预览前 120 帧，导出仍包含全部工作集帧。</p>}
               </div>
             </div>
           </div>
@@ -1532,15 +2155,46 @@ export default function FrameExtractionModal({
             open={!!editorFrame}
             backgroundOptions={bg}
             backgroundLoading={backgroundLoading}
+            worksetLoading={backgroundLoading || worksetEditLoading}
             worksetFrameCount={worksetFrames.length}
             onClose={() => setEditorFrameId(null)}
-            onSaved={url => saveEditedFrame(editorFrame.id, url)}
+            onSaved={(url, width, height) => saveEditedFrame(editorFrame.id, url, width, height)}
             onApplyBackgroundWorkset={() => applyBackgroundToFrames(worksetFrames)}
+            onApplyUpscaleWorkset={(method, scale, colorReplacement) => applyUpscaleToFrames(worksetFrames, method, scale, colorReplacement)}
+            onApplyColorReplacementWorkset={options => applyColorReplacementToFrames(worksetFrames, options)}
             onRestoreBackgroundWorkset={() => restoreFrames(worksetFrames)}
           />
         )}
       </div>
     </Modal>
+    <Modal
+      open={workbenchCloseConfirmOpen}
+      centered
+      width={440}
+      zIndex={1400}
+      rootClassName="image-editor-close-confirm-root"
+      className="image-editor-close-confirm"
+      title={(
+        <div className="image-editor-close-confirm-title">
+          <ExclamationCircleOutlined aria-hidden="true" />
+          <span>关闭视频转精灵图工作台？</span>
+        </div>
+      )}
+      okText="确认关闭"
+      cancelText="继续编辑"
+      okButtonProps={{ danger: true }}
+      maskClosable={false}
+      onOk={confirmWorkbenchClose}
+      onCancel={cancelWorkbenchClose}
+      destroyOnHidden
+    >
+      <p className="image-editor-close-confirm-copy">
+        {frames.length
+          ? `关闭后，已提取的 ${frames.length} 帧、工作集整理和未导出结果都将丢失。`
+          : '关闭后，当前工作台设置将被清空。'}
+      </p>
+    </Modal>
+    </>
   );
 }
 
@@ -1562,6 +2216,8 @@ export function ImageEditorModal({ open, imageUrl, onClose, onSaved }: ImageEdit
     time: null,
     width: 0,
     height: 0,
+    sourceWidth: 0,
+    sourceHeight: 0,
     markers: [],
   } : null, [imageUrl]);
 
@@ -1574,12 +2230,15 @@ export function ImageEditorModal({ open, imageUrl, onClose, onSaved }: ImageEdit
       open={open}
       backgroundOptions={backgroundOptions}
       backgroundLoading={false}
+      worksetLoading={false}
       worksetFrameCount={1}
       showBatchActions={false}
       contextLabel="聊天结果"
       onClose={onClose}
       onSaved={url => onSaved?.(url)}
-      onApplyBackgroundWorkset={() => undefined}
+      onApplyBackgroundWorkset={async () => false}
+      onApplyUpscaleWorkset={async () => false}
+      onApplyColorReplacementWorkset={async () => false}
       onRestoreBackgroundWorkset={() => undefined}
     />
   );
@@ -1621,10 +2280,17 @@ interface FrameCanvasEditorProps {
   open: boolean;
   backgroundOptions: ReturnType<typeof useBackgroundOptions>;
   backgroundLoading: boolean;
+  worksetLoading: boolean;
   worksetFrameCount: number;
   onClose: () => void;
-  onSaved: (url: string) => void;
-  onApplyBackgroundWorkset: () => void;
+  onSaved: (url: string, width: number, height: number) => void;
+  onApplyBackgroundWorkset: () => Promise<boolean>;
+  onApplyUpscaleWorkset: (
+    method: ImageUpscaleMethodId,
+    scale: 2 | 4,
+    colorReplacement?: WorksetColorReplacementOptions,
+  ) => Promise<boolean>;
+  onApplyColorReplacementWorkset: (options: WorksetColorReplacementOptions) => Promise<boolean>;
   onRestoreBackgroundWorkset: () => void;
   showBatchActions?: boolean;
   contextLabel?: string;
@@ -1636,10 +2302,13 @@ function FrameCanvasEditor({
   open,
   backgroundOptions,
   backgroundLoading,
+  worksetLoading,
   worksetFrameCount,
   onClose,
   onSaved,
   onApplyBackgroundWorkset,
+  onApplyUpscaleWorkset,
+  onApplyColorReplacementWorkset,
   onRestoreBackgroundWorkset,
   showBatchActions = true,
   contextLabel,
@@ -1672,11 +2341,17 @@ function FrameCanvasEditor({
   const floodSeenRef = useRef<Uint8Array | null>(null);
   const floodStackRef = useRef<Int32Array | null>(null);
   const floodMaskRef = useRef<Uint8Array | null>(null);
+  const worksetReplaceTargetRef = useRef<Pick<
+    WorksetColorReplacementOptions,
+    'targetColor' | 'targetXRatio' | 'targetYRatio'
+  > | null>(null);
   const softenSourceRef = useRef<ImageData | null>(null);
   const floodRenderTimerRef = useRef<number | null>(null);
   const floodRenderFrameRef = useRef<number | null>(null);
   const softenRenderFrameRef = useRef<number | null>(null);
   const lastDrawPointRef = useRef<{ x: number; y: number } | null>(null);
+  const upscaleMethodRef = useRef<ImageUpscaleMethodId>('realesrgan_anime');
+  const upscaleScaleRef = useRef<2 | 4>(2);
   const [tool, setTool] = useState<CanvasTool>('replace');
   const [color, setColor] = useState('#ffffff');
   const [replaceWithTransparency, setReplaceWithTransparency] = useState(true);
@@ -1705,23 +2380,73 @@ function FrameCanvasEditor({
   const [isDirty, setIsDirty] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [replacePreviewActive, setReplacePreviewActive] = useState(false);
+  const [upscaleMethods, setUpscaleMethods] = useState<ImageUpscaleMethod[]>(defaultUpscaleMethods);
+  const [upscaleMethod, setUpscaleMethod] = useState<ImageUpscaleMethodId>('realesrgan_anime');
+  const [upscaleScale, setUpscaleScale] = useState<2 | 4>(2);
+  const [upscaleLimits, setUpscaleLimits] = useState({ maxEdge: 4096, maxPixels: 16_777_216 });
+  const [upscaleMethodsLoading, setUpscaleMethodsLoading] = useState(false);
+  const [upscaleLoading, setUpscaleLoading] = useState(false);
   const baseUrl = getFrameExportUrl(frame);
   const frameLabel = `#${String(frame.index + 1).padStart(3, '0')}`;
   const backgroundOptionsState = backgroundOptions.state;
   const backgroundOptionsToRequest = backgroundOptions.toRequest;
-  const editorBusy = imageLoading || saving || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading;
+  const editorBusy = imageLoading || saving || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading || worksetLoading;
   const editorInteractive = imageReady && !editorBusy;
-  const batchApplyDisabledReason = backgroundLoading
-    ? '正在批量处理背景'
-    : backgroundPreviewLoading
-      ? '正在生成当前帧背景预览'
-      : backgroundPreviewPending
-        ? '正在等待当前帧背景预览'
-    : saving
-      ? '正在保存当前帧'
-      : !worksetFrameCount
-        ? '工作集为空'
-        : undefined;
+  const selectedUpscaleMethod = upscaleMethods.find(method => method.id === upscaleMethod) ?? upscaleMethods[0];
+  const selectedUpscaleScale = selectedUpscaleMethod?.scale_availability.find(item => item.scale === upscaleScale);
+  const upscaleMethodOptions = useMemo(() => {
+    const groups = new Map<string, Array<{ value: ImageUpscaleMethodId; label: string; disabled: boolean; title: string }>>();
+    for (const method of upscaleMethods) {
+      const options = groups.get(method.algorithm_name) ?? [];
+      options.push({
+        value: method.id,
+        label: method.label,
+        disabled: !method.available,
+        title: method.unavailable_reason || method.description,
+      });
+      groups.set(method.algorithm_name, options);
+    }
+    return Array.from(groups, ([label, options]) => ({ label, options }));
+  }, [upscaleMethods]);
+  const upscaleTarget = useMemo(
+    () => getImageUpscaleTarget(
+      canvasSize.width,
+      canvasSize.height,
+      upscaleScale,
+      upscaleLimits,
+      selectedUpscaleScale?.processing_scale ?? upscaleScale,
+    ),
+    [canvasSize.height, canvasSize.width, selectedUpscaleScale?.processing_scale, upscaleLimits, upscaleScale],
+  );
+  const upscaleMethodDisabledReason = !selectedUpscaleMethod?.available
+    ? selectedUpscaleMethod?.unavailable_reason || '当前方法不可用'
+    : !selectedUpscaleScale?.available
+      ? selectedUpscaleScale?.unavailable_reason || '当前倍率不可用'
+      : undefined;
+  const upscaleDisabledReason = upscaleMethodDisabledReason || (!upscaleTarget.allowed
+      ? upscaleTarget.reason
+      : undefined);
+  const changeUpscaleMethod = (value: ImageUpscaleMethodId) => {
+    const method = upscaleMethods.find(item => item.id === value);
+    upscaleMethodRef.current = value;
+    setUpscaleMethod(value);
+    if (method && !method.supported_scales.includes(upscaleScale) && method.supported_scales[0]) {
+      upscaleScaleRef.current = method.supported_scales[0];
+      setUpscaleScale(method.supported_scales[0]);
+    }
+  };
+  let batchApplyDisabledReason: string | undefined;
+  if (worksetLoading) batchApplyDisabledReason = '正在处理工作集';
+  else if (tool !== 'background' && tool !== 'upscale' && tool !== 'replace') batchApplyDisabledReason = '当前工具不支持应用到工作集';
+  else if (!imageReady) batchApplyDisabledReason = '当前图片尚未载入';
+  else if (!worksetFrameCount) batchApplyDisabledReason = '工作集为空';
+  else if (saving) batchApplyDisabledReason = '正在保存当前帧';
+  else if (tool === 'replace' && (!replacePreviewActive || liveFloodRef.current?.tool !== 'replace')) batchApplyDisabledReason = '请先点击画布选择换色目标';
+  else if (tool === 'upscale' && upscaleLoading) batchApplyDisabledReason = '正在放大当前帧';
+  else if (tool === 'upscale' && upscaleMethodDisabledReason) batchApplyDisabledReason = upscaleMethodDisabledReason;
+  else if (backgroundLoading) batchApplyDisabledReason = '正在批量处理背景';
+  else if (backgroundPreviewLoading) batchApplyDisabledReason = '正在生成当前帧背景预览';
+  else if (backgroundPreviewPending) batchApplyDisabledReason = '正在等待当前帧背景预览';
 
   const syncDirty = useCallback(() => {
     const dirty = contentDirtyRef.current || parameterDirtyRef.current;
@@ -1837,6 +2562,31 @@ function FrameCanvasEditor({
     setCanvasPan({ x: 0, y: 0 });
   }, []);
 
+  const restoreCanvasHistoryEntry = useCallback((entry: CanvasHistoryEntry) => {
+    const canvas = canvasRef.current;
+    const strokeCanvas = strokeCanvasRef.current;
+    if (!canvas) return;
+    canvas.width = entry.image.width;
+    canvas.height = entry.image.height;
+    if (strokeCanvas) {
+      strokeCanvas.width = entry.image.width;
+      strokeCanvas.height = entry.image.height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.putImageData(entry.image, 0, 0);
+    setCanvasSize({ width: entry.image.width, height: entry.image.height });
+    updateContentDirty(entry.contentDirty);
+    restoreStrokeSourceRef.current = null;
+    restoreStrokeMaskRef.current = null;
+    restoreStrokeLayerRef.current = null;
+    liveFloodRef.current = null;
+    setReplacePreviewActive(false);
+    softenSourceRef.current = null;
+    autoFitRef.current = true;
+    window.requestAnimationFrame(fitCanvasToStage);
+  }, [fitCanvasToStage, updateContentDirty]);
+
   const changeCanvasZoom = useCallback((value: number, anchorClientX?: number, anchorClientY?: number) => {
     const stage = wrapRef.current;
     const canvas = canvasRef.current;
@@ -1901,6 +2651,7 @@ function FrameCanvasEditor({
       setImageReady(true);
       historyRef.current = [];
       redoRef.current = [];
+      worksetReplaceTargetRef.current = null;
       restoreStrokeSourceRef.current = null;
       restoreStrokeMaskRef.current = null;
       restoreStrokeLayerRef.current = null;
@@ -1951,6 +2702,11 @@ function FrameCanvasEditor({
       pushHistory();
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
+      const strokeCanvas = strokeCanvasRef.current;
+      if (strokeCanvas) {
+        strokeCanvas.width = image.naturalWidth;
+        strokeCanvas.height = image.naturalHeight;
+      }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(image, 0, 0);
       updateContentDirty(true);
@@ -1971,6 +2727,7 @@ function FrameCanvasEditor({
 
   const applyBackgroundPreview = () => {
     cancelBackgroundPreviewActivity();
+    worksetReplaceTargetRef.current = null;
     observedBackgroundOptionsKeyRef.current = `${frame.sourceUrl}:${JSON.stringify(backgroundOptionsState)}`;
     setBackgroundPreviewEnabled(true);
     void runBackgroundPreview(backgroundOptionsToRequest());
@@ -2011,6 +2768,44 @@ function FrameCanvasEditor({
     cancelPendingPreviewRender();
     setBrushPreview(null);
   }, [cancelPendingPreviewRender, tool]);
+
+  useEffect(() => {
+    if (!open || tool !== 'upscale') return;
+    let active = true;
+    setUpscaleMethodsLoading(true);
+    void apiService.getImageUpscaleMethods()
+      .then(response => {
+        if (!active) return;
+        setUpscaleMethods(response.methods);
+        setUpscaleLimits({ maxEdge: response.max_edge, maxPixels: response.max_pixels });
+        const currentMethod = response.methods.find(method => method.id === upscaleMethodRef.current && method.available);
+        const nextMethod = currentMethod ?? response.methods.find(method => method.id === 'lanczos') ?? response.methods[0];
+        if (nextMethod) {
+          upscaleMethodRef.current = nextMethod.id;
+          setUpscaleMethod(nextMethod.id);
+          const nextScale = nextMethod.supported_scales.includes(upscaleScaleRef.current)
+            ? upscaleScaleRef.current
+            : nextMethod.supported_scales[0];
+          if (nextScale) {
+            upscaleScaleRef.current = nextScale;
+            setUpscaleScale(nextScale);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setUpscaleMethods(defaultUpscaleMethods.map(method => method.id === 'lanczos' ? method : {
+          ...method,
+          unavailable_reason: getErrorMessage(err, 'ComfyUI 方法检测失败'),
+        }));
+        upscaleMethodRef.current = 'lanczos';
+        setUpscaleMethod('lanczos');
+      })
+      .finally(() => {
+        if (active) setUpscaleMethodsLoading(false);
+      });
+    return () => { active = false; };
+  }, [open, tool]);
 
   useEffect(() => {
     if (!backgroundPreviewEnabled || !open || !imageReady || saving || backgroundLoading) return;
@@ -2404,18 +3199,36 @@ function FrameCanvasEditor({
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 || tool === 'background' || tool === 'soften') return;
+    if (event.button !== 0 || tool === 'background' || tool === 'soften' || tool === 'upscale') return;
     const { x, y } = getPoint(event);
     if (tool === 'fill' || tool === 'replace') {
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');
       if (!canvas || !ctx) return;
       const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      if (
-        tool === 'replace'
-        && replaceWithTransparency
-        && !isHardTransparentReplacementTarget(source.data, canvas.width, canvas.height, Math.floor(x), Math.floor(y))
-      ) return;
+      if (tool === 'replace' && !isHardTransparentReplacementTarget(
+        source.data,
+        canvas.width,
+        canvas.height,
+        Math.floor(x),
+        Math.floor(y),
+      )) return;
+      if (tool === 'replace') {
+        const targetX = Math.min(source.width - 1, Math.max(0, Math.floor(x)));
+        const targetY = Math.min(source.height - 1, Math.max(0, Math.floor(y)));
+        const targetOffset = (targetY * source.width + targetX) * 4;
+        worksetReplaceTargetRef.current = {
+          targetColor: [
+            source.data[targetOffset],
+            source.data[targetOffset + 1],
+            source.data[targetOffset + 2],
+          ],
+          targetXRatio: source.width > 1 ? targetX / (source.width - 1) : 0,
+          targetYRatio: source.height > 1 ? targetY / (source.height - 1) : 0,
+        };
+      } else {
+        worksetReplaceTargetRef.current = null;
+      }
       cancelPendingPreviewRender();
       cancelBackgroundPreviewActivity();
       pushHistory();
@@ -2428,6 +3241,7 @@ function FrameCanvasEditor({
     }
     cancelPendingPreviewRender();
     cancelBackgroundPreviewActivity();
+    worksetReplaceTargetRef.current = null;
     const strokeSource = pushHistory();
     updateContentDirty(true);
     liveFloodRef.current = null;
@@ -2532,6 +3346,57 @@ function FrameCanvasEditor({
     }
   };
 
+  const applyUpscale = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas || upscaleDisabledReason) return;
+    cancelPendingPreviewRender();
+    cancelBackgroundPreviewActivity();
+    setUpscaleLoading(true);
+    try {
+      const response = await apiService.upscaleImage({
+        image: canvas.toDataURL('image/png'),
+        method: upscaleMethod,
+        scale: upscaleScale,
+      });
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const nextImage = new window.Image();
+        nextImage.crossOrigin = 'anonymous';
+        nextImage.onload = () => resolve(nextImage);
+        nextImage.onerror = () => reject(new Error('放大结果加载失败'));
+        nextImage.src = response.image_url;
+      });
+      const currentCanvas = canvasRef.current;
+      if (!currentCanvas) return;
+      pushHistory();
+      currentCanvas.width = image.naturalWidth;
+      currentCanvas.height = image.naturalHeight;
+      const strokeCanvas = strokeCanvasRef.current;
+      if (strokeCanvas) {
+        strokeCanvas.width = image.naturalWidth;
+        strokeCanvas.height = image.naturalHeight;
+      }
+      const ctx = currentCanvas.getContext('2d');
+      if (!ctx) throw new Error('无法更新画布');
+      ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
+      ctx.drawImage(image, 0, 0);
+      setCanvasSize({ width: image.naturalWidth, height: image.naturalHeight });
+      updateContentDirty(true);
+      restoreStrokeSourceRef.current = null;
+      restoreStrokeMaskRef.current = null;
+      restoreStrokeLayerRef.current = null;
+      liveFloodRef.current = null;
+      setReplacePreviewActive(false);
+      softenSourceRef.current = null;
+      autoFitRef.current = true;
+      window.requestAnimationFrame(fitCanvasToStage);
+      message.success(`已放大至 ${response.width}×${response.height}`);
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, '图片放大增强失败'));
+    } finally {
+      setUpscaleLoading(false);
+    }
+  };
+
   const undo = useCallback(() => {
     if (drawingRef.current) return;
     const canvas = canvasRef.current;
@@ -2546,12 +3411,8 @@ function FrameCanvasEditor({
       contentDirty: contentDirtyRef.current,
     };
     redoRef.current.push(current);
-    ctx.putImageData(previous.image, 0, 0);
-    updateContentDirty(previous.contentDirty);
-    liveFloodRef.current = null;
-    setReplacePreviewActive(false);
-    softenSourceRef.current = null;
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
+    restoreCanvasHistoryEntry(previous);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, restoreCanvasHistoryEntry]);
 
   const redo = useCallback(() => {
     if (drawingRef.current) return;
@@ -2566,12 +3427,8 @@ function FrameCanvasEditor({
       contentDirty: contentDirtyRef.current,
     });
     trimCanvasHistory(historyRef.current);
-    ctx.putImageData(next.image, 0, 0);
-    updateContentDirty(next.contentDirty);
-    liveFloodRef.current = null;
-    setReplacePreviewActive(false);
-    softenSourceRef.current = null;
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
+    restoreCanvasHistoryEntry(next);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, restoreCanvasHistoryEntry]);
 
   useEffect(() => {
     if (!open) return;
@@ -2596,6 +3453,36 @@ function FrameCanvasEditor({
     if (frame.included && (!frame.backgroundRemovedUrl || frame.editedUrl)) requestImageLoad();
   };
 
+  const getWorksetColorReplacementOptions = (): WorksetColorReplacementOptions | undefined => {
+    const target = worksetReplaceTargetRef.current;
+    if (!target) return undefined;
+    return {
+      ...target,
+      replaceWithTransparency,
+      replacementColor: color,
+      opacity,
+      replaceTolerance,
+      colorReplaceTolerance,
+      replaceMatchMode,
+      replaceEdgeCleanup,
+      replaceEdgeEnhancementMode,
+    };
+  };
+
+  const applyToolToWorkset = async () => {
+    let applied = false;
+    if (tool === 'upscale') {
+      applied = await onApplyUpscaleWorkset(upscaleMethod, upscaleScale, getWorksetColorReplacementOptions());
+    } else if (tool === 'background') {
+      applied = await onApplyBackgroundWorkset();
+    } else if (tool === 'replace') {
+      const options = getWorksetColorReplacementOptions();
+      if (!options) return;
+      applied = await onApplyColorReplacementWorkset(options);
+    }
+    if (applied) onClose();
+  };
+
   const save = async (closeAfter = false) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -2613,7 +3500,7 @@ function FrameCanvasEditor({
       const image = canvas.toDataURL('image/png');
       const res = await apiService.saveEditedVideoFrame({ image, base_frame_url: baseUrl, preview_id: previewId ?? undefined });
       skipReloadUrlRef.current = res.image_url;
-      onSaved(res.image_url);
+      onSaved(res.image_url, res.width, res.height);
       resetBackgroundPreview();
       liveFloodRef.current = null;
       setReplacePreviewActive(false);
@@ -2655,7 +3542,7 @@ function FrameCanvasEditor({
             <div className="frame-canvas-footer-background-actions">
               <Tooltip title={batchApplyDisabledReason}>
                 <span>
-                  <Button loading={backgroundLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={onApplyBackgroundWorkset}>应用工作集 ({worksetFrameCount})</Button>
+                  <Button loading={worksetLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={() => void applyToolToWorkset()}>应用工作集 ({worksetFrameCount})</Button>
                 </span>
               </Tooltip>
               <Button disabled={!editorInteractive || !worksetFrameCount} onClick={restoreBackgroundWorkset}>恢复工作集</Button>
@@ -2663,8 +3550,8 @@ function FrameCanvasEditor({
           ) : <div />}
           <div className="frame-canvas-footer-save-actions">
             <Button disabled={editorBusy} onClick={requestClose}>关闭</Button>
-            <Button loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading} onClick={() => save(false)}>保存</Button>
-            <Button type="primary" loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading} onClick={() => save(true)}>保存并关闭</Button>
+            <Button loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading} onClick={() => save(false)}>保存</Button>
+            <Button type="primary" loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading} onClick={() => save(true)}>保存并关闭</Button>
           </div>
         </div>
       )}
@@ -2684,6 +3571,7 @@ function FrameCanvasEditor({
                 { label: '换色', value: 'replace' },
                 { label: '背景处理', value: 'background' },
                 { label: '边缘柔化', value: 'soften' },
+                { label: '放大增强', value: 'upscale' },
               ]}
             />
             <div className="frame-canvas-history-actions">
@@ -2697,7 +3585,7 @@ function FrameCanvasEditor({
           <div className="frame-canvas-workspace">
             <div
               ref={wrapRef}
-              className={`frame-canvas-stage ${editorBusy || !imageReady ? 'processing' : ''} ${imageLoading ? 'loading' : ''} ${panning ? 'panning' : ''} ${tool === 'background' ? 'background-tool' : ''}`}
+              className={`frame-canvas-stage ${editorBusy || !imageReady ? 'processing' : ''} ${imageLoading ? 'loading' : ''} ${panning ? 'panning' : ''} ${tool === 'background' || tool === 'upscale' ? 'background-tool' : ''}`}
               aria-busy={editorBusy}
               onPointerDown={onStagePointerDown}
               onPointerMove={onStagePointerMove}
@@ -2759,7 +3647,7 @@ function FrameCanvasEditor({
               <span>滚轮缩放 · 中键拖动 · Ctrl/Cmd+Z 撤销 · Ctrl/Cmd+Shift+Z 重做</span>
             </div>
           </div>
-          <aside className={`frame-canvas-background-panel ${saving ? 'locked' : ''}`} aria-label="工具参数" aria-busy={saving || backgroundPreviewPending || backgroundPreviewLoading}>
+          <aside className={`frame-canvas-background-panel ${saving || upscaleLoading ? 'locked' : ''}`} aria-label="工具参数" aria-busy={saving || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading}>
             {tool === 'brush' && (
               <div className="frame-canvas-replace-settings">
                 <div className="frame-editor-section-title">画笔参数</div>
@@ -2926,6 +3814,74 @@ function FrameCanvasEditor({
                   />
                 </div>
                 <p className="frame-editor-help">调整柔化半径时会立即更新画布，可使用撤销恢复。</p>
+              </div>
+            )}
+            {tool === 'upscale' && (
+              <div className="frame-canvas-replace-settings frame-canvas-upscale-settings">
+                <div className="frame-editor-section-title">
+                  放大增强
+                  {upscaleMethodsLoading && <Spin size="small" />}
+                </div>
+                <label className="frame-editor-field">
+                  <span>处理方法</span>
+                  <Select
+                    value={upscaleMethod}
+                    options={upscaleMethodOptions}
+                    onChange={changeUpscaleMethod}
+                  />
+                </label>
+                <label className="frame-editor-field">
+                  <span>放大倍率</span>
+                  <Segmented
+                    block
+                    value={upscaleScale}
+                    options={[
+                      { label: '2x', value: 2, disabled: !selectedUpscaleMethod?.supported_scales.includes(2) },
+                      { label: '4x', value: 4, disabled: !selectedUpscaleMethod?.supported_scales.includes(4) },
+                    ]}
+                    onChange={value => {
+                      upscaleScaleRef.current = value as 2 | 4;
+                      setUpscaleScale(value as 2 | 4);
+                    }}
+                  />
+                </label>
+                <div className={`frame-canvas-upscale-size ${upscaleTarget.allowed ? '' : 'invalid'}`} role={upscaleTarget.allowed ? undefined : 'alert'}>
+                  <span>当前 {canvasSize.width}×{canvasSize.height}</span>
+                  <strong>{upscaleTarget.width}×{upscaleTarget.height}</strong>
+                </div>
+                <div className="frame-canvas-upscale-algorithm">
+                  <div className="frame-canvas-upscale-algorithm-heading">
+                    <strong>{selectedUpscaleMethod?.algorithm_name}</strong>
+                    <span>{selectedUpscaleMethod?.behavior}</span>
+                  </div>
+                  <p>{selectedUpscaleMethod?.architecture}</p>
+                  <p>{selectedUpscaleMethod?.description}</p>
+                  {selectedUpscaleScale?.model && <small>当前模型：{selectedUpscaleScale.model}</small>}
+                </div>
+                {selectedUpscaleMethod?.license_notice && (
+                  <p className="frame-editor-help frame-canvas-upscale-license">许可：{selectedUpscaleMethod.license_notice}</p>
+                )}
+                {upscaleMethods.filter(method => !method.available).map(method => (
+                  <p className="frame-editor-help frame-canvas-upscale-unavailable" key={method.id}>
+                    {method.label}：{method.unavailable_reason}
+                  </p>
+                ))}
+                <Tooltip title={upscaleDisabledReason}>
+                  <span>
+                    <Button
+                      block
+                      type="primary"
+                      className="frame-canvas-preview-action"
+                      loading={upscaleLoading}
+                      disabled={!imageReady || Boolean(upscaleDisabledReason)}
+                      onClick={() => void applyUpscale()}
+                    >
+                      应用放大增强
+                    </Button>
+                  </span>
+                </Tooltip>
+                {!upscaleTarget.allowed && <p className="frame-editor-help frame-canvas-upscale-error">{upscaleTarget.reason}</p>}
+                <p className="frame-editor-help">“应用放大增强”只处理当前画布，完成后需保存；底部“应用工作集”会批量保存并关闭窗口。</p>
               </div>
             )}
           </aside>

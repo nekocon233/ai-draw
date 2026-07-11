@@ -15,7 +15,7 @@ from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
-from utils.media_processor import resize_image_base64, resize_video_bytes
+from utils.media_processor import merge_upscaled_alpha, resize_image_base64, resize_video_bytes
 
 
 class AIDrawService:
@@ -115,6 +115,63 @@ class AIDrawService:
         finally:
             self.is_generating_prompt = False
             self._notify_state_change('is_generating_prompt', False)
+
+    async def get_upscale_models(self) -> list[str]:
+        """查询 ComfyUI 当前可用的图片放大模型。"""
+        return await self.comfyui.get_upscale_models()
+
+    async def get_comfyui_object_info(self, node_name: str) -> dict:
+        """查询远端 ComfyUI 节点能力。"""
+        return await self.comfyui.get_object_info(node_name)
+
+    async def upscale_image(self, image: Image.Image, model_name: str, scale: int, native_scale: int) -> Image.Image:
+        """AI 放大 RGB 内容，并按源图片透明通道生成精确目标尺寸。"""
+        def encode_source() -> str:
+            rgb_buffer = BytesIO()
+            image.convert('RGB').save(rgb_buffer, format='PNG')
+            return base64.b64encode(rgb_buffer.getvalue()).decode('utf-8')
+
+        source_b64 = await asyncio.to_thread(encode_source)
+        result_b64 = await self.comfyui.upscale_image(source_b64, model_name, scale, native_scale)
+        target_size = (image.width * scale, image.height * scale)
+
+        def decode_result() -> Image.Image:
+            result = Image.open(BytesIO(base64.b64decode(result_b64)))
+            return merge_upscaled_alpha(image, result, target_size)
+
+        return await asyncio.to_thread(decode_result)
+
+    async def upscale_image_invsr(
+        self,
+        image: Image.Image,
+        scale: int,
+        sd_model: str,
+        invsr_model: str,
+        dtype: str,
+        chopping_size: int,
+    ) -> Image.Image:
+        """使用 InvSR 生成式扩散工作流放大，并恢复源 Alpha。"""
+        def encode_source() -> str:
+            rgb_buffer = BytesIO()
+            image.convert('RGB').save(rgb_buffer, format='PNG')
+            return base64.b64encode(rgb_buffer.getvalue()).decode('utf-8')
+
+        source_b64 = await asyncio.to_thread(encode_source)
+        result_b64 = await self.comfyui.upscale_image_invsr(
+            source_b64,
+            scale,
+            sd_model,
+            invsr_model,
+            dtype,
+            chopping_size,
+        )
+        target_size = (image.width * scale, image.height * scale)
+
+        def decode_result() -> Image.Image:
+            result = Image.open(BytesIO(base64.b64decode(result_b64)))
+            return merge_upscaled_alpha(image, result, target_size)
+
+        return await asyncio.to_thread(decode_result)
     
     async def generate_media(
         self,

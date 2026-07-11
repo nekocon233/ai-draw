@@ -14,6 +14,7 @@ from comfy_api_simplified import ComfyApiWrapper
 from comfyui.requests.comfyui_request_interface import ComfyUIRequestInterface
 from comfyui.structures.comfyui_request_result import ComfyUIRequestResult
 from comfyui.structures.comfyui_request_state import ComfyUIRequestState
+from comfyui.structures.upscale_models import extract_upscale_model_options
 from utils.config_loader import get_comfyui_config
 
 
@@ -150,6 +151,41 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 for k in keys_to_delete:
                     del inputs[k]
                     print(f"[LocalComfyUIRequest] 已清理对节点 {node_id}({title}) 的引用: inputs['{k}']")
+
+    async def get_upscale_models(self) -> list[str]:
+        """读取 ComfyUI UpscaleModelLoader 当前可选模型。"""
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{self.api_address}object_info/UpscaleModelLoader") as response:
+                response.raise_for_status()
+                payload = await response.json()
+        return extract_upscale_model_options(payload)
+
+    async def get_object_info(self, node_name: str) -> dict:
+        """读取单个 ComfyUI 节点定义；节点不存在时返回空字典。"""
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{self.api_address}object_info/{node_name}") as response:
+                if response.status == 404:
+                    return {}
+                response.raise_for_status()
+                payload = await response.json()
+        return payload.get(node_name, {}) if isinstance(payload, dict) else {}
+
+    async def _upload_overwrite_image(self, input_filename: str, remote_filename: str) -> dict:
+        """上传到固定临时位置并覆盖旧输入，避免 ComfyUI input 目录持续增长。"""
+        async with aiofiles.open(input_filename, "rb") as file:
+            content = await file.read()
+        form = aiohttp.FormData()
+        form.add_field("image", content, filename=remote_filename, content_type="image/png")
+        form.add_field("type", "input")
+        form.add_field("subfolder", "ai_draw")
+        form.add_field("overwrite", "true")
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(f"{self.api_address}upload/image", data=form) as response:
+                response.raise_for_status()
+                return await response.json()
 
     async def _queue_and_poll(self, workflow, timeout: int = 3600, poll_interval: float = 3.0) -> str:
         """
@@ -325,6 +361,111 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                                                 first_result["type"])
             return ComfyUIRequestResult(success=True, data=base64.b64encode(base64_content).decode('utf-8'), error="")
         return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
+
+    async def upscale_image(self, workflow, image_b64: str, model_name: str, scale: int, native_scale: int) -> ComfyUIRequestResult:
+        """通过独立模型放大工作流处理单张 RGB 图片。"""
+        input_filename = os.path.join(tempfile.gettempdir(), "ai_draw_upscale_input.png")
+        try:
+            raw_image = await asyncio.to_thread(base64.b64decode, image_b64)
+            async with aiofiles.open(input_filename, "wb") as file:
+                await file.write(raw_image)
+            image_metadata = await self._upload_overwrite_image(input_filename, "upscale_input.png")
+            img_path = (
+                f"{image_metadata['subfolder']}/{image_metadata['name']}"
+                if image_metadata.get('subfolder')
+                else image_metadata['name']
+            )
+            workflow.set_node_param("main_image", "image", img_path)
+            workflow.set_node_param("upscale_model", "model_name", model_name)
+            workflow.set_node_param("output_scale", "scale_by", scale / native_scale)
+
+            prompt_id = await self._queue_and_poll(workflow, timeout=540)
+            image_node_id = workflow.get_node_id("保存图像")
+            history = await asyncio.to_thread(self.api.get_history, prompt_id)
+            results = history[prompt_id]["outputs"][image_node_id]["images"]
+            if not results:
+                return ComfyUIRequestResult(success=False, data=None, error="未获得有效结果")
+            first_result = results[0]
+            content = await asyncio.to_thread(
+                self.api.get_image,
+                first_result["filename"],
+                first_result["subfolder"],
+                first_result["type"],
+            )
+            return ComfyUIRequestResult(
+                success=True,
+                data=base64.b64encode(content).decode('utf-8'),
+                error="",
+            )
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=str(e))
+        finally:
+            try:
+                os.unlink(input_filename)
+            except OSError:
+                pass
+
+    async def upscale_image_invsr(
+        self,
+        workflow,
+        image_b64: str,
+        scale: int,
+        sd_model: str,
+        invsr_model: str,
+        dtype: str,
+        chopping_size: int,
+    ) -> ComfyUIRequestResult:
+        """通过 InvSR 独立扩散工作流处理单张 RGB 图片。"""
+        input_filename = os.path.join(tempfile.gettempdir(), "ai_draw_invsr_input.png")
+        try:
+            raw_image = await asyncio.to_thread(base64.b64decode, image_b64)
+            async with aiofiles.open(input_filename, "wb") as file:
+                await file.write(raw_image)
+            image_metadata = await self._upload_overwrite_image(input_filename, "invsr_input.png")
+            img_path = (
+                f"{image_metadata['subfolder']}/{image_metadata['name']}"
+                if image_metadata.get('subfolder')
+                else image_metadata['name']
+            )
+            workflow.set_node_param("main_image", "image", img_path)
+            workflow.set_node_param("invsr_loader", "sd_model", sd_model)
+            workflow.set_node_param("invsr_loader", "invsr_model", invsr_model)
+            workflow.set_node_param("invsr_loader", "dtype", dtype)
+            workflow.set_node_param("invsr_loader", "tiled_vae", True)
+            workflow.set_node_param("invsr_sampler", "num_steps", 1)
+            workflow.set_node_param("invsr_sampler", "cfg", 1.0)
+            workflow.set_node_param("invsr_sampler", "batch_size", 1)
+            workflow.set_node_param("invsr_sampler", "chopping_batch_size", 1)
+            workflow.set_node_param("invsr_sampler", "chopping_size", chopping_size)
+            workflow.set_node_param("invsr_sampler", "color_fix", "wavelet")
+            workflow.set_node_param("invsr_sampler", "seed", 123)
+            workflow.set_node_param("output_scale", "scale_by", scale / 4)
+
+            prompt_id = await self._queue_and_poll(workflow, timeout=540)
+            image_node_id = workflow.get_node_id("保存图像")
+            history = await asyncio.to_thread(self.api.get_history, prompt_id)
+            results = history[prompt_id]["outputs"][image_node_id]["images"]
+            if not results:
+                return ComfyUIRequestResult(success=False, data=None, error="InvSR 未获得有效结果")
+            first_result = results[0]
+            content = await asyncio.to_thread(
+                self.api.get_image,
+                first_result["filename"],
+                first_result["subfolder"],
+                first_result["type"],
+            )
+            return ComfyUIRequestResult(
+                success=True,
+                data=base64.b64encode(content).decode('utf-8'),
+                error="",
+            )
+        except Exception as e:
+            return ComfyUIRequestResult(success=False, data=None, error=str(e))
+        finally:
+            try:
+                os.unlink(input_filename)
+            except OSError:
+                pass
 
     async def generate_flf2v(
         self,

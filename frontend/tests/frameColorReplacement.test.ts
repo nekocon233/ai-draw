@@ -44,6 +44,33 @@ test('clears disconnected pixels that match the clicked color', () => {
   )
 })
 
+test('can keep the selected target color across different frame pixels', () => {
+  const source = new Uint8ClampedArray([
+    102, 100, 100, 255,
+    100, 100, 100, 255,
+    180, 180, 180, 255,
+  ])
+
+  const result = applyHardTransparentReplacement(
+    source,
+    3,
+    1,
+    0,
+    0,
+    1,
+    0,
+    'global',
+    'connected_color',
+    [100, 100, 100],
+  )
+
+  assert.deepEqual(Array.from(result ?? []), [
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    180, 180, 180, 255,
+  ])
+})
+
 test('matches FramePacker RGB Euclidean tolerance scaling', () => {
   const source = new Uint8ClampedArray([
     251, 251, 251, 255,

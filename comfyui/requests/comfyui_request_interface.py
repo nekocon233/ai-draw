@@ -40,6 +40,31 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
+    async def get_upscale_models(self) -> list[str]:
+        """获取 ComfyUI 可用模型放大权重。"""
+
+    @abstractmethod
+    async def get_object_info(self, node_name: str) -> dict:
+        """获取 ComfyUI 单个节点能力。"""
+
+    @abstractmethod
+    async def upscale_image(self, workflow, image_b64: str, model_name: str, scale: int, native_scale: int) -> ComfyUIRequestResult:
+        """执行通用模型放大工作流。"""
+
+    @abstractmethod
+    async def upscale_image_invsr(
+        self,
+        workflow,
+        image_b64: str,
+        scale: int,
+        sd_model: str,
+        invsr_model: str,
+        dtype: str,
+        chopping_size: int,
+    ) -> ComfyUIRequestResult:
+        """执行 InvSR 扩散放大工作流。"""
+
+    @abstractmethod
     async def generate_flf2v(
         self,
         workflow,

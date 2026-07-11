@@ -1494,6 +1494,25 @@
   gap: 10px;
 }
 
+.frame-organize-grid.is-multi-selecting {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.frame-organize-grid.is-multi-selecting .frame-editor-tile {
+  cursor: crosshair;
+  transition: border-color 0.15s ease;
+}
+
+.frame-organize-grid.is-multi-selecting .frame-editor-tile:hover {
+  transform: none;
+}
+
+.frame-organize-grid.is-multi-selecting .frame-editor-check {
+  background: #e6f4ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.35);
+}
+
 .frame-organize-preview-panel {
   padding: 12px;
   display: flex;
@@ -1693,7 +1712,7 @@
   position: absolute;
   left: 6px;
   right: 6px;
-  top: 60px;
+  bottom: 34px;
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
@@ -1718,11 +1737,6 @@
   z-index: 3;
 }
 
-.frame-editor-badge.edit {
-  right: 34px;
-  background: rgba(114, 46, 209, 0.86);
-}
-
 .frame-workbench-export-preview {
   flex: 1 1 auto;
   min-height: 0;
@@ -1734,15 +1748,11 @@
   flex-direction: column;
 }
 
-.frame-workbench-export-grid {
+.frame-workbench-export-stage {
   flex: 1 1 auto;
   min-height: 0;
   padding: 14px;
   overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 10px;
-  align-content: start;
   background-color: var(--bg-tertiary);
   background-image:
     linear-gradient(45deg, rgba(255, 255, 255, 0.16) 25%, transparent 25%),
@@ -1753,8 +1763,29 @@
   background-size: 16px 16px;
 }
 
+.frame-workbench-export-stage.sheet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.frame-workbench-export-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
 .frame-workbench-export-grid.sheet {
-  grid-template-columns: repeat(auto-fill, minmax(72px, 96px));
+  flex: 0 0 auto;
+  gap: 0;
+  align-content: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background-color: rgba(0, 0, 0, 0.04);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .frame-workbench-export-grid img {
@@ -1764,6 +1795,21 @@
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.05);
+}
+
+.frame-workbench-export-grid.sheet img {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  aspect-ratio: auto;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.frame-workbench-export-grid.sheet.manual-size img {
+  object-fit: fill;
 }
 
 .frame-canvas-editor-modal.ant-modal {
@@ -2064,6 +2110,96 @@
 
 .frame-canvas-replace-settings .frame-editor-field {
   grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.frame-canvas-upscale-settings .frame-editor-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.frame-canvas-upscale-size {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-canvas-upscale-size strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.frame-canvas-upscale-size.invalid {
+  border-color: rgba(207, 19, 34, 0.42);
+  background: rgba(207, 19, 34, 0.06);
+}
+
+.frame-canvas-upscale-algorithm {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.frame-canvas-upscale-algorithm-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.frame-canvas-upscale-algorithm-heading strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.frame-canvas-upscale-algorithm-heading span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.frame-canvas-upscale-algorithm p,
+.frame-canvas-upscale-algorithm small {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.frame-canvas-upscale-algorithm p:first-of-type {
+  color: var(--text-primary);
+}
+
+.frame-canvas-upscale-license {
+  padding: 8px 10px;
+  border: 1px solid rgba(212, 136, 6, 0.32);
+  border-radius: 7px;
+  background: rgba(250, 173, 20, 0.08);
+  color: var(--text-primary);
+}
+
+.frame-canvas-upscale-unavailable {
+  margin: -4px 0 0;
+}
+
+.frame-canvas-upscale-error {
+  color: #cf1322;
 }
 
 .frame-canvas-stage {
@@ -2465,7 +2601,7 @@
   }
 
   .frame-canvas-tool-switch .ant-segmented-group {
-    min-width: 430px;
+    min-width: 520px;
   }
 
   .frame-canvas-history-actions {

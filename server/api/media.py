@@ -5,6 +5,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Backgro
 import asyncio
 import base64
 import re
+import time
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -13,8 +14,10 @@ from PIL import Image
 from pydantic import BaseModel
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
+from server.image_upscale_methods import build_upscale_method_registry
 from server.schemas import GenerateMediaRequest, GenerateMediaResponse
-from utils.config_loader import get_config, get_video_frames_config
+from utils.config_loader import get_config, get_image_upscale_config, get_video_frames_config
+from utils.media_processor import ImageUpscaleValidationError, decode_upscale_png_data_url, upscale_image_lanczos
 from utils.video_frames import (
     BackgroundRemovalOptions,
     apply_background_removal,
@@ -22,6 +25,7 @@ from utils.video_frames import (
     build_gif,
     build_spritesheet,
     extract_frame_items,
+    normalize_frame_sizes,
     probe_video_duration,
     probe_video_fps,
     resize_frames,
@@ -54,7 +58,7 @@ class BackgroundOptionsRequest(BaseModel):
 class VideoToSpritesheetRequest(BackgroundOptionsRequest):
     """视频转透明精灵图请求"""
     video_url: str            # 形如 /uploads/video/xxx.mp4
-    rows: Optional[int] = None
+    rows: int = 1
     start_time: Optional[float] = None
     end_time: Optional[float] = None
 
@@ -77,8 +81,7 @@ class VideoFrameExportRequest(BaseModel):
     """抽帧工作台导出请求"""
     frame_urls: List[str]
     output: Literal['zip', 'spritesheet', 'gif', 'apng'] = 'spritesheet'
-    rows: Optional[int] = None
-    cols: Optional[int] = None
+    rows: int = 1
     cell_width: Optional[int] = None
     cell_height: Optional[int] = None
     gif_fps: Optional[float] = None
@@ -97,6 +100,20 @@ class SaveEditedVideoFrameRequest(BaseModel):
     image: str
     base_frame_url: Optional[str] = None
     preview_id: Optional[str] = None
+
+
+class ImageUpscaleRequest(BaseModel):
+    """对当前 canvas PNG 执行精确倍率放大。"""
+    image: str
+    method: Literal['lanczos', 'apisr', 'real_cugan', 'realesrgan_general', 'realesrgan_anime', 'invsr']
+    scale: Literal[2, 4]
+
+
+class ImageUpscaleBatchRequest(BaseModel):
+    """使用同一方法批量放大工作集图片。"""
+    frame_urls: List[str]
+    method: Literal['lanczos', 'apisr', 'real_cugan', 'realesrgan_general', 'realesrgan_anime', 'invsr']
+    scale: Literal[2, 4]
 
 
 class RemoveBackgroundRequest(BackgroundOptionsRequest):
@@ -209,7 +226,69 @@ def _decode_data_png(data_url: str) -> Image.Image:
     return image
 
 
+def _encode_png_data_url(image: Image.Image) -> str:
+    buffer = BytesIO()
+    image.convert('RGBA').save(buffer, format='PNG')
+    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+
+def _decode_upscale_png(data_url: str, scale: int, processing_scale: int) -> tuple[Image.Image, int, int]:
+    cfg = get_image_upscale_config()
+    try:
+        return decode_upscale_png_data_url(
+            data_url,
+            scale,
+            cfg.max_edge,
+            cfg.max_pixels,
+            cfg.max_input_bytes,
+            processing_scale,
+        )
+    except ImageUpscaleValidationError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+def _cleanup_stale_upscale_previews(save_dir: Path) -> None:
+    cutoff = time.time() - 24 * 60 * 60
+    for path in save_dir.glob('upscaled_*.png'):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+
+def _comfy_option_values(node_info: dict, input_name: str) -> set:
+    try:
+        field = node_info['input']['required'][input_name]
+    except (KeyError, TypeError):
+        return set()
+    if not isinstance(field, list) or not field:
+        return set()
+    if isinstance(field[0], list):
+        return set(field[0])
+    if len(field) > 1 and isinstance(field[1], dict):
+        return set(field[1].get('options', []))
+    return set()
+
+
+def _invsr_config_error(loader_info: dict, sampler_info: dict, cfg) -> Optional[str]:
+    if not loader_info or not sampler_info:
+        return 'ComfyUI 未安装 InvSR 节点'
+    required_options = {
+        'sd_model': cfg.invsr_sd_model,
+        'invsr_model': cfg.invsr_model,
+        'dtype': cfg.invsr_dtype,
+    }
+    for input_name, value in required_options.items():
+        if value not in _comfy_option_values(loader_info, input_name):
+            return f'InvSR 节点不支持 {input_name}={value}'
+    if cfg.invsr_chopping_size not in _comfy_option_values(sampler_info, 'chopping_size'):
+        return f'InvSR 节点不支持 chopping_size={cfg.invsr_chopping_size}'
+    return None
+
+
 _export_progress: dict[str, dict] = {}
+_upscale_slots = asyncio.Semaphore(1)
 
 
 def _set_export_progress(
@@ -461,7 +540,179 @@ async def save_edited_video_frame(request: SaveEditedVideoFrameRequest) -> dict:
     return {
         'success': True,
         'image_url': f'/uploads/frames/edited/{filename}',
+        'width': image.width,
+        'height': image.height,
     }
+
+
+@router.get("/image-upscale-methods")
+async def get_image_upscale_methods(
+    service: AIDrawService = Depends(get_ai_draw_service),
+) -> dict:
+    """返回本地方法与远端 ComfyUI 模型可用性。"""
+    cfg = get_image_upscale_config()
+    try:
+        installed_models = set(await service.get_upscale_models())
+        model_error = None
+    except Exception:
+        installed_models = set()
+        model_error = 'ComfyUI 当前不可用'
+    try:
+        invsr_loader, invsr_sampler = await asyncio.gather(
+            service.get_comfyui_object_info('LoadInvSRModels'),
+            service.get_comfyui_object_info('InvSRSampler'),
+        )
+        invsr_error = _invsr_config_error(invsr_loader, invsr_sampler, cfg)
+        invsr_available = invsr_error is None
+    except Exception:
+        invsr_available = False
+        invsr_error = 'ComfyUI 当前不可用'
+    registry = build_upscale_method_registry(cfg)
+    return {
+        'methods': [
+            method.availability(installed_models, invsr_available, model_error, invsr_error)
+            for method in registry.values()
+        ],
+        'scales': [2, 4],
+        'max_edge': cfg.max_edge,
+        'max_pixels': cfg.max_pixels,
+    }
+
+
+async def _perform_image_upscale(
+    request: ImageUpscaleRequest,
+    service: AIDrawService,
+    persistent: bool = False,
+) -> dict:
+    cfg = get_image_upscale_config()
+    method = build_upscale_method_registry(cfg)[request.method]
+    model = method.models.get(request.scale)
+    processing_scale = request.scale
+
+    if method.runner == 'upscale_model':
+        if model is None:
+            raise HTTPException(status_code=400, detail='该算法不支持此倍率')
+        try:
+            installed_models = set(await service.get_upscale_models())
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f'无法连接 ComfyUI: {e}')
+        if model.filename not in installed_models:
+            raise HTTPException(status_code=503, detail=f'ComfyUI 未安装 {model.filename}')
+        processing_scale = model.native_scale
+    elif method.runner == 'invsr':
+        try:
+            invsr_loader, invsr_sampler = await asyncio.gather(
+                service.get_comfyui_object_info('LoadInvSRModels'),
+                service.get_comfyui_object_info('InvSRSampler'),
+            )
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f'无法连接 ComfyUI: {e}')
+        invsr_error = _invsr_config_error(invsr_loader, invsr_sampler, cfg)
+        if invsr_error:
+            raise HTTPException(status_code=503, detail=invsr_error)
+        processing_scale = 4
+
+    image, width, height = await asyncio.to_thread(
+        _decode_upscale_png,
+        request.image,
+        request.scale,
+        processing_scale,
+    )
+
+    if method.runner == 'local':
+        try:
+            result = await asyncio.to_thread(upscale_image_lanczos, image, request.scale)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'快速放大失败: {e}')
+    elif method.runner == 'upscale_model':
+        try:
+            result = await service.upscale_image(image, model.filename, request.scale, model.native_scale)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'AI 放大失败: {e}')
+    else:
+        try:
+            result = await service.upscale_image_invsr(
+                image,
+                request.scale,
+                cfg.invsr_sd_model,
+                cfg.invsr_model,
+                cfg.invsr_dtype,
+                cfg.invsr_chopping_size,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'InvSR 放大失败: {e}')
+
+    relative_dir = 'frames/edited' if persistent else 'upscaled'
+    save_dir = Path(get_config().paths.upload_dir) / relative_dir
+    save_dir.mkdir(parents=True, exist_ok=True)
+    if not persistent:
+        await asyncio.to_thread(_cleanup_stale_upscale_previews, save_dir)
+    filename = f"{'edited_upscaled' if persistent else 'upscaled'}_{uuid.uuid4().hex}.png"
+    try:
+        await asyncio.to_thread(result.save, save_dir / filename, 'PNG')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'保存放大图片失败: {e}')
+    return {
+        'success': True,
+        'image_url': f'/uploads/{relative_dir}/{filename}',
+        'width': width,
+        'height': height,
+        'method': request.method,
+        'algorithm': method.algorithm_name,
+        'scale': request.scale,
+    }
+
+
+@router.post("/image-upscale")
+async def upscale_image(
+    request: ImageUpscaleRequest,
+    service: AIDrawService = Depends(get_ai_draw_service),
+) -> dict:
+    """放大当前画布并返回临时上传 URL；繁忙时不排队，避免请求堆积。"""
+    try:
+        await asyncio.wait_for(_upscale_slots.acquire(), timeout=0.01)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=429, detail='已有放大任务正在处理，请稍后重试')
+    try:
+        return await _perform_image_upscale(request, service)
+    finally:
+        _upscale_slots.release()
+
+
+@router.post("/image-upscale-batch")
+async def upscale_image_batch(
+    request: ImageUpscaleBatchRequest,
+    service: AIDrawService = Depends(get_ai_draw_service),
+) -> dict:
+    """按顺序放大整个工作集，结果持久化为可直接导出的编辑帧。"""
+    try:
+        await asyncio.wait_for(_upscale_slots.acquire(), timeout=0.01)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=429, detail='已有放大任务正在处理，请稍后重试')
+    try:
+        source_frames = _load_frame_urls(request.frame_urls, mode='RGBA')
+        results = []
+        for source_url, source_frame in zip(request.frame_urls, source_frames):
+            item_request = ImageUpscaleRequest(
+                image=await asyncio.to_thread(_encode_png_data_url, source_frame),
+                method=request.method,
+                scale=request.scale,
+            )
+            result = await _perform_image_upscale(item_request, service, persistent=True)
+            results.append({
+                'source_url': source_url,
+                'image_url': result['image_url'],
+                'width': result['width'],
+                'height': result['height'],
+            })
+        return {
+            'success': True,
+            'method': request.method,
+            'scale': request.scale,
+            'frames': results,
+        }
+    finally:
+        _upscale_slots.release()
 
 
 @router.post("/export-video-frames")
@@ -476,6 +727,9 @@ async def export_video_frames(request: VideoFrameExportRequest) -> dict:
     if cell_width or cell_height:
         _set_export_progress(request.progress_id, 'resize', 40, '正在调整帧尺寸')
         processed = await asyncio.to_thread(resize_frames, processed, cell_width, cell_height)
+    elif request.output != 'zip' and len({frame.size for frame in processed}) > 1:
+        _set_export_progress(request.progress_id, 'resize', 40, '正在适配不同帧尺寸')
+        processed = await asyncio.to_thread(normalize_frame_sizes, processed)
 
     frame_width = processed[0].width
     frame_height = processed[0].height
@@ -548,7 +802,7 @@ async def export_video_frames(request: VideoFrameExportRequest) -> dict:
 
     try:
         _set_export_progress(request.progress_id, 'packing', 72, '正在生成精灵图')
-        png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.cols, request.rows)
+        png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.rows)
     except Exception as e:
         _set_export_progress(request.progress_id, 'error', 100, '精灵图生成失败', error=str(e), done=True)
         raise HTTPException(status_code=500, detail=f'精灵图生成失败: {e}')

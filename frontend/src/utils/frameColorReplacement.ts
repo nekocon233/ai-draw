@@ -40,6 +40,7 @@ export function applyHardTransparentReplacement(
   edgeEnhancement: number,
   matchMode: TransparentReplaceMatchMode = 'global',
   edgeEnhancementMode: TransparentEdgeEnhancementMode = 'connected_color',
+  targetColor?: readonly [number, number, number],
 ): Uint8ClampedArray | null {
   if (!isHardTransparentReplacementTarget(source, width, height, x, y)) {
     return null
@@ -47,9 +48,9 @@ export function applyHardTransparentReplacement(
 
   const clickedOffset = (y * width + x) * 4
   const result = new Uint8ClampedArray(source)
-  const clickedRed = source[clickedOffset]
-  const clickedGreen = source[clickedOffset + 1]
-  const clickedBlue = source[clickedOffset + 2]
+  const clickedRed = targetColor?.[0] ?? source[clickedOffset]
+  const clickedGreen = targetColor?.[1] ?? source[clickedOffset + 1]
+  const clickedBlue = targetColor?.[2] ?? source[clickedOffset + 2]
   const normalizedTolerance = Number.isFinite(tolerance)
     ? Math.min(50, Math.max(0, Math.round(tolerance)))
     : 0

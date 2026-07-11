@@ -566,16 +566,14 @@ def apply_background_removal(
 # ── 打包：网格 PNG / APNG / GIF / ZIP ─────────────────────────────────────
 def build_spritesheet(
     frames_rgba: List[Image.Image],
-    cols: Optional[int] = None,
-    rows: Optional[int] = None,
+    rows: Optional[int] = 1,
 ) -> Tuple[bytes, int, int]:
     """
     把透明帧拼成一张网格 PNG（透明底）。
 
     Args:
         frames_rgba: 透明帧列表（RGBA）
-        cols: 列数；None 时按 ceil(sqrt(n)) 自动计算
-        rows: 行数；提供时优先按行数反推列数
+        rows: 行数；默认 1，列数根据帧数自动计算
 
     Returns:
         (png_bytes, cols, rows)
@@ -584,24 +582,14 @@ def build_spritesheet(
         raise ValueError('无可用帧，无法生成精灵图')
 
     n = len(frames_rgba)
-    # 统一为 RGBA 并以首帧尺寸为单元格尺寸
-    frames_rgba = [f.convert('RGBA') for f in frames_rgba]
+    frames_rgba = normalize_frame_sizes(frames_rgba)
     frame_w, frame_h = frames_rgba[0].size
 
-    if rows and rows > 0:
-        rows = min(max(1, int(rows)), n)
-        cols = math.ceil(n / rows)
-    else:
-        if not cols or cols < 1:
-            cols = max(1, math.ceil(math.sqrt(n)))
-        cols = min(max(1, int(cols)), n)
-        rows = math.ceil(n / cols)
+    rows = min(max(1, int(rows or 1)), n)
+    cols = math.ceil(n / rows)
 
     sheet = Image.new('RGBA', (cols * frame_w, rows * frame_h), (0, 0, 0, 0))
     for i, frame in enumerate(frames_rgba):
-        # 尺寸不一致时按首帧尺寸缩放（保险）
-        if frame.size != (frame_w, frame_h):
-            frame = frame.resize((frame_w, frame_h), Image.LANCZOS)
         sheet.paste(frame, ((i % cols) * frame_w, (i // cols) * frame_h), frame)
 
     buf = io.BytesIO()
@@ -617,12 +605,7 @@ def build_apng(frames_rgba: List[Image.Image], fps: Optional[float] = None) -> T
     fps = min(max(fps or 12, 0.1), 60)
     duration_ms = max(1, round(1000 / fps))
 
-    frames_rgba = [frame.convert('RGBA') for frame in frames_rgba]
-    frame_w, frame_h = frames_rgba[0].size
-    normalized = [
-        frame if frame.size == (frame_w, frame_h) else frame.resize((frame_w, frame_h), Image.LANCZOS)
-        for frame in frames_rgba
-    ]
+    normalized = normalize_frame_sizes(frames_rgba)
 
     buf = io.BytesIO()
     first, rest = normalized[0], normalized[1:]
@@ -645,12 +628,7 @@ def build_gif(frames_rgba: List[Image.Image], fps: Optional[float] = None) -> Tu
 
     fps = min(max(fps or 12, 0.1), 60)
     duration_ms = max(1, round(1000 / fps))
-    rgba_frames = [frame.convert('RGBA') for frame in frames_rgba]
-    frame_w, frame_h = rgba_frames[0].size
-    normalized = [
-        frame if frame.size == (frame_w, frame_h) else frame.resize((frame_w, frame_h), Image.LANCZOS)
-        for frame in rgba_frames
-    ]
+    normalized = normalize_frame_sizes(frames_rgba)
 
     paletted = []
     for frame in normalized:
@@ -705,11 +683,12 @@ def resize_frames(
     width: Optional[int] = None,
     height: Optional[int] = None,
 ) -> List[Image.Image]:
-    """统一调整帧尺寸；只给宽或高时按首帧比例补齐另一边。"""
+    """统一调整帧尺寸；只给宽或高时按工作集最大画布比例补齐另一边。"""
     if not frames or (not width and not height):
         return frames
 
-    base_w, base_h = frames[0].size
+    base_w = max(frame.width for frame in frames)
+    base_h = max(frame.height for frame in frames)
     target_w = int(width) if width and width > 0 else None
     target_h = int(height) if height and height > 0 else None
 
@@ -727,10 +706,39 @@ def resize_frames(
     ]
 
 
+def normalize_frame_sizes(frames: List[Image.Image]) -> List[Image.Image]:
+    """按最大帧尺寸建立统一透明画布，等比缩放并居中每一帧。"""
+    if not frames:
+        return frames
+
+    rgba_frames = [frame.convert('RGBA') for frame in frames]
+    target_w = max(frame.width for frame in rgba_frames)
+    target_h = max(frame.height for frame in rgba_frames)
+    target_size = (target_w, target_h)
+    normalized: List[Image.Image] = []
+
+    for frame in rgba_frames:
+        if frame.size == target_size:
+            normalized.append(frame)
+            continue
+        scale = min(target_w / frame.width, target_h / frame.height)
+        resized_size = (
+            max(1, round(frame.width * scale)),
+            max(1, round(frame.height * scale)),
+        )
+        resized = frame.resize(resized_size, Image.LANCZOS)
+        canvas = Image.new('RGBA', target_size, (0, 0, 0, 0))
+        offset = ((target_w - resized.width) // 2, (target_h - resized.height) // 2)
+        canvas.alpha_composite(resized, offset)
+        normalized.append(canvas)
+
+    return normalized
+
+
 # ── 对外编排 ────────────────────────────────────────────────────────────
 def video_to_spritesheet(
     video_path: Path,
-    rows: Optional[int] = None,
+    rows: Optional[int] = 1,
     max_frames: Optional[int] = None,
     start_time: Optional[float] = None,
     end_time: Optional[float] = None,
