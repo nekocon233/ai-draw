@@ -12,7 +12,7 @@
   },
   "73": {
     "inputs": {
-      "shift": 8.000000000000002,
+      "shift": 5,
       "model": [
         "76",
         0
@@ -25,7 +25,7 @@
   },
   "74": {
     "inputs": {
-      "shift": 8,
+      "shift": 5,
       "model": [
         "77",
         0
@@ -89,8 +89,14 @@
   },
   "81": {
     "inputs": {
-      "width": 640,
-      "height": 640,
+      "width": [
+        "154",
+        0
+      ],
+      "height": [
+        "154",
+        1
+      ],
       "length": [
         "152",
         0
@@ -109,11 +115,11 @@
         0
       ],
       "start_image": [
-        "124",
+        "80",
         0
       ],
       "end_image": [
-        "119",
+        "89",
         0
       ]
     },
@@ -129,12 +135,12 @@
         "122",
         0
       ],
-      "steps": 20,
-      "cfg": 4,
+      "steps": 4,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
       "start_at_step": 0,
-      "end_at_step": 10,
+      "end_at_step": 2,
       "return_with_leftover_noise": "enable",
       "model": [
         "73",
@@ -178,12 +184,12 @@
     "inputs": {
       "add_noise": "disable",
       "noise_seed": 0,
-      "steps": 20,
-      "cfg": 4,
+      "steps": 4,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
-      "start_at_step": 10,
-      "end_at_step": 10000,
+      "start_at_step": 2,
+      "end_at_step": 4,
       "return_with_leftover_noise": "disable",
       "model": [
         "74",
@@ -239,12 +245,12 @@
         "122",
         0
       ],
-      "steps": 20,
-      "cfg": 4,
+      "steps": 4,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
       "start_at_step": 0,
-      "end_at_step": 10,
+      "end_at_step": 2,
       "return_with_leftover_noise": "enable",
       "model": [
         "73",
@@ -288,12 +294,12 @@
     "inputs": {
       "add_noise": "disable",
       "noise_seed": 0,
-      "steps": 20,
-      "cfg": 4,
+      "steps": 4,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
-      "start_at_step": 10,
-      "end_at_step": 10000,
+      "start_at_step": 2,
+      "end_at_step": 4,
       "return_with_leftover_noise": "disable",
       "model": [
         "74",
@@ -319,8 +325,14 @@
   },
   "109": {
     "inputs": {
-      "width": 640,
-      "height": 640,
+      "width": [
+        "154",
+        0
+      ],
+      "height": [
+        "154",
+        1
+      ],
       "length": [
         "151",
         0
@@ -339,11 +351,11 @@
         0
       ],
       "start_image": [
-        "119",
+        "89",
         0
       ],
       "end_image": [
-        "124",
+        "80",
         0
       ]
     },
@@ -384,26 +396,6 @@
       "title": "组合图像批次"
     }
   },
-  "119": {
-    "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "upscale_method": "nearest-exact",
-      "keep_proportion": "pad_edge",
-      "pad_color": "0, 0, 0",
-      "crop_position": "center",
-      "divisible_by": 2,
-      "device": "cpu",
-      "image": [
-        "89",
-        0
-      ]
-    },
-    "class_type": "ImageResizeKJv2",
-    "_meta": {
-      "title": "Resize Image v2"
-    }
-  },
   "122": {
     "inputs": {
       "value": 0
@@ -420,26 +412,6 @@
     "class_type": "easy positive",
     "_meta": {
       "title": "positive_prompt_start"
-    }
-  },
-  "124": {
-    "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "upscale_method": "nearest-exact",
-      "keep_proportion": "pad_edge",
-      "pad_color": "0, 0, 0",
-      "crop_position": "center",
-      "divisible_by": 2,
-      "device": "cpu",
-      "image": [
-        "80",
-        0
-      ]
-    },
-    "class_type": "ImageResizeKJv2",
-    "_meta": {
-      "title": "Resize Image v2"
     }
   },
   "125": {
@@ -537,6 +509,18 @@
     "class_type": "FloatConstant",
     "_meta": {
       "title": "frameRate"
+    }
+  },
+  "154": {
+    "inputs": {
+      "image": [
+        "80",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取首帧尺寸"
     }
   }
 }
