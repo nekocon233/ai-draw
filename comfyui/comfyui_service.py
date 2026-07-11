@@ -225,6 +225,10 @@ class ComfyUIService:
         """返回远端 ComfyUI 节点定义。"""
         return await self.request.get_object_info(node_name)
 
+    async def interrupt(self) -> None:
+        """中断当前 ComfyUI 执行。"""
+        await self.request.interrupt()
+
     async def upscale_image(self, image_base64: str, model_name: str, scale: int, native_scale: int) -> str:
         """使用独立工作流放大图片，不切换当前生成工作流。"""
         workflow_file = self.workflow_configs.get("image_upscale")

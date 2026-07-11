@@ -47,6 +47,15 @@ interface ChatMessage {
   }
 }
 
+interface ApiChatMessage {
+  id: string;
+  type: 'user' | 'assistant';
+  content?: string;
+  images?: ChatMessage['images'];
+  timestamp: number;
+  params?: ChatMessage['params'];
+}
+
 export interface GenerationSettingsDraft {
   workflow: string;
   strength: number;
@@ -69,8 +78,11 @@ interface AppState {
   
   // 聊天历史
   chatHistory: ChatMessage[];
+  hasEarlierMessages: boolean;
+  isLoadingEarlierMessages: boolean;
   // 服务状态
   isServiceAvailable: boolean;
+  serviceStatusChecked: boolean;
   isGenerating: boolean;
   isGeneratingPrompt: boolean;
   currentGeneratingMessageId: string | null; // 当前正在生成的消息ID
@@ -132,7 +144,7 @@ interface AppState {
   sidebarCollapsed: boolean;
   
   // Actions
-  setServiceStatus: (status: { available: boolean; is_generating: boolean; is_generating_prompt: boolean }) => void;
+  setServiceStatus: (status: { available: boolean; is_generating?: boolean; is_generating_prompt?: boolean }) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setCurrentWorkflow: (workflow: string) => void;
   commitGenerationSettings: (draft: GenerationSettingsDraft) => void;
@@ -170,11 +182,12 @@ interface AppState {
     newPromptEnd?: string
   ) => Promise<void>;
   clearChatHistory: () => void;
+  loadEarlierMessages: () => Promise<void>;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
   reset: () => void;
-  stopGeneration: () => void;
+  stopGeneration: () => Promise<void>;
   loadDefaultConfig: () => Promise<void>;
   loadAvailableWorkflows: () => Promise<void>;
   loadUserConfig: () => Promise<void>;
@@ -190,7 +203,7 @@ interface AppState {
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   
   // 会话配置管理
-  saveSessionConfig: () => void;
+  saveSessionConfig: (immediate?: boolean) => void;
   loadSessionConfig: (sessionId: string) => Promise<void>;
 }
 
@@ -293,11 +306,16 @@ const initialConfig = guestConfig ? {
   currentWorkflow: guestConfig.currentWorkflow || defaultConfig.currentWorkflow,
 } : defaultConfig;
 
+let sessionSwitchSequence = 0;
+let sessionConfigSaveTimer: number | undefined;
+const sessionConfigSaveChains = new Map<string, Promise<void>>();
+
 export const useAppStore = create<AppState>((set, get) => ({
   // 初始状态
   sessions: [],
   currentSessionId: null,
   isServiceAvailable: false,
+  serviceStatusChecked: false,
   isGenerating: false,
   isGeneratingPrompt: false,
   currentGeneratingMessageId: null,
@@ -329,16 +347,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   referenceImageEnd: null,
   workflowImageStash: {},
   chatHistory: [],
+  hasEarlierMessages: false,
+  isLoadingEarlierMessages: false,
   loading: false,
   error: null,
   sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
   
   // Actions
-  setServiceStatus: (status) => set({
+  setServiceStatus: (status) => set(state => ({
     isServiceAvailable: status.available,
-    isGenerating: status.is_generating,
-    isGeneratingPrompt: status.is_generating_prompt,
-  }),
+    serviceStatusChecked: true,
+    isGenerating: status.is_generating ?? state.isGenerating,
+    isGeneratingPrompt: status.is_generating_prompt ?? state.isGeneratingPrompt,
+  })),
   
   setCurrentWorkflow: (workflow) => {
     const state = get();
@@ -600,7 +621,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { 
         chatHistory: newHistory,
         sessions: updatedSessions,
-        currentGeneratingMessageId: `${messageId}-reply` // 设置当前生成任务ID
+        currentGeneratingMessageId: `${messageId}-reply`, // 设置当前生成任务ID
+        isGenerating: true,
       };
     });
     
@@ -824,6 +846,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return msg;
       }),
       currentGeneratingMessageId: assistantMsgId,
+      isGenerating: true,
     }));
 
     // 登录用户：先等待数据库更新完成，再触发生成（避免与 generateMedia 的竞态条件）
@@ -889,7 +912,38 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     }
   },
-  clearChatHistory: () => set({ chatHistory: [] }),
+  clearChatHistory: () => set({ chatHistory: [], hasEarlierMessages: false }),
+  loadEarlierMessages: async () => {
+    const state = get();
+    const sessionId = state.currentSessionId;
+    if (!sessionId || !isLoggedIn() || !state.hasEarlierMessages || state.isLoadingEarlierMessages) return;
+
+    set({ isLoadingEarlierMessages: true });
+    try {
+      const response = await apiService.getChatHistory(50, sessionId, state.chatHistory.length);
+      if (get().currentSessionId !== sessionId) return;
+      const olderMessages: ChatMessage[] = (response.messages as ApiChatMessage[]).map(message => ({
+        id: message.id,
+        session_id: sessionId,
+        type: message.type,
+        content: message.content || '',
+        images: message.images || [],
+        timestamp: message.timestamp,
+        params: message.params || undefined,
+      }));
+      set(current => {
+        const existingIds = new Set(current.chatHistory.map(message => message.id));
+        return {
+          chatHistory: [...olderMessages.filter(message => !existingIds.has(message.id)), ...current.chatHistory],
+          hasEarlierMessages: response.has_more === true,
+        };
+      });
+    } catch (error) {
+      console.error('加载更早记录失败:', error);
+    } finally {
+      set({ isLoadingEarlierMessages: false });
+    }
+  },
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
@@ -897,9 +951,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ sidebarCollapsed: collapsed });
     localStorage.setItem('sidebarCollapsed', String(collapsed));
   },
-  stopGeneration: () => {
-    // TODO: 实现停止生成的逻辑
-    set({ loading: false, isGenerating: false });
+  stopGeneration: async () => {
+    await apiService.stopGeneration();
+    const messageId = get().currentGeneratingMessageId;
+    set(state => ({
+      loading: false,
+      isGenerating: false,
+      currentGeneratingMessageId: null,
+      chatHistory: messageId
+        ? state.chatHistory.map(message => message.id === messageId ? { ...message, images: [] } : message)
+        : state.chatHistory,
+    }));
   },
   reset: () => set({
     prompt: '',
@@ -911,6 +973,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     referenceImage3: null,
     referenceImageEnd: null,
     chatHistory: [],
+    hasEarlierMessages: false,
     loading: false,
     error: null,
   }),
@@ -1043,7 +1106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadSessions: async () => {
     if (!isLoggedIn()) {
       // 游客模式：从 localStorage 加载
-      let sessions = loadGuestSessions();
+      const sessions = loadGuestSessions();
       
      
       
@@ -1060,7 +1123,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ 
           sessions,
           currentSessionId,
-          chatHistory: chatHistoryWithoutImages
+          chatHistory: chatHistoryWithoutImages,
+          hasEarlierMessages: false,
         });
         
         // 异步恢复图片数据
@@ -1075,7 +1139,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ 
           sessions: [],
           currentSessionId: null,
-          chatHistory: []
+          chatHistory: [],
+          hasEarlierMessages: false,
         });
       }
       return;
@@ -1090,7 +1155,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       let restoredSessionId: string | null = null;
       try {
         const userConfig = await apiService.getUserConfig();
-        restoredSessionId = (userConfig as any).current_session_id || null;
+        restoredSessionId = userConfig.current_session_id || null;
       } catch (error) {
         console.error('获取用户配置失败:', error);
       }
@@ -1116,7 +1181,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     
     // 保存当前会话的配置（如果存在）
     if (state.currentSessionId) {
-      state.saveSessionConfig();
+      state.saveSessionConfig(true);
     }
     
     // 确保工作流列表已加载
@@ -1157,6 +1222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions: [newSession, ...state.sessions],
       currentSessionId: sessionId,
       chatHistory: [], // 清空当前聊天历史
+      hasEarlierMessages: false,
     }));
     
     // 为新会话初始化配置（使用默认工作流的默认参数）
@@ -1260,7 +1326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (otherSessions.length > 0) {
         await state.switchSession(otherSessions[0].id);
       } else {
-        set({ currentSessionId: null, chatHistory: [] });
+        set({ currentSessionId: null, chatHistory: [], hasEarlierMessages: false });
       }
     }
     
@@ -1289,37 +1355,41 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 切换会话
   switchSession: async (sessionId: string) => {
     const state = get();
+    const switchSequence = ++sessionSwitchSequence;
     
     // 如果有正在生成的任务，先停止
     if (state.isGenerating) {
       console.warn('切换会话时自动停止图片生成');
-      state.stopGeneration();
+      try {
+        await state.stopGeneration();
+      } catch (error) {
+        console.error('切换会话时停止生成失败:', error);
+      }
     }
-    
-    set({ currentSessionId: sessionId });
+
+    state.saveSessionConfig(true);
+    set({ currentSessionId: sessionId, hasEarlierMessages: false });
     
     // 持久化 currentSessionId（登录用户保存到后端配置，游客保存到 localStorage）
     if (isLoggedIn()) {
-      try {
-        await apiService.updateUserConfig({ current_session_id: sessionId });
-      } catch (error) {
-        console.error('保存当前会话ID失败:', error);
-      }
+      apiService.updateUserConfig({ current_session_id: sessionId })
+        .catch(error => console.error('保存当前会话ID失败:', error));
     } else {
       localStorage.setItem('currentSessionId', sessionId);
     }
     
     // 加载该会话的配置
     await state.loadSessionConfig(sessionId);
+    if (switchSequence !== sessionSwitchSequence || get().currentSessionId !== sessionId) return;
     
     // 加载该会话的聊天历史
     if (isLoggedIn()) {
       try {
-        const response: any = await apiService.getChatHistory(50, sessionId);
-        const messages = response.messages || [];
+        const response = await apiService.getChatHistory(50, sessionId);
+        const messages = response.messages as ApiChatMessage[];
         
         // 转换后端数据为前端格式
-        const chatHistory: ChatMessage[] = messages.map((msg: any) => ({
+        const chatHistory: ChatMessage[] = messages.map((msg: ApiChatMessage) => ({
           id: msg.id,
           session_id: sessionId,
           type: msg.type,
@@ -1329,7 +1399,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           params: msg.params || undefined,
         }));
         
-        set({ chatHistory });
+        if (switchSequence === sessionSwitchSequence && get().currentSessionId === sessionId) {
+        set({ chatHistory, hasEarlierMessages: response.has_more === true });
+        }
       } catch (error) {
         console.error('加载会话历史失败:', error);
       }
@@ -1339,14 +1411,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       
       // 异步恢复图片数据
       restoreSessionImages(sessionId, historyWithoutImages)
-        .then(chatHistory => set({ chatHistory }))
+        .then(chatHistory => {
+          if (switchSequence === sessionSwitchSequence && get().currentSessionId === sessionId) {
+            set({ chatHistory, hasEarlierMessages: false });
+          }
+        })
         .catch(error => {
           console.error('恢复图片数据失败:', error);
-          set({ chatHistory: historyWithoutImages });
+          if (switchSequence === sessionSwitchSequence && get().currentSessionId === sessionId) {
+            set({ chatHistory: historyWithoutImages, hasEarlierMessages: false });
+          }
         });
       
       // 先设置不带图片的数据，避免界面空白
-      set({ chatHistory: historyWithoutImages });
+      if (switchSequence === sessionSwitchSequence && get().currentSessionId === sessionId) {
+        set({ chatHistory: historyWithoutImages, hasEarlierMessages: false });
+      }
     }
   },
   
@@ -1398,9 +1478,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   
   // 保存当前会话配置
-  saveSessionConfig: () => {
+  saveSessionConfig: (immediate = false) => {
     const state = get();
     if (!state.currentSessionId) return;
+    const sessionId = state.currentSessionId;
     
     const config = {
       workflow: state.currentWorkflow,
@@ -1421,13 +1502,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       frame_count: state.frameCount ?? undefined,
     };
     
-    if (isLoggedIn()) {
-      // 登录用户：保存到后端数据库
-      apiService.updateSessionConfig(state.currentSessionId, config)
-        .catch(err => console.error('保存会话配置失败:', err));
-    } else {
-      // 游客模式：保存到 localStorage
-      saveGuestSessionConfig(state.currentSessionId, {
+    const persist = () => {
+      if (isLoggedIn()) {
+        const previous = sessionConfigSaveChains.get(sessionId) ?? Promise.resolve();
+        const next = previous
+          .catch(() => undefined)
+          .then(() => apiService.updateSessionConfig(sessionId, config))
+          .then(() => undefined)
+          .catch(err => console.error('保存会话配置失败:', err));
+        sessionConfigSaveChains.set(sessionId, next);
+        void next.finally(() => {
+          if (sessionConfigSaveChains.get(sessionId) === next) sessionConfigSaveChains.delete(sessionId);
+        });
+        return;
+      }
+
+      saveGuestSessionConfig(sessionId, {
         workflow: config.workflow,
         prompt: config.prompt,
         loraPrompt: config.lora_prompt,
@@ -1445,6 +1535,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         frameRate: config.frame_rate,
         frameCount: config.frame_count,
       });
+    };
+
+    window.clearTimeout(sessionConfigSaveTimer);
+    if (immediate) {
+      persist();
+    } else {
+      sessionConfigSaveTimer = window.setTimeout(persist, 400);
     }
   },
   
@@ -1454,6 +1551,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 登录用户：从后端加载
       try {
         const config = await apiService.getSessionConfig(sessionId);
+        if (get().currentSessionId !== sessionId) return;
         set({
           currentWorkflow: config.workflow || DEFAULT_CONFIG.WORKFLOW,
           prompt: config.prompt || DEFAULT_CONFIG.PROMPT,
@@ -1462,19 +1560,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.images_per_row ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.reference_image || null,
-          referenceImage2: (config as any).reference_image_2 || null,
-          referenceImage3: (config as any).reference_image_3 || null,
+          referenceImage2: config.reference_image_2 || null,
+          referenceImage3: config.reference_image_3 || null,
           promptEnd: config.prompt_end || '',
           referenceImageEnd: config.reference_image_end || null,
-          isLoop: (config as any).is_loop ?? false,
-          startFrameCount: (config as any).start_frame_count ?? null,
-          endFrameCount: (config as any).end_frame_count ?? null,
-          frameRate: (config as any).frame_rate ?? null,
+          isLoop: config.is_loop ?? false,
+          startFrameCount: config.start_frame_count ?? null,
+          endFrameCount: config.end_frame_count ?? null,
+          frameRate: config.frame_rate ?? null,
           frameCount: config.frame_count ?? null,
           workflowImageStash: {},
         });
       } catch (error) {
         console.error('加载会话配置失败:', error);
+        if (get().currentSessionId !== sessionId) return;
         // 失败时使用默认配置
         set({
           currentWorkflow: DEFAULT_CONFIG.WORKFLOW,
@@ -1499,6 +1598,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       // 游客模式：从 localStorage 加载
       const config = loadGuestSessionConfig(sessionId);
+      if (get().currentSessionId !== sessionId) return;
       if (config) {
         set({
           currentWorkflow: config.workflow || DEFAULT_CONFIG.WORKFLOW,
@@ -1508,15 +1608,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.imagesPerRow ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.referenceImage || null,
-          referenceImage2: (config as any).referenceImage2 || null,
-          referenceImage3: (config as any).referenceImage3 || null,
+          referenceImage2: config.referenceImage2 || null,
+          referenceImage3: config.referenceImage3 || null,
           promptEnd: config.promptEnd || '',
           referenceImageEnd: config.referenceImageEnd || null,
-          isLoop: (config as any).isLoop ?? false,
-          startFrameCount: (config as any).startFrameCount ?? null,
-          endFrameCount: (config as any).endFrameCount ?? null,
-          frameRate: (config as any).frameRate ?? null,
-          frameCount: (config as any).frameCount ?? null,
+          isLoop: config.isLoop ?? false,
+          startFrameCount: config.startFrameCount ?? null,
+          endFrameCount: config.endFrameCount ?? null,
+          frameRate: config.frameRate ?? null,
+          frameCount: config.frameCount ?? null,
           workflowImageStash: {},
         });
       } else {

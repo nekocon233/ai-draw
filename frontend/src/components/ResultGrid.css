@@ -84,6 +84,12 @@
   border-radius: 24px;
 }
 
+.load-earlier-messages {
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
+}
+
 .scroll-to-bottom-button.ant-btn {
   position: fixed;
   z-index: 800;
@@ -517,9 +523,9 @@
   width: 72px;
   height: 72px;
   border-radius: 6px;
-  border: 1px dashed rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px dashed var(--user-message-text);
+  background: var(--user-message-field-bg);
+  color: var(--user-message-text);
   font-size: 20px;
   cursor: pointer;
   display: flex;
@@ -2858,6 +2864,12 @@
   .chat-image-overlay .ant-btn {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .chat-image-overlay {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .edit-ref-remove,

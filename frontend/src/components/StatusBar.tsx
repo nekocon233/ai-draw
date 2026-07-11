@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Tag, Button, Dropdown } from 'antd';
 import { LoadingOutlined, UserOutlined, LogoutOutlined, LoginOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import LoginModal from './LoginModal';
 import { isLoggedIn as checkLoggedIn, getUsername, clearAccessToken } from '../utils/helpers';
 
@@ -66,9 +67,17 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
 }
 
 export default function StatusBar() {
-  const { isGenerating, isGeneratingPrompt, error } = useAppStore();
+  const { isGenerating, isGeneratingPrompt, error, clearError, isServiceAvailable, serviceStatusChecked } = useAppStore(useShallow(state => ({
+    isGenerating: state.isGenerating,
+    isGeneratingPrompt: state.isGeneratingPrompt,
+    error: state.error,
+    clearError: state.clearError,
+    isServiceAvailable: state.isServiceAvailable,
+    serviceStatusChecked: state.serviceStatusChecked,
+  })));
 
-  if (!isGenerating && !isGeneratingPrompt && !error) return null;
+  const serviceUnavailable = serviceStatusChecked && !isServiceAvailable;
+  if (!isGenerating && !isGeneratingPrompt && !error && !serviceUnavailable) return null;
 
   return (
     <div className="app-status-bar" role="status" aria-live="polite">
@@ -83,9 +92,12 @@ export default function StatusBar() {
         </Tag>
       )}
       {error && (
-        <Tag color="error" role="alert">
+        <Tag color="error" role="alert" closable onClose={clearError} aria-label={`${error}，关闭错误提示`}>
           {error}
         </Tag>
+      )}
+      {serviceUnavailable && !error && (
+        <Tag color="error" role="alert">ComfyUI 服务暂不可用</Tag>
       )}
     </div>
   );

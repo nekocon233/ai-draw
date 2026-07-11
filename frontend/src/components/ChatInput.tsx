@@ -12,6 +12,7 @@ import {
   UserOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import { apiService } from '../api/services';
 import './ChatInput.css';
 
@@ -111,7 +112,39 @@ export default function ChatInput() {
     setNanoBananaSendHistory,
     setError,
     clearError,
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({
+    prompt: state.prompt,
+    promptEnd: state.promptEnd,
+    strength: state.strength,
+    count: state.count,
+    loraPrompt: state.loraPrompt,
+    currentWorkflow: state.currentWorkflow,
+    availableWorkflows: state.availableWorkflows,
+    rememberedMethod: state.rememberedMethod,
+    referenceImage: state.referenceImage,
+    referenceImage2: state.referenceImage2,
+    referenceImage3: state.referenceImage3,
+    referenceImageEnd: state.referenceImageEnd,
+    isGenerating: state.isGenerating,
+    currentSessionId: state.currentSessionId,
+    isLoop: state.isLoop,
+    frameRate: state.frameRate,
+    startFrameCount: state.startFrameCount,
+    endFrameCount: state.endFrameCount,
+    frameCount: state.frameCount,
+    nanoBananaSendHistory: state.nanoBananaSendHistory,
+    setPrompt: state.setPrompt,
+    setPromptEnd: state.setPromptEnd,
+    setCurrentWorkflow: state.setCurrentWorkflow,
+    setReferenceImage: state.setReferenceImage,
+    setReferenceImage2: state.setReferenceImage2,
+    setReferenceImage3: state.setReferenceImage3,
+    setReferenceImageEnd: state.setReferenceImageEnd,
+    setIsLoop: state.setIsLoop,
+    setNanoBananaSendHistory: state.setNanoBananaSendHistory,
+    setError: state.setError,
+    clearError: state.clearError,
+  })));
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   const isFlf2v = workflowMeta?.requires_end_image === true;
   const isI2V = currentWorkflow === 'i2v'; // Wan i2v：图生视频
@@ -145,6 +178,7 @@ export default function ChatInput() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [promptAssistantOpen, setPromptAssistantOpen] = useState(false);
   const [poseWebOpen, setPoseWebOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [poseWebTargetSlot, setPoseWebTargetSlot] = useState<1 | 2 | 3>(1);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,6 +187,7 @@ export default function ChatInput() {
   const fileInputEndRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
+  const submissionPendingRef = useRef(false);
   // 组件加载或切换会话时自动聚焦到输入框，并将光标移到末尾
   useEffect(() => {
     if (textAreaRef.current?.resizableTextArea?.textArea) {
@@ -167,6 +202,7 @@ export default function ChatInput() {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.currentTarget.value = '';
 
     const isImage = file.type.startsWith('image/');
     if (!isImage) {
@@ -195,6 +231,7 @@ export default function ChatInput() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      e.currentTarget.value = '';
       if (!file.type.startsWith('image/')) { message.error('\u53ea\u80fd\u4e0a\u4f20\u56fe\u7247\u6587\u4ef6!'); return; }
       if (file.size / 1024 / 1024 >= 10) { message.error('\u56fe\u7247\u5927\u5c0f\u4e0d\u80fd\u8d85\u8fc7 10MB!'); return; }
       try {
@@ -212,11 +249,16 @@ export default function ChatInput() {
     const { isGenerating } = useAppStore.getState();
     
     if (isGenerating) {
-      // 停止生成
-      useAppStore.getState().stopGeneration();
-      message.info('已停止生成');
+      try {
+        await useAppStore.getState().stopGeneration();
+        message.info('已停止生成');
+      } catch (error) {
+        message.error('停止生成失败: ' + getErrorMessage(error));
+      }
       return;
     }
+
+    if (submissionPendingRef.current) return;
 
     if (isFlf2v && !referenceImage) {
       message.warning('请上传开始帧图片');
@@ -234,30 +276,34 @@ export default function ChatInput() {
     }
 
     clearError();
+    submissionPendingRef.current = true;
+    setIsSubmitting(true);
 
     // 添加聊天消息（用户输入 + 加载占位符）
     // 使用用户选择的工作流
     const hasStrength = workflowMeta?.parameters?.some(p => p.name === 'strength') ?? false;
     const effectiveStrength = hasStrength ? strength : undefined;
-    const messageId = await useAppStore.getState().addChatMessage({
-      prompt,
-      workflow: currentWorkflow,
-      strength: effectiveStrength,
-      count,
-      loraPrompt,
-      promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
-      referenceImage,
-      referenceImage2: referenceImage2 || undefined,
-      referenceImage3: referenceImage3 || undefined,
-      referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
-      isLoop: isFlf2v ? isLoop : undefined,
-      frameRate: isFlf2v ? frameRate : (isI2V ? frameRate : undefined),
-      startFrameCount: isFlf2v ? startFrameCount : undefined,
-      endFrameCount: isFlf2v ? endFrameCount : undefined,
-      frameCount: isI2V ? frameCount : undefined,
-    });
-
+    let messageId = '';
     try {
+      messageId = await useAppStore.getState().addChatMessage({
+        prompt,
+        workflow: currentWorkflow,
+        strength: effectiveStrength,
+        count,
+        loraPrompt,
+        promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
+        referenceImage,
+        referenceImage2: referenceImage2 || undefined,
+        referenceImage3: referenceImage3 || undefined,
+        referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
+        isLoop: isFlf2v ? isLoop : undefined,
+        frameRate: isFlf2v ? frameRate : (isI2V ? frameRate : undefined),
+        startFrameCount: isFlf2v ? startFrameCount : undefined,
+        endFrameCount: isFlf2v ? endFrameCount : undefined,
+        frameCount: isI2V ? frameCount : undefined,
+      });
+      if (!messageId) return;
+
       const state = useAppStore.getState();
 
       // 接口立即返回，生成在后台执行，结果和错误通过 WebSocket 推送
@@ -299,11 +345,14 @@ export default function ChatInput() {
       }
     } catch (err: unknown) {
       // HTTP 层面失败（任务未能提交到后台）
-      useAppStore.getState().updateChatImages(messageId, []);
+      if (messageId) useAppStore.getState().updateChatImages(messageId, []);
       useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
       const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       message.error('提交失败: ' + errorMessage);
+    } finally {
+      submissionPendingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
@@ -528,6 +577,7 @@ export default function ChatInput() {
                       size="small"
                       checked={isLoop}
                       onChange={setIsLoop}
+                      aria-label={`视频过渡模式：${isLoop ? '循环' : '单程'}`}
                     />
                     <span className="flf2v-loop-label">
                       {isLoop ? '循环' : '单程'}
@@ -558,7 +608,7 @@ export default function ChatInput() {
                   className="chat-textarea"
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   onPressEnter={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       handleSend();
                     }
@@ -635,7 +685,7 @@ export default function ChatInput() {
                   className="chat-textarea"
                   autoSize={{ minRows: (isRequiresImage || supportsMultiImage) ? 1 : 2, maxRows: 6 }}
                   onPressEnter={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       handleSend();
                     }
@@ -763,7 +813,8 @@ export default function ChatInput() {
             type="primary"
             icon={isGenerating ? <StopOutlined /> : <SendOutlined />}
             onClick={handleSend}
-            disabled={!isGenerating && !!isRequiresImage && !referenceImage}
+            disabled={isSubmitting || (!isGenerating && !!isRequiresImage && !referenceImage)}
+            loading={isSubmitting}
             className="chat-send-button"
             danger={isGenerating}
             aria-label={isGenerating ? '停止生成' : '开始生成'}
@@ -789,6 +840,7 @@ export default function ChatInput() {
             onApply={handleApplyPrompt}
             onApplyEnd={(p) => { setPromptEnd(p); message.success('尾帧描述已应用'); }}
             workflowId={currentWorkflow}
+            workflowMeta={workflowMeta}
             initialPrompt={prompt}
           />
         )}

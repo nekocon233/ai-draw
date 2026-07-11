@@ -6,6 +6,7 @@ import {
   AppstoreOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import { getScrollPosition, setScrollPosition, type StoredScrollPosition } from '../utils/scrollPosition';
 import './ResultGrid.css';
 
@@ -14,7 +15,20 @@ const FrameExtractionModal = lazy(loadFrameEditors);
 const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default: module.ImageEditorModal })));
 
 export default function ResultGrid() {
-  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore();
+  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore(useShallow(state => ({
+    chatHistory: state.chatHistory,
+    currentSessionId: state.currentSessionId,
+    currentWorkflow: state.currentWorkflow,
+    availableWorkflows: state.availableWorkflows,
+    isGenerating: state.isGenerating,
+    currentGeneratingMessageId: state.currentGeneratingMessageId,
+    hasEarlierMessages: state.hasEarlierMessages,
+    isLoadingEarlierMessages: state.isLoadingEarlierMessages,
+    loadEarlierMessages: state.loadEarlierMessages,
+    deleteChatMessage: state.deleteChatMessage,
+    editAndRegenerateMessage: state.editAndRegenerateMessage,
+    appendChatMedia: state.appendChatMedia,
+  })));
   const activeWorkflow = availableWorkflows.find(item => item.key === currentWorkflow);
   const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_multi_image;
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -34,6 +48,7 @@ export default function ResultGrid() {
   const latestScrollPositionRef = useRef<StoredScrollPosition | null>(null);
   const previousMediaCountRef = useRef(0);
   const mediaBaselinePendingRef = useRef(true);
+  const isNearBottomRef = useRef(true);
   const historyMatchesCurrentSession = Boolean(
     currentSessionId
     && chatHistory.length > 0
@@ -59,6 +74,7 @@ export default function ResultGrid() {
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     restoreGenRef.current += 1; // 取消任何在途的恢复循环
     isRestoringRef.current = false;
+    isNearBottomRef.current = true;
     const container = getScrollContainer();
     if (container) {
       container.scrollTo({ top: container.scrollHeight, behavior });
@@ -66,6 +82,17 @@ export default function ResultGrid() {
       messagesEndRef.current?.scrollIntoView({ behavior });
     }
   }, [getScrollContainer]);
+
+  const handleLoadEarlier = useCallback(async () => {
+    const container = getScrollContainer();
+    const previousHeight = container?.scrollHeight ?? 0;
+    const previousTop = container?.scrollTop ?? 0;
+    await loadEarlierMessages();
+    window.requestAnimationFrame(() => {
+      const current = getScrollContainer();
+      if (current) current.scrollTop = previousTop + current.scrollHeight - previousHeight;
+    });
+  }, [getScrollContainer, loadEarlierMessages]);
 
   const getVisibleAnchor = useCallback((container: HTMLElement): StoredScrollPosition => {
     const containerTop = container.getBoundingClientRect().top;
@@ -98,7 +125,7 @@ export default function ResultGrid() {
     let lastHeight = -1;
     let heightStable = 0;
     let attempts = 0;
-    const maxAttempts = 600; // ~10s 上限，覆盖刷新后图片逐步加载
+    const maxAttempts = 100; // 100ms 间隔，最多校正约 10 秒
     const tick = () => {
       if (gen !== restoreGenRef.current) return; // 被更新的恢复取代
       if (!isRestoringRef.current) return;
@@ -135,11 +162,11 @@ export default function ResultGrid() {
           && (message.compareDocumentPosition(anchorAfter) & Node.DOCUMENT_POSITION_FOLLOWING),
         );
       });
-      if ((reached && heightStable >= 15 && !hasPendingImagesBeforeAnchor) || attempts >= maxAttempts) {
+      if ((reached && heightStable >= 3 && !hasPendingImagesBeforeAnchor) || attempts >= maxAttempts) {
         isRestoringRef.current = false;
         return;
       }
-      requestAnimationFrame(tick);
+      window.setTimeout(tick, 100);
     };
     requestAnimationFrame(tick);
   }, [findMessageElement, getScrollContainer]);
@@ -238,8 +265,24 @@ export default function ResultGrid() {
       const sid = currentSessionId as string;
       const saved = getScrollPosition(sid);
       setTimeout(() => {
-        if (saved != null) restoreScrollPosition(saved);
-        else scrollToBottom('auto');
+        if (saved == null) {
+          scrollToBottom('auto');
+          return;
+        }
+        isNearBottomRef.current = false;
+        void (async () => {
+          let pagesLoaded = 0;
+          while (saved.messageId && pagesLoaded < 20) {
+            const container = getScrollContainer();
+            if (container && findMessageElement(container, saved.messageId)) break;
+            const state = useAppStore.getState();
+            if (state.currentSessionId !== sid || !state.hasEarlierMessages) break;
+            await state.loadEarlierMessages();
+            pagesLoaded += 1;
+            await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+          }
+          if (useAppStore.getState().currentSessionId === sid) restoreScrollPosition(saved);
+        })();
       }, 50);
       return;
     }
@@ -247,9 +290,9 @@ export default function ResultGrid() {
     // 当前会话内消息条数变化（发消息 / 生成 / 删除）→ 平滑滚到底
     if (chatHistory.length !== prevHistoryLength.current) {
       prevHistoryLength.current = chatHistory.length;
-      setTimeout(() => scrollToBottom('smooth'), 50);
+      if (isNearBottomRef.current) setTimeout(() => scrollToBottom('smooth'), 50);
     }
-  }, [chatHistory, currentSessionId, restoreScrollPosition, scrollToBottom]);
+  }, [chatHistory, currentSessionId, findMessageElement, getScrollContainer, restoreScrollPosition, scrollToBottom]);
 
   // 媒体替换 loading 占位符时消息数量不变，单独跟踪结果数量并滚动到新结果。
   useEffect(() => {
@@ -269,7 +312,7 @@ export default function ResultGrid() {
 
     const hasNewMedia = mediaCount > previousMediaCountRef.current;
     previousMediaCountRef.current = mediaCount;
-    if (!hasNewMedia) return;
+    if (!hasNewMedia || !isNearBottomRef.current) return;
 
     const sessionAtSchedule = currentSessionId;
     [50, 250, 700].forEach(delay => window.setTimeout(() => {
@@ -283,6 +326,7 @@ export default function ResultGrid() {
 
     const updateScrollButton = () => {
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      isNearBottomRef.current = distanceFromBottom <= 120;
       const rect = container.getBoundingClientRect();
       setShowScrollToBottom(distanceFromBottom > 120);
       setScrollButtonPosition({
@@ -478,6 +522,13 @@ export default function ResultGrid() {
         onChange={handleEditFileChange}
       />
       <div className="chat-messages">
+        {hasEarlierMessages && (
+          <div className="load-earlier-messages">
+            <Button loading={isLoadingEarlierMessages} onClick={() => void handleLoadEarlier()}>
+              加载更早记录
+            </Button>
+          </div>
+        )}
         {chatHistory.map((message) => (
           <div
             key={message.id}
@@ -757,6 +808,7 @@ export default function ResultGrid() {
                                   key={`${mediaKey}:${retryVersion}`}
                                   src={image}
                                   controls
+                                  preload="metadata"
                                   aria-label={`生成视频 ${imgIndex + 1}`}
                                   onError={() => setFailedMediaKeys(previous => new Set(previous).add(mediaKey))}
                                 />
@@ -766,6 +818,7 @@ export default function ResultGrid() {
                                   src={image}
                                   alt={`生成图片 ${imgIndex + 1}`}
                                   className="chat-image"
+                                  loading="lazy"
                                   preview={{ mask: '预览' }}
                                   onError={() => setFailedMediaKeys(previous => new Set(previous).add(mediaKey))}
                                 />

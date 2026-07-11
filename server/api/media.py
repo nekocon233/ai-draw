@@ -382,9 +382,10 @@ async def upload_reference_media(file: UploadFile = File(...)) -> dict:
 
 
 @router.get("/stop")
+@router.post("/stop")
 async def stop_generation(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """停止生成"""
-    service.stop_generation()
+    await service.stop_generation()
     return {"success": True, "message": "已停止生成"}
 
 

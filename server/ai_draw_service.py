@@ -39,6 +39,7 @@ class AIDrawService:
         
         # 状态变化回调
         self.on_state_change = None
+        self._generation_task: Optional[asyncio.Task] = None
     
     async def start_service(self):
         """启动 ComfyUI 服务（如果配置了路径和 Python 解释器）"""
@@ -204,6 +205,8 @@ class AIDrawService:
         kling_options: Optional[dict] = None,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
+        generation_task = asyncio.current_task()
+        self._generation_task = generation_task
         try:
             self.is_generating = True
             self._notify_state_change('is_generating', True)
@@ -553,8 +556,23 @@ class AIDrawService:
             self._notify_state_change('generation_progress', error_msg)
             raise
         finally:
+            if self._generation_task is generation_task:
+                self._generation_task = None
             self.is_generating = False
             self._notify_state_change('is_generating', False)
+
+    async def stop_generation(self) -> None:
+        """中断 ComfyUI 并取消当前生成协程。"""
+        try:
+            await self.comfyui.interrupt()
+        except Exception as error:
+            print(f"[AIDrawService] ComfyUI 中断请求失败: {error}")
+
+        task = self._generation_task
+        if task and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+        self.is_generating = False
+        self._notify_state_change('is_generating', False)
     
     # ── Gemini 多轮对话辅助 ─────────────────────────────────────────────────
 

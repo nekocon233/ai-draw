@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch, Select } from 'antd';
 import { useAppStore, type GenerationSettingsDraft } from '../stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { WorkflowParameterValue } from '../types/api';
 import './SettingsModal.css';
 
@@ -29,7 +30,22 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     frameCount,
     selectOptions,
     commitGenerationSettings,
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({
+    currentWorkflow: state.currentWorkflow,
+    availableWorkflows: state.availableWorkflows,
+    strength: state.strength,
+    count: state.count,
+    loraPrompt: state.loraPrompt,
+    width: state.width,
+    height: state.height,
+    useOriginalSize: state.useOriginalSize,
+    startFrameCount: state.startFrameCount,
+    endFrameCount: state.endFrameCount,
+    frameRate: state.frameRate,
+    frameCount: state.frameCount,
+    selectOptions: state.selectOptions,
+    commitGenerationSettings: state.commitGenerationSettings,
+  })));
 
   const [form] = Form.useForm<SettingsFormValues>();
   const draftWorkflow = Form.useWatch('workflow', form) ?? currentWorkflow;
@@ -199,6 +215,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="strength" noStyle>
                   <Slider
+                    aria-label="生成强度"
                     min={strengthParam?.min ?? 0}
                     max={strengthParam?.max ?? 1}
                     step={strengthParam?.step ?? 0.01}
@@ -209,6 +226,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="strength" noStyle>
                   <InputNumber
+                    aria-label="生成强度数值"
                     min={strengthParam?.min ?? 0}
                     max={strengthParam?.max ?? 1}
                     step={strengthParam?.step ?? 0.01}
@@ -227,6 +245,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="count" noStyle>
                   <Slider
+                    aria-label="生成数量"
                     min={countParam?.min ?? 1}
                     max={countParam?.max ?? 8}
                     step={countParam?.step ?? 1}
@@ -237,6 +256,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="count" noStyle>
                   <InputNumber
+                    aria-label="生成数量数值"
                     min={countParam?.min ?? 1}
                     max={countParam?.max ?? 8}
                     step={countParam?.step ?? 1}
@@ -273,6 +293,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <Col flex="auto">
                   <Form.Item name="width" noStyle>
                     <Slider
+                      aria-label={widthParam?.label || '图像宽度'}
                       min={widthParam?.min || 512}
                       max={widthParam?.max || 2048}
                       step={widthParam?.step || 64}
@@ -282,6 +303,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <Col>
                   <Form.Item name="width" noStyle>
                     <InputNumber
+                      aria-label={`${widthParam?.label || '图像宽度'}数值`}
                       min={widthParam?.min || 512}
                       max={widthParam?.max || 2048}
                       step={widthParam?.step || 64}
@@ -301,6 +323,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="height" noStyle>
                   <Slider
+                    aria-label={heightParam?.label || '图像高度'}
                     min={heightParam?.min || 512}
                     max={heightParam?.max || 2048}
                     step={heightParam?.step || 64}
@@ -310,6 +333,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="height" noStyle>
                   <InputNumber
+                    aria-label={`${heightParam?.label || '图像高度'}数值`}
                     min={heightParam?.min || 512}
                     max={heightParam?.max || 2048}
                     step={heightParam?.step || 64}
@@ -328,6 +352,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="startFrameCount" noStyle>
                   <Slider
+                    aria-label={startFrameCountParam?.label || '起始帧长度'}
                     min={startFrameCountParam?.min ?? 0}
                     max={startFrameCountParam?.max ?? 200}
                     step={startFrameCountParam?.step ?? 1}
@@ -337,6 +362,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="startFrameCount" noStyle>
                   <InputNumber
+                    aria-label={`${startFrameCountParam?.label || '起始帧长度'}数值`}
                     min={startFrameCountParam?.min ?? 0}
                     max={startFrameCountParam?.max ?? 200}
                     step={startFrameCountParam?.step ?? 1}
@@ -355,6 +381,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="endFrameCount" noStyle>
                   <Slider
+                    aria-label={endFrameCountParam?.label || '结束帧长度'}
                     min={endFrameCountParam?.min ?? 0}
                     max={endFrameCountParam?.max ?? 200}
                     step={endFrameCountParam?.step ?? 1}
@@ -364,6 +391,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="endFrameCount" noStyle>
                   <InputNumber
+                    aria-label={`${endFrameCountParam?.label || '结束帧长度'}数值`}
                     min={endFrameCountParam?.min ?? 0}
                     max={endFrameCountParam?.max ?? 200}
                     step={endFrameCountParam?.step ?? 1}
@@ -382,6 +410,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="frameRate" noStyle>
                   <Slider
+                    aria-label={frameRateParam?.label || '帧率'}
                     min={frameRateParam?.min ?? 1}
                     max={frameRateParam?.max ?? 60}
                     step={frameRateParam?.step ?? 1}
@@ -392,6 +421,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="frameRate" noStyle>
                   <InputNumber
+                    aria-label={`${frameRateParam?.label || '帧率'}数值`}
                     min={frameRateParam?.min ?? 1}
                     max={frameRateParam?.max ?? 60}
                     step={frameRateParam?.step ?? 1}
@@ -410,6 +440,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col flex="auto">
                 <Form.Item name="frameCount" noStyle>
                   <Slider
+                    aria-label={frameCountParam?.label || '总帧数'}
                     min={frameCountParam?.min ?? 1}
                     max={frameCountParam?.max ?? 200}
                     step={frameCountParam?.step ?? 1}
@@ -419,6 +450,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="frameCount" noStyle>
                   <InputNumber
+                    aria-label={`${frameCountParam?.label || '总帧数'}数值`}
                     min={frameCountParam?.min ?? 1}
                     max={frameCountParam?.max ?? 200}
                     step={frameCountParam?.step ?? 1}

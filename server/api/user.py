@@ -2,7 +2,7 @@
 用户认证和配置管理 API
 """
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -214,7 +214,8 @@ def reset_user_config(
 
 @router.get("/chat/history")
 def get_chat_history(
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     session_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -226,7 +227,9 @@ def get_chat_history(
     if session_id:
         query = query.filter(ChatMessage.session_id == session_id)
     
-    messages = query.order_by(ChatMessage.created_at.desc()).limit(limit).all()
+    messages = query.order_by(ChatMessage.created_at.desc()).offset(offset).limit(limit + 1).all()
+    has_more = len(messages) > limit
+    messages = messages[:limit]
     
     result = []
     for msg in reversed(messages):
@@ -280,7 +283,7 @@ def get_chat_history(
         
         result.append(msg_dict)
     
-    return {"messages": result}
+    return {"messages": result, "has_more": has_more}
 
 @router.delete("/chat/history")
 def clear_chat_history(

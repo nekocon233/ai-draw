@@ -172,6 +172,12 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 payload = await response.json()
         return payload.get(node_name, {}) if isinstance(payload, dict) else {}
 
+    async def interrupt(self) -> None:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(f"{self.api_address}interrupt") as response:
+                response.raise_for_status()
+
     async def _upload_overwrite_image(self, input_filename: str, remote_filename: str) -> dict:
         """上传到固定临时位置并覆盖旧输入，避免 ComfyUI input 目录持续增长。"""
         async with aiofiles.open(input_filename, "rb") as file:

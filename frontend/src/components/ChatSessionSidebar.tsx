@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, List, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined,
@@ -8,6 +8,7 @@ import {
   PushpinOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import type { ChatSession } from '../types/models';
 import { AccountMenu } from './StatusBar';
 import './ChatSessionSidebar.css';
@@ -36,14 +37,66 @@ export default function ChatSessionSidebar() {
     setSessionPinned,
     sidebarCollapsed,
     setSidebarCollapsed,
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({
+    sessions: state.sessions,
+    currentSessionId: state.currentSessionId,
+    createSession: state.createSession,
+    deleteSession: state.deleteSession,
+    switchSession: state.switchSession,
+    setSessionPinned: state.setSessionPinned,
+    sidebarCollapsed: state.sidebarCollapsed,
+    setSidebarCollapsed: state.setSidebarCollapsed,
+  })));
   
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 768px)').matches);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mobileToggleRef = useRef<HTMLButtonElement>(null);
   const isMobile = () => window.innerWidth <= 768;
+
+  const closeMobileSidebar = () => {
+    setIsMobileOpen(false);
+    window.requestAnimationFrame(() => mobileToggleRef.current?.focus());
+  };
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobileViewport(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport || !isMobileOpen || !sidebarRef.current) return;
+    const sidebar = sidebarRef.current;
+    const focusableSelector = 'button:not(:disabled), a[href], input:not(:disabled), [tabindex]:not([tabindex="-1"])';
+    const focusable = Array.from(sidebar.querySelectorAll<HTMLElement>(focusableSelector));
+    focusable[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMobileSidebar();
+        return;
+      }
+      if (event.key !== 'Tab' || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileOpen, isMobileViewport]);
 
   const handleCreateSession = async () => {
     await createSession();
-    if (isMobile()) setIsMobileOpen(false);
+    if (isMobile()) closeMobileSidebar();
   };
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -55,7 +108,7 @@ export default function ChatSessionSidebar() {
     if (sessionId !== currentSessionId) {
       switchSession(sessionId);
     }
-    if (isMobile()) setIsMobileOpen(false);
+    if (isMobile()) closeMobileSidebar();
   };
 
   const formatDate = (timestamp: number) => {
@@ -136,11 +189,12 @@ export default function ChatSessionSidebar() {
         aria-label="关闭会话列表"
         aria-hidden={!isMobileOpen}
         tabIndex={isMobileOpen ? 0 : -1}
-        onClick={() => setIsMobileOpen(false)}
+        onClick={closeMobileSidebar}
       />
 
       {!isMobileOpen && (
         <button
+          ref={mobileToggleRef}
           className="sidebar-mobile-toggle"
           type="button"
           onClick={() => setIsMobileOpen(true)}
@@ -153,9 +207,14 @@ export default function ChatSessionSidebar() {
       )}
 
       <aside
+        ref={sidebarRef}
         id="chat-session-sidebar"
         className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}
         aria-label="会话导航"
+        aria-hidden={isMobileViewport && !isMobileOpen}
+        aria-modal={isMobileViewport && isMobileOpen ? true : undefined}
+        role={isMobileViewport ? 'dialog' : undefined}
+        inert={isMobileViewport && !isMobileOpen}
       >
         <header className="sidebar-header">
           <div className="sidebar-brand-row">
@@ -170,7 +229,7 @@ export default function ChatSessionSidebar() {
                 icon={<SidebarToggleIcon collapsed={sidebarCollapsed && !isMobileOpen} />}
                 onClick={() => {
                   if (isMobile()) {
-                    setIsMobileOpen(false);
+                    closeMobileSidebar();
                   } else {
                     setSidebarCollapsed(!sidebarCollapsed);
                   }

@@ -5,8 +5,9 @@
 // 服务状态
 export interface ServiceStatus {
   available: boolean;
-  is_generating: boolean;
-  is_generating_prompt: boolean;
+  message?: string;
+  is_generating?: boolean;
+  is_generating_prompt?: boolean;
 }
 
 // 生成 Prompt 请求

@@ -503,10 +503,29 @@ export async function compressImage(
 
 // ============ 会话配置管理（游客模式）============
 
+export interface GuestSessionConfig {
+  workflow: string;
+  prompt: string;
+  loraPrompt: string;
+  strength: number;
+  count: number;
+  imagesPerRow: number;
+  referenceImage: string | null;
+  referenceImage2?: string | null;
+  referenceImage3?: string | null;
+  promptEnd?: string;
+  referenceImageEnd?: string | null;
+  isLoop?: boolean;
+  startFrameCount?: number | null;
+  endFrameCount?: number | null;
+  frameRate?: number | null;
+  frameCount?: number | null;
+}
+
 /**
  * 加载游客会话配置
  */
-export function loadGuestSessionConfig(sessionId: string): any {
+export function loadGuestSessionConfig(sessionId: string): GuestSessionConfig | null {
   try {
     const data = localStorage.getItem(`guestSessionConfig_${sessionId}`);
     return data ? JSON.parse(data) : null;
@@ -519,7 +538,7 @@ export function loadGuestSessionConfig(sessionId: string): any {
 /**
  * 保存游客会话配置
  */
-export function saveGuestSessionConfig(sessionId: string, config: any): void {
+export function saveGuestSessionConfig(sessionId: string, config: GuestSessionConfig): void {
   try {
     localStorage.setItem(`guestSessionConfig_${sessionId}`, JSON.stringify(config));
   } catch (error) {

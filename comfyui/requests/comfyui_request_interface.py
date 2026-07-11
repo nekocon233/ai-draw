@@ -48,6 +48,10 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """获取 ComfyUI 单个节点能力。"""
 
     @abstractmethod
+    async def interrupt(self) -> None:
+        """中断当前 ComfyUI 队列任务。"""
+
+    @abstractmethod
     async def upscale_image(self, workflow, image_b64: str, model_name: str, scale: int, native_scale: int) -> ComfyUIRequestResult:
         """执行通用模型放大工作流。"""
 

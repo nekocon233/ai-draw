@@ -476,6 +476,13 @@
   }
 }
 
+@media (hover: none), (pointer: coarse) {
+  .session-actions .ant-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 @media (hover: none) {
   .session-actions {
     opacity: 1;

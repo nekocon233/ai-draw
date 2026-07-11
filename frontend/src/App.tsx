@@ -8,6 +8,7 @@ import LoginModal from './components/LoginModal';
 import { wsManager } from './api/websocket';
 import { apiService } from './api/services';
 import { useAppStore } from './stores/appStore';
+import { useShallow } from 'zustand/react/shallow';
 import { isLoggedIn } from './utils/helpers';
 import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
 import './App.css';
@@ -15,7 +16,13 @@ import './App.css';
 const ResultGrid = lazy(() => import('./components/ResultGrid'));
 
 function AppContent() {
-  const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore();
+  const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore(useShallow(state => ({
+    setServiceStatus: state.setServiceStatus,
+    setError: state.setError,
+    chatHistory: state.chatHistory,
+    loadUserConfig: state.loadUserConfig,
+    loadSessions: state.loadSessions,
+  })));
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [messageApi, contextHolder] = message.useMessage();
   const [forceLoginOpen] = useState(!isLoggedIn());

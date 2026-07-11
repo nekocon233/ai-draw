@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { useAppStore } from '../stores/appStore';
+import type { WorkflowMetadata } from '../types/api';
 import './PromptAssistantModal.css';
 
 const { TextArea } = Input;
@@ -21,6 +22,7 @@ interface PromptAssistantModalProps {
   onApply: (prompt: string) => void;
   onApplyEnd?: (prompt: string) => void;
   workflowId?: string;
+  workflowMeta?: WorkflowMetadata;
   initialPrompt?: string;
 }
 
@@ -111,7 +113,7 @@ function TextPromptPanel({
           autoSize={{ minRows: 4, maxRows: 8 }}
           autoFocus
           onPressEnter={event => {
-            if (!event.shiftKey) {
+            if (!event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               generate();
             }
@@ -215,7 +217,9 @@ function ImagePromptPanel({ onApply, onClose }: { onApply: (value: string) => vo
           value={extraDescription}
           onChange={event => setExtraDescription(event.target.value)}
           placeholder="例如：描述人物动作、镜头构图和光影风格"
-          onPressEnter={analyze}
+          onPressEnter={event => {
+            if (!event.nativeEvent.isComposing) analyze();
+          }}
         />
       </label>
       <div className="prompt-assistant-generate-row">
@@ -297,7 +301,9 @@ function FramePromptPanel({
           value={extraDescription}
           onChange={event => setExtraDescription(event.target.value)}
           placeholder="补充动作细节、风格或运镜要求"
-          onPressEnter={analyze}
+          onPressEnter={event => {
+            if (!event.nativeEvent.isComposing) analyze();
+          }}
         />
       </label>
       <div className="prompt-assistant-generate-row">
@@ -405,10 +411,11 @@ export default function PromptAssistantModal({
   onApply,
   onApplyEnd,
   workflowId,
+  workflowMeta,
   initialPrompt,
 }: PromptAssistantModalProps) {
-  const showImageAnalysis = workflowId === 't2i' || workflowId === 'i2v';
-  const showFrameAnalysis = workflowId === 'flf2v';
+  const showFrameAnalysis = workflowMeta?.requires_end_image === true;
+  const showImageAnalysis = workflowId === 't2i' || (workflowMeta?.requires_image === true && !showFrameAnalysis);
   const items = [
     {
       key: 'text',

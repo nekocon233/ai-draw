@@ -77,6 +77,15 @@ export interface ImageUpscaleBatchResponse {
   }>;
 }
 
+interface WorkflowDefaultsResponse {
+  success: boolean;
+  defaults: {
+    workflow_metadata?: Record<string, {
+      parameters?: Array<{ name: string; default?: unknown }>;
+    }>;
+  };
+}
+
 export interface VideoBackgroundOptions {
   background_mode?: VideoBackgroundMode;
   rembg_model?: string;
@@ -244,8 +253,8 @@ export const apiService = {
     client.put(`/chat/sessions/${sessionId}/config`, config),
   
   // 聊天历史
-  getChatHistory: (limit?: number, sessionId?: string): Promise<{ messages: any[] }> =>
-    client.get('/chat/history', { params: { limit, session_id: sessionId } }),
+  getChatHistory: (limit?: number, sessionId?: string, offset?: number): Promise<{ messages: unknown[]; has_more?: boolean }> =>
+    client.get('/chat/history', { params: { limit, offset, session_id: sessionId } }),
   
   saveChatMessage: (data: {
     session_id: string;
@@ -313,6 +322,9 @@ export const apiService = {
     client.post('/media/generate', data, {
       timeout: 300000 // 5 分钟，因为生成多张图片耗时较长
     }),
+
+  stopGeneration: (): Promise<{ success: boolean; message: string }> =>
+    client.post('/media/stop'),
   
   // 媒体上传
   uploadImage: (file: File): Promise<UploadImageResponse> => {
@@ -424,13 +436,13 @@ export const apiService = {
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),
 
-  getWorkflowDefaults: (): Promise<{ success: boolean; defaults: any }> =>
+  getWorkflowDefaults: (): Promise<WorkflowDefaultsResponse> =>
     client.get('/service/workflow/defaults'),
 
   switchWorkflow: (workflow_type: string): Promise<{ message: string }> =>
     client.post('/service/workflow/switch', null, { params: { workflow_type } }),
   // 预览
-  getPreviews: (): Promise<{ previews: any[] }> =>
+  getPreviews: (): Promise<{ previews: unknown[] }> =>
     client.get('/previews'),
   
   clearPreviews: (): Promise<{ message: string }> =>
