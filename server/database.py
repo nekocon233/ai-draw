@@ -41,6 +41,16 @@ def init_db():
             
             # 创建表
             Base.metadata.create_all(bind=engine)
+            # 现有部署尚未引入 Alembic，先用幂等 DDL 补齐持久化字段。
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_sessions_is_pinned "
+                    "ON chat_sessions (is_pinned)"
+                ))
             print("[Database] 数据库表初始化完成")
             return
         except Exception as e:

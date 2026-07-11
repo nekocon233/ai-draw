@@ -1,21 +1,25 @@
 import { useEffect } from 'react';
 import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch, Select } from 'antd';
-import { useAppStore } from '../stores/appStore';
+import { useAppStore, type GenerationSettingsDraft } from '../stores/appStore';
+import type { WorkflowParameterValue } from '../types/api';
+import './SettingsModal.css';
 
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
 }
 
+interface SettingsFormValues extends GenerationSettingsDraft {
+  selectOptions: Record<string, WorkflowParameterValue>;
+}
+
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const {
     currentWorkflow,
-    setCurrentWorkflow,
     availableWorkflows,
     strength,
     count,
     loraPrompt,
-    imagesPerRow,
     width,
     height,
     useOriginalSize,
@@ -24,24 +28,15 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     frameRate,
     frameCount,
     selectOptions,
-    setStrength,
-    setCount,
-    setLoraPrompt,
-    setImagesPerRow,
-    setWidth,
-    setHeight,
-    setUseOriginalSize,
-    setStartFrameCount,
-    setEndFrameCount,
-    setFrameRate,
-    setFrameCount,
-    setSelectOption,
+    commitGenerationSettings,
   } = useAppStore();
 
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<SettingsFormValues>();
+  const draftWorkflow = Form.useWatch('workflow', form) ?? currentWorkflow;
+  const draftUseOriginalSize = Form.useWatch('useOriginalSize', form) ?? useOriginalSize;
 
-  // 获取当前工作流的参数配置
-  const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+  // 参数面板由弹窗草稿驱动，切换方式不会提前修改全局状态。
+  const workflowMeta = availableWorkflows.find(w => w.key === draftWorkflow);
   // 同类工作流分组（如 图生图）：用于在设置里选择具体方式
   const category = workflowMeta?.category;
   const methodOptions = category
@@ -57,10 +52,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const hasFrameRate = workflowMeta?.parameters.some(p => p.name === 'frameRate') || false;
   const hasFrameCount = workflowMeta?.parameters.some(p => p.name === 'frameCount') || false;
   const supportsOriginalSize = workflowMeta?.supports_original_size === true;
-  // select 类型参数（如 Kling 时长），直接绑定到 selectOptions（与「生成方式」一致，即时持久化）
+  // select 类型参数（如 Kling 时长）也纳入表单草稿。
   const selectParams = workflowMeta?.parameters.filter(p => p.type === 'select') ?? [];
 
   // 获取 width 和 height 的参数配置
+  const strengthParam = workflowMeta?.parameters.find(p => p.name === 'strength');
+  const countParam = workflowMeta?.parameters.find(p => p.name === 'count');
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
   const heightParam = workflowMeta?.parameters.find(p => p.name === 'height');
   const startFrameCountParam = workflowMeta?.parameters.find(p => p.name === 'startFrameCount');
@@ -68,38 +65,71 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const frameRateParam = workflowMeta?.parameters.find(p => p.name === 'frameRate');
   const frameCountParam = workflowMeta?.parameters.find(p => p.name === 'frameCount');
 
-  // 当弹窗打开时，重置表单值为当前状态
+  // 每次打开弹窗时，从当前已提交状态创建一份完整草稿。
   useEffect(() => {
     if (open) {
+      const currentMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+      const parameter = (name: string) => currentMeta?.parameters.find(item => item.name === name);
       form.setFieldsValue({
-        strength: strength,
-        count: count,
-        loraPrompt: loraPrompt,
-        imagesPerRow: imagesPerRow,
-        width: width ?? widthParam?.default ?? 1024,
-        height: height ?? heightParam?.default ?? 1024,
-        startFrameCount: startFrameCount ?? startFrameCountParam?.default ?? 0,
-        endFrameCount: endFrameCount ?? endFrameCountParam?.default ?? 33,
-        frameRate: frameRate ?? frameRateParam?.default ?? 16,
-        frameCount: frameCount ?? frameCountParam?.default ?? 33,
+        workflow: currentWorkflow,
+        strength,
+        count,
+        loraPrompt,
+        width: width ?? Number(parameter('width')?.default ?? 1024),
+        height: height ?? Number(parameter('height')?.default ?? 1024),
+        useOriginalSize,
+        startFrameCount: startFrameCount ?? Number(parameter('startFrameCount')?.default ?? 0),
+        endFrameCount: endFrameCount ?? Number(parameter('endFrameCount')?.default ?? 33),
+        frameRate: frameRate ?? Number(parameter('frameRate')?.default ?? 16),
+        frameCount: frameCount ?? Number(parameter('frameCount')?.default ?? 33),
+        selectOptions: { ...selectOptions },
       });
     }
-  }, [open, form, strength, count, loraPrompt, imagesPerRow, width, height, widthParam, heightParam, startFrameCount, endFrameCount, frameRate, frameCount, startFrameCountParam, endFrameCountParam, frameRateParam, frameCountParam]);
+  }, [open, form, currentWorkflow, availableWorkflows, strength, count, loraPrompt, width, height, useOriginalSize, startFrameCount, endFrameCount, frameRate, frameCount, selectOptions]);
 
-  const handleOk = () => {
-    form.validateFields().then((values) => {
-      setStrength(values.strength);
-      setCount(values.count);
-      setLoraPrompt(values.loraPrompt || '');
-      setImagesPerRow(values.imagesPerRow);
-      if (hasWidth) setWidth(values.width);
-      if (hasHeight) setHeight(values.height);
-      if (hasStartFrameCount) setStartFrameCount(values.startFrameCount);
-      if (hasEndFrameCount) setEndFrameCount(values.endFrameCount);
-      if (hasFrameRate) setFrameRate(values.frameRate);
-      if (hasFrameCount) setFrameCount(values.frameCount);
-      onClose();
+  const handleDraftWorkflowChange = (workflow: string) => {
+    const targetMeta = availableWorkflows.find(item => item.key === workflow);
+    if (!targetMeta) return;
+    const parameter = (name: string) => targetMeta.parameters.find(item => item.name === name);
+    const nextSelectOptions = { ...(form.getFieldValue('selectOptions') ?? selectOptions) };
+    targetMeta.parameters.forEach(param => {
+      if (param.type !== 'select') return;
+      const current = nextSelectOptions[param.name];
+      if (current === undefined || (param.options && !param.options.includes(String(current)))) {
+        nextSelectOptions[param.name] = param.default;
+      }
     });
+
+    form.setFieldsValue({
+      workflow,
+      strength: Number(parameter('strength')?.default ?? strength),
+      count: Number(parameter('count')?.default ?? count),
+      loraPrompt: String(parameter('lora_prompt')?.default ?? ''),
+      width: parameter('width') ? Number(parameter('width')?.default) : null,
+      height: parameter('height') ? Number(parameter('height')?.default) : null,
+      useOriginalSize: true,
+      startFrameCount: parameter('startFrameCount') ? Number(parameter('startFrameCount')?.default) : null,
+      endFrameCount: parameter('endFrameCount') ? Number(parameter('endFrameCount')?.default) : null,
+      frameRate: parameter('frameRate') ? Number(parameter('frameRate')?.default) : null,
+      frameCount: parameter('frameCount') ? Number(parameter('frameCount')?.default) : null,
+      selectOptions: nextSelectOptions,
+    });
+  };
+
+  const handleOk = async () => {
+    const values = await form.validateFields();
+    commitGenerationSettings({
+      ...values,
+      loraPrompt: values.loraPrompt || '',
+      width: hasWidth ? values.width : null,
+      height: hasHeight ? values.height : null,
+      startFrameCount: hasStartFrameCount ? values.startFrameCount : null,
+      endFrameCount: hasEndFrameCount ? values.endFrameCount : null,
+      frameRate: hasFrameRate ? values.frameRate : null,
+      frameCount: hasFrameCount ? values.frameCount : null,
+      selectOptions: values.selectOptions ?? {},
+    });
+    onClose();
   };
 
   const handleCancel = () => {
@@ -114,9 +144,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       onCancel={handleCancel}
       width={500}
       centered
+      rootClassName="settings-modal-root"
+      className="settings-modal"
       okText="确定"
       cancelText="取消"
       destroyOnClose
+      styles={{ body: { maxHeight: 'min(70dvh, 680px)', overflowY: 'auto', overflowX: 'hidden' } }}
     >
       <Form
         form={form}
@@ -125,14 +158,23 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           strength: strength,
           count: count,
           loraPrompt: loraPrompt,
-          imagesPerRow: imagesPerRow,
         }}
       >
+        {methodOptions.length === 0 && (
+          <Form.Item name="workflow" hidden>
+            <Input />
+          </Form.Item>
+        )}
+        {!supportsOriginalSize && (
+          <Form.Item name="useOriginalSize" valuePropName="checked" hidden>
+            <Switch />
+          </Form.Item>
+        )}
+
         {methodOptions.length > 0 && (
-          <Form.Item label="生成方式">
+          <Form.Item label="生成方式" name="workflow">
             <Select
-              value={currentWorkflow}
-              onChange={(val) => setCurrentWorkflow(val)}
+              onChange={handleDraftWorkflowChange}
               options={methodOptions.map(m => ({
                 label: m.method || m.label,
                 value: m.key,
@@ -143,10 +185,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         )}
 
         {selectParams.map(param => (
-          <Form.Item key={param.name} label={param.label}>
+          <Form.Item key={param.name} label={param.label} name={['selectOptions', param.name]}>
             <Select
-              value={selectOptions[param.name] ?? param.default}
-              onChange={(val) => setSelectOption(param.name, val)}
               options={(param.options || []).map(v => ({ label: v, value: v }))}
               style={{ width: '100%' }}
             />
@@ -155,13 +195,13 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasStrength && (
           <Form.Item label="生成强度">
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="strength" noStyle>
                   <Slider
-                    min={0}
-                    max={1}
-                    step={0.01}
+                    min={strengthParam?.min ?? 0}
+                    max={strengthParam?.max ?? 1}
+                    step={strengthParam?.step ?? 0.01}
                     marks={{ 0: '0', 0.5: '0.5', 1: '1' }}
                   />
                 </Form.Item>
@@ -169,9 +209,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="strength" noStyle>
                   <InputNumber
-                    min={0}
-                    max={1}
-                    step={0.01}
+                    min={strengthParam?.min ?? 0}
+                    max={strengthParam?.max ?? 1}
+                    step={strengthParam?.step ?? 0.01}
                     size="small"
                     style={{ width: 70 }}
                   />
@@ -183,13 +223,13 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasCount && (
           <Form.Item label="生成数量">
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="count" noStyle>
                   <Slider
-                    min={1}
-                    max={8}
-                    step={1}
+                    min={countParam?.min ?? 1}
+                    max={countParam?.max ?? 8}
+                    step={countParam?.step ?? 1}
                     marks={{ 1: '1', 2: '2', 4: '4', 6: '6', 8: '8' }}
                   />
                 </Form.Item>
@@ -197,8 +237,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <Col>
                 <Form.Item name="count" noStyle>
                   <InputNumber
-                    min={1}
-                    max={8}
+                    min={countParam?.min ?? 1}
+                    max={countParam?.max ?? 8}
+                    step={countParam?.step ?? 1}
                     size="small"
                     style={{ width: 70 }}
                   />
@@ -222,15 +263,13 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             {supportsOriginalSize && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span style={{ fontSize: 13 }}>使用原图尺寸</span>
-                <Switch
-                  size="small"
-                  checked={useOriginalSize}
-                  onChange={setUseOriginalSize}
-                />
+                <Form.Item name="useOriginalSize" valuePropName="checked" noStyle>
+                  <Switch size="small" aria-label="使用原图尺寸" />
+                </Form.Item>
               </div>
             )}
-            {(!useOriginalSize || !supportsOriginalSize) && (
-              <Row gutter={12} align="middle">
+            {(!draftUseOriginalSize || !supportsOriginalSize) && (
+              <Row className="settings-control-row" align="middle">
                 <Col flex="auto">
                   <Form.Item name="width" noStyle>
                     <Slider
@@ -256,9 +295,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           </Form.Item>
         )}
 
-        {hasHeight && (!useOriginalSize || !supportsOriginalSize) && (
+        {hasHeight && (!draftUseOriginalSize || !supportsOriginalSize) && (
           <Form.Item label={heightParam?.label || "图像高度"}>
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="height" noStyle>
                   <Slider
@@ -285,7 +324,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasStartFrameCount && (
           <Form.Item label={startFrameCountParam?.label || '起始帧长度'}>
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="startFrameCount" noStyle>
                   <Slider
@@ -312,7 +351,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasEndFrameCount && (
           <Form.Item label={endFrameCountParam?.label || '结束帧长度'}>
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="endFrameCount" noStyle>
                   <Slider
@@ -339,7 +378,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasFrameRate && (
           <Form.Item label={frameRateParam?.label || '帧率'}>
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="frameRate" noStyle>
                   <Slider
@@ -367,7 +406,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {hasFrameCount && (
           <Form.Item label={frameCountParam?.label || '总帧数'}>
-            <Row gutter={12} align="middle">
+            <Row className="settings-control-row" align="middle">
               <Col flex="auto">
                 <Form.Item name="frameCount" noStyle>
                   <Slider
@@ -392,30 +431,6 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           </Form.Item>
         )}
 
-        <Form.Item label="每行显示数量">
-          <Row gutter={12} align="middle">
-            <Col flex="auto">
-              <Form.Item name="imagesPerRow" noStyle>
-                <Slider
-                  min={1}
-                  max={8}
-                  step={1}
-                  marks={{ 1: '1', 2: '2', 4: '4', 6: '6', 8: '8' }}
-                />
-              </Form.Item>
-            </Col>
-            <Col>
-              <Form.Item name="imagesPerRow" noStyle>
-                <InputNumber
-                  min={1}
-                  max={8}
-                  size="small"
-                  style={{ width: 70 }}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form.Item>
       </Form>
     </Modal>
   );

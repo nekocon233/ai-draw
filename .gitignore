@@ -51,6 +51,7 @@ Desktop.ini
 .env
 .env.local
 .env.*.local
+.env.session-title
 
 # Logs
 comfyui_log.txt

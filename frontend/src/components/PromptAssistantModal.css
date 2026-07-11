@@ -1,0 +1,413 @@
+.prompt-assistant-modal :is(.ant-modal-container, .ant-modal-content) {
+  max-height: min(88vh, 820px);
+  padding: 20px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prompt-assistant-modal .ant-modal-header {
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+}
+
+.prompt-assistant-modal .ant-modal-body {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prompt-assistant-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prompt-assistant-title > .anticon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+}
+
+.prompt-assistant-title > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prompt-assistant-title strong {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.prompt-assistant-title span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.prompt-assistant-tabs {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.prompt-assistant-tabs .ant-tabs-nav {
+  flex: 0 0 auto;
+  margin-bottom: 14px;
+}
+
+.prompt-assistant-tabs .ant-tabs-tab-btn > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-assistant-tabs .ant-tabs-content-holder {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 3px;
+}
+
+.prompt-assistant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prompt-assistant-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.prompt-assistant-intro strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.prompt-assistant-intro span,
+.prompt-assistant-generate-row > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.prompt-assistant-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.prompt-assistant-field .ant-input,
+.prompt-assistant-field .ant-input-affix-wrapper {
+  border-radius: 9px;
+}
+
+.prompt-assistant-generate-row {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-assistant-result {
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.prompt-assistant-result-head {
+  margin-bottom: 9px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-assistant-result-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.prompt-assistant-result-head span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.prompt-assistant-result .ant-input {
+  border-radius: 9px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.prompt-assistant-result-actions,
+.prompt-assistant-apply-all {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.prompt-assistant-upload.ant-upload-wrapper .ant-upload-drag {
+  min-height: 150px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.prompt-assistant-upload .ant-upload-btn {
+  min-height: 148px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.prompt-assistant-upload .ant-upload-drag-container {
+  width: 100%;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.prompt-assistant-upload .anticon {
+  margin-bottom: 3px;
+  color: var(--text-primary);
+  font-size: 25px;
+}
+
+.prompt-assistant-upload strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.prompt-assistant-upload span {
+  display: block;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.prompt-assistant-image-preview {
+  position: relative;
+  min-height: 180px;
+  max-height: 300px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.prompt-assistant-image-preview img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+}
+
+.prompt-assistant-image-preview .ant-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.prompt-assistant-frame-grid,
+.prompt-assistant-pose-map {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.prompt-assistant-frame-grid > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.prompt-assistant-frame-grid img,
+.prompt-assistant-frame-empty {
+  width: 100%;
+  height: 150px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  object-fit: contain;
+}
+
+.prompt-assistant-frame-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.prompt-assistant-preset-card {
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.prompt-assistant-preset-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prompt-assistant-preset-heading > .anticon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--bg-tertiary);
+  color: #8c8c8c;
+  display: grid;
+  place-items: center;
+}
+
+.prompt-assistant-preset-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prompt-assistant-preset-heading strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.prompt-assistant-preset-heading span,
+.prompt-assistant-preset-actions > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.prompt-assistant-pose-map > div {
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.prompt-assistant-pose-map b {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.prompt-assistant-pose-map span,
+.prompt-assistant-preset-copy p {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.prompt-assistant-preset-copy {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.prompt-assistant-preset-copy p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.prompt-assistant-preset-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .prompt-assistant-modal.ant-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: none;
+    margin: 8px auto;
+    padding-bottom: 0;
+  }
+
+  .prompt-assistant-modal :is(.ant-modal-container, .ant-modal-content) {
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 16px;
+  }
+
+  .prompt-assistant-title span {
+    display: none;
+  }
+
+  .prompt-assistant-tabs .ant-tabs-nav-wrap {
+    overflow-x: auto;
+  }
+
+  .prompt-assistant-upload.ant-upload-wrapper .ant-upload-drag,
+  .prompt-assistant-upload .ant-upload-btn {
+    min-height: 132px;
+  }
+
+  .prompt-assistant-generate-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .prompt-assistant-generate-row .ant-btn,
+  .prompt-assistant-result-actions .ant-btn,
+  .prompt-assistant-apply-all .ant-btn {
+    min-height: 44px;
+  }
+
+  .prompt-assistant-result-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .prompt-assistant-frame-grid,
+  .prompt-assistant-pose-map {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-assistant-preset-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .prompt-assistant-preset-actions .ant-btn {
+    min-height: 44px;
+  }
+}

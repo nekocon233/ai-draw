@@ -1,18 +1,30 @@
-import { useState, useEffect } from 'react';
-import { Button, List, Input, Popconfirm, Tooltip } from 'antd';
+import { useState } from 'react';
+import { Button, List, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined,
   MessageOutlined,
   DeleteOutlined,
-  EditOutlined,
-  CheckOutlined,
-  CloseOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
+  PushpinFilled,
+  PushpinOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import type { ChatSession } from '../types/models';
+import { AccountMenu } from './StatusBar';
 import './ChatSessionSidebar.css';
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className={`sidebar-control-icon ${collapsed ? 'is-collapsed' : ''}`}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <rect className="sidebar-control-shell" x="3.25" y="4.25" width="17.5" height="15.5" rx="3" />
+      <path className="sidebar-control-rail" d="M9 4.75v14.5" />
+      <path className="sidebar-control-arrow" d="m16 9-3 3 3 3" />
+    </svg>
+  );
+}
 
 export default function ChatSessionSidebar() {
   const {
@@ -21,20 +33,13 @@ export default function ChatSessionSidebar() {
     createSession,
     deleteSession,
     switchSession,
-    updateSessionTitle,
+    setSessionPinned,
     sidebarCollapsed,
     setSidebarCollapsed,
   } = useAppStore();
   
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState('');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const isMobile = () => window.innerWidth <= 768;
-
-  // 手机端点击会话后自动关闭侧边栏
-  useEffect(() => {
-    setIsMobileOpen(false);
-  }, [currentSessionId]);
 
   const handleCreateSession = async () => {
     await createSession();
@@ -50,25 +55,7 @@ export default function ChatSessionSidebar() {
     if (sessionId !== currentSessionId) {
       switchSession(sessionId);
     }
-  };
-
-  const startEditTitle = (session: ChatSession, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingSessionId(session.id);
-    setEditingTitle(session.title);
-  };
-
-  const saveTitle = async () => {
-    if (editingSessionId && editingTitle.trim()) {
-      await updateSessionTitle(editingSessionId, editingTitle.trim());
-    }
-    setEditingSessionId(null);
-    setEditingTitle('');
-  };
-
-  const cancelEdit = () => {
-    setEditingSessionId(null);
-    setEditingTitle('');
+    if (isMobile()) setIsMobileOpen(false);
   };
 
   const formatDate = (timestamp: number) => {
@@ -88,131 +75,152 @@ export default function ChatSessionSidebar() {
     }
   };
 
+  const pinnedSessions = sessions.filter(session => session.is_pinned).sort((a, b) => b.updated_at - a.updated_at);
+  const recentSessions = sessions.filter(session => !session.is_pinned).sort((a, b) => b.updated_at - a.updated_at);
+
+  const renderSession = (session: ChatSession) => (
+    <List.Item
+      key={session.id}
+      className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
+    >
+      <button
+        type="button"
+        className="session-select"
+        onClick={() => handleSwitchSession(session.id)}
+        aria-current={session.id === currentSessionId ? 'page' : undefined}
+      >
+        <MessageOutlined className="session-icon" />
+        <span className="session-copy">
+          <span className="session-title">{session.title}</span>
+          <span className="session-meta">
+            <span>{formatDate(session.updated_at)}</span>
+            <span>{session.message_count} 条</span>
+          </span>
+        </span>
+      </button>
+
+      <div className="session-actions">
+        <Tooltip title={session.is_pinned ? '取消置顶' : '置顶'}>
+          <Button
+            type="text"
+            size="small"
+            className={session.is_pinned ? 'is-pinned' : ''}
+            icon={session.is_pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            onClick={(event) => {
+              event.stopPropagation();
+              setSessionPinned(session.id, !session.is_pinned);
+            }}
+            aria-label={`${session.is_pinned ? '取消置顶' : '置顶'} ${session.title}`}
+          />
+        </Tooltip>
+        <Popconfirm
+          title="确定删除这个对话吗？"
+          description="删除后无法恢复"
+          onConfirm={(event) => handleDeleteSession(session.id, event!)}
+          okText="删除"
+          cancelText="取消"
+        >
+          <Tooltip title="删除">
+            <Button type="text" size="small" danger icon={<DeleteOutlined />} aria-label={`删除 ${session.title}`} />
+          </Tooltip>
+        </Popconfirm>
+      </div>
+    </List.Item>
+  );
+
   return (
     <>
-      {/* 手机端遮罩层 */}
-      {isMobileOpen && (
-        <div className="sidebar-overlay" onClick={() => setIsMobileOpen(false)} />
-      )}
+      <button
+        className={`sidebar-overlay ${isMobileOpen ? 'is-visible' : ''}`}
+        type="button"
+        aria-label="关闭会话列表"
+        aria-hidden={!isMobileOpen}
+        tabIndex={isMobileOpen ? 0 : -1}
+        onClick={() => setIsMobileOpen(false)}
+      />
 
-      {/* 手机端汉堡按钮（固定在左上角，侧边栏收起时显示） */}
       {!isMobileOpen && (
         <button
           className="sidebar-mobile-toggle"
+          type="button"
           onClick={() => setIsMobileOpen(true)}
-          title="打开会话列表"
+          aria-label="打开会话列表"
+          aria-expanded={false}
+          aria-controls="chat-session-sidebar"
         >
-          <MenuUnfoldOutlined />
+          <SidebarToggleIcon collapsed />
         </button>
       )}
 
-      <div className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
-      <div className="sidebar-header">
-        {(!sidebarCollapsed || isMobileOpen) && (
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleCreateSession}
-            size="small"
-          >
-            新对话
-          </Button>
-        )}
-        <Button
-          className="collapse-btn"
-          type="text"
-          icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          onClick={() => {
-            if (isMobile()) {
-              setIsMobileOpen(false);
-            } else {
-              setSidebarCollapsed(!sidebarCollapsed);
-            }
-          }}
-          title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-        />
-      </div>
+      <aside
+        id="chat-session-sidebar"
+        className={`chat-session-sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}
+        aria-label="会话导航"
+      >
+        <header className="sidebar-header">
+          <div className="sidebar-brand-row">
+            <span className="sidebar-brand-lockup">
+              <img src="/ai-draw.svg" alt="" aria-hidden="true" />
+              <span className="sidebar-brand">ai-draw</span>
+            </span>
+            <Tooltip title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}>
+              <Button
+                className="collapse-btn"
+                type="text"
+                icon={<SidebarToggleIcon collapsed={sidebarCollapsed && !isMobileOpen} />}
+                onClick={() => {
+                  if (isMobile()) {
+                    setIsMobileOpen(false);
+                  } else {
+                    setSidebarCollapsed(!sidebarCollapsed);
+                  }
+                }}
+                aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+              />
+            </Tooltip>
+          </div>
 
-      <div className="session-list">
-        <List
-          dataSource={sessions.sort((a, b) => b.updated_at - a.updated_at)}
-          renderItem={(session) => (
-            <List.Item
-              key={session.id}
-              className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
-              onClick={() => handleSwitchSession(session.id)}
+          <Tooltip title={sidebarCollapsed && !isMobileOpen ? '新对话' : undefined} placement="right">
+            <Button
+              className="new-chat-button"
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={handleCreateSession}
+              aria-label={sidebarCollapsed && !isMobileOpen ? '新对话' : undefined}
             >
-              <div className="session-content">
-                <div className="session-header">
-                  <MessageOutlined className="session-icon" />
-                  {editingSessionId === session.id ? (
-                    <div className="session-title-edit" onClick={(e) => e.stopPropagation()}>
-                      <Input
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onPressEnter={saveTitle}
-                        size="small"
-                        autoFocus
-                      />
-                      <div className="edit-actions">
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<CheckOutlined />}
-                          onClick={saveTitle}
-                        />
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<CloseOutlined />}
-                          onClick={cancelEdit}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <span className="session-title">{session.title}</span>
-                  )}
-                </div>
-                <div className="session-meta">
-                  <span className="session-time">{formatDate(session.updated_at)}</span>
-                  <span className="session-count">{session.message_count} 条消息</span>
-                </div>
-              </div>
-              <div className="session-actions" onClick={(e) => e.stopPropagation()}>
-                {editingSessionId !== session.id && (
-                  <>
-                    <Tooltip title="重命名">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={(e) => startEditTitle(session, e)}
-                      />
-                    </Tooltip>
-                    <Popconfirm
-                      title="确定删除这个对话吗？"
-                      description="删除后无法恢复"
-                      onConfirm={(e) => handleDeleteSession(session.id, e!)}
-                      okText="删除"
-                      cancelText="取消"
-                    >
-                      <Tooltip title="删除">
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                        />
-                      </Tooltip>
-                    </Popconfirm>
-                  </>
-                )}
-              </div>
-            </List.Item>
+              <span className="new-chat-label">新对话</span>
+            </Button>
+          </Tooltip>
+        </header>
+
+        <nav className="session-list" aria-label="最近会话">
+          {sessions.length > 0 ? (
+            <>
+              {pinnedSessions.length > 0 && (
+                <section className="session-group" aria-labelledby="pinned-sessions-label">
+                  <div id="pinned-sessions-label" className="session-list-label">置顶</div>
+                  <List dataSource={pinnedSessions} renderItem={renderSession} />
+                </section>
+              )}
+              {recentSessions.length > 0 && (
+                <section className="session-group" aria-labelledby="recent-sessions-label">
+                  <div id="recent-sessions-label" className="session-list-label">最近</div>
+                  <List dataSource={recentSessions} renderItem={renderSession} />
+                </section>
+              )}
+            </>
+          ) : (
+            <div className="session-empty">
+              <MessageOutlined />
+              <span>还没有对话</span>
+            </div>
           )}
-        />
-      </div>
-    </div>
+        </nav>
+
+        <footer className="sidebar-footer">
+          <AccountMenu collapsed={sidebarCollapsed && !isMobileOpen} />
+        </footer>
+      </aside>
     </>
   );
 }

@@ -1,17 +1,22 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Image, Spin, Tag, Button, Popconfirm, Input } from 'antd';
+import { lazy, Suspense, useEffect, useRef, useState, useCallback } from 'react';
+import { Image, Tag, Button, Popconfirm, Input, message as antMessage } from 'antd';
 import {
-  DownloadOutlined, PictureOutlined, LoadingOutlined,
+  DownloadOutlined, PictureOutlined, ReloadOutlined,
   DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
-  AppstoreOutlined, EyeOutlined,
+  AppstoreOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { getScrollPosition, setScrollPosition, type StoredScrollPosition } from '../utils/scrollPosition';
-import FrameExtractionModal, { ImageEditorModal } from './FrameExtractionModal';
 import './ResultGrid.css';
 
+const loadFrameEditors = () => import('./FrameExtractionModal');
+const FrameExtractionModal = lazy(loadFrameEditors);
+const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default: module.ImageEditorModal })));
+
 export default function ResultGrid() {
-  const { chatHistory, imagesPerRow, currentSessionId, isGenerating, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore();
+  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore();
+  const activeWorkflow = availableWorkflows.find(item => item.key === currentWorkflow);
+  const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_multi_image;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -27,6 +32,13 @@ export default function ResultGrid() {
   // 最近一次用户滚动位置。刷新/关闭页面时 React cleanup 不可靠，需靠 pagehide 强制落盘。
   const latestScrollSessionRef = useRef<string | null>(null);
   const latestScrollPositionRef = useRef<StoredScrollPosition | null>(null);
+  const previousMediaCountRef = useRef(0);
+  const mediaBaselinePendingRef = useRef(true);
+  const historyMatchesCurrentSession = Boolean(
+    currentSessionId
+    && chatHistory.length > 0
+    && chatHistory.every(message => message.session_id === currentSessionId),
+  );
 
   // 找到真正负责滚动的容器：从锚点向上找第一个「实际可滚动」的祖先
   // （overflow-y 为 auto/scroll 且 scrollHeight > clientHeight）；找不到时回退到 .results-area。
@@ -113,7 +125,17 @@ export default function ResultGrid() {
       const reached = anchorAfter
         ? Math.abs((anchorAfter.getBoundingClientRect().top - el.getBoundingClientRect().top) - (position.offset ?? 0)) < 1
         : Math.abs(lastSetTop - position.scrollTop) < 1;
-      if ((reached && heightStable >= 15) || attempts >= maxAttempts) {
+      const hasPendingImagesBeforeAnchor = Array.from(el.querySelectorAll<HTMLImageElement>('img')).some(image => {
+        if (image.complete) return false;
+        if (!anchorAfter) return true;
+        const message = image.closest<HTMLElement>('[data-message-id]');
+        return Boolean(
+          message
+          && message !== anchorAfter
+          && (message.compareDocumentPosition(anchorAfter) & Node.DOCUMENT_POSITION_FOLLOWING),
+        );
+      });
+      if ((reached && heightStable >= 15 && !hasPendingImagesBeforeAnchor) || attempts >= maxAttempts) {
         isRestoringRef.current = false;
         return;
       }
@@ -132,7 +154,10 @@ export default function ResultGrid() {
   } | null>(null);
   const [imageEditor, setImageEditor] = useState<{ messageId: string; imageUrl: string } | null>(null);
   const [stripImageKeys, setStripImageKeys] = useState<Set<string>>(new Set());
-  const [activePreviewImage, setActivePreviewImage] = useState<{ url: string; alt: string } | null>(null);
+  const [failedMediaKeys, setFailedMediaKeys] = useState<Set<string>>(new Set());
+  const [mediaRetryVersions, setMediaRetryVersions] = useState<Record<string, number>>({});
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [scrollButtonPosition, setScrollButtonPosition] = useState({ left: 0, bottom: 0 });
   const [editRefImages, setEditRefImages] = useState<{
     img1?: string | null;
     img2?: string | null;
@@ -140,6 +165,7 @@ export default function ResultGrid() {
   }>({});
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const activeRefSlot = useRef<1 | 2 | 3>(1);
+
 
   const startEdit = useCallback((message: { id: string; content: string; params?: { promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string } }) => {
     setEditingMsgId(message.id);
@@ -187,6 +213,7 @@ export default function ResultGrid() {
     if (currentSessionId && currentSessionId !== prevSessionId.current) {
       prevSessionId.current = currentSessionId;
       pendingSessionRef.current = currentSessionId;
+      mediaBaselinePendingRef.current = true;
     }
   }, [currentSessionId]);
 
@@ -224,10 +251,63 @@ export default function ResultGrid() {
     }
   }, [chatHistory, currentSessionId, restoreScrollPosition, scrollToBottom]);
 
+  // 媒体替换 loading 占位符时消息数量不变，单独跟踪结果数量并滚动到新结果。
+  useEffect(() => {
+    const mediaCount = chatHistory.reduce(
+      (total, message) => total + (message.images?.filter(image => typeof image === 'string').length ?? 0),
+      0,
+    );
+    const historyMatchesSession = chatHistory.length === 0
+      || chatHistory.every(message => message.session_id === currentSessionId);
+
+    if (mediaBaselinePendingRef.current) {
+      if (!historyMatchesSession) return;
+      mediaBaselinePendingRef.current = false;
+      previousMediaCountRef.current = mediaCount;
+      return;
+    }
+
+    const hasNewMedia = mediaCount > previousMediaCountRef.current;
+    previousMediaCountRef.current = mediaCount;
+    if (!hasNewMedia) return;
+
+    const sessionAtSchedule = currentSessionId;
+    [50, 250, 700].forEach(delay => window.setTimeout(() => {
+      if (prevSessionId.current === sessionAtSchedule) scrollToBottom('smooth');
+    }, delay));
+  }, [chatHistory, currentSessionId, scrollToBottom]);
+
+  useEffect(() => {
+    const container = getScrollContainer();
+    if (!container) return;
+
+    const updateScrollButton = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      const rect = container.getBoundingClientRect();
+      setShowScrollToBottom(distanceFromBottom > 120);
+      setScrollButtonPosition({
+        left: rect.left + rect.width / 2,
+        bottom: window.innerHeight - rect.bottom + 14,
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(updateScrollButton);
+    resizeObserver.observe(container);
+    container.addEventListener('scroll', updateScrollButton, { passive: true });
+    window.addEventListener('resize', updateScrollButton);
+    updateScrollButton();
+
+    return () => {
+      resizeObserver.disconnect();
+      container.removeEventListener('scroll', updateScrollButton);
+      window.removeEventListener('resize', updateScrollButton);
+    };
+  }, [chatHistory.length, getScrollContainer]);
+
   // 保存滚动位置：用户滚动时（debounce）写入 localStorage；切换会话前 flush 落盘
   useEffect(() => {
     const container = getScrollContainer();
-    if (!container || !currentSessionId) return;
+    if (!container || !currentSessionId || !historyMatchesCurrentSession) return;
     const sid = currentSessionId;
     let timer: number | undefined;
     const captureLatest = () => {
@@ -272,7 +352,7 @@ export default function ResultGrid() {
       window.removeEventListener('beforeunload', flush);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [getScrollContainer, getVisibleAnchor, currentSessionId, chatHistory.length]);
+  }, [getScrollContainer, getVisibleAnchor, currentSessionId, historyMatchesCurrentSession]);
 
   useEffect(() => {
     const candidates: { key: string; url: string }[] = [];
@@ -335,6 +415,29 @@ export default function ResultGrid() {
     link.click();
   };
 
+  const retryMedia = (mediaKey: string) => {
+    setFailedMediaKeys(previous => {
+      const next = new Set(previous);
+      next.delete(mediaKey);
+      return next;
+    });
+    setMediaRetryVersions(previous => ({
+      ...previous,
+      [mediaKey]: (previous[mediaKey] ?? 0) + 1,
+    }));
+  };
+
+  const setAsReference = (imageUrl: string) => {
+    const state = useAppStore.getState();
+    const workflow = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
+    if (!state.referenceImage) state.setReferenceImage(imageUrl);
+    else if (workflow?.requires_end_image && !state.referenceImageEnd) state.setReferenceImageEnd(imageUrl);
+    else if (workflow?.supports_multi_image && !state.referenceImage2) state.setReferenceImage2(imageUrl);
+    else if (workflow?.supports_multi_image && !state.referenceImage3) state.setReferenceImage3(imageUrl);
+    else state.setReferenceImage(imageUrl);
+    antMessage.success('已添加到当前输入的参考图');
+  };
+
   const openFrameEditor = (messageId: string, videoUrl: string) => {
     setFrameEditor({ messageId, videoUrl });
   };
@@ -357,8 +460,8 @@ export default function ResultGrid() {
     return (
       <div className="result-container">
         <div className="result-empty">
-          <PictureOutlined className="result-empty-icon" />
-          <span className="result-empty-text">暂无生成结果</span>
+          <PictureOutlined className="result-empty-icon" aria-hidden="true" />
+          <span className="result-empty-text">输入提示词开始生成，结果会显示在这里</span>
         </div>
       </div>
     );
@@ -383,36 +486,7 @@ export default function ResultGrid() {
           >
             {message.type === 'user' ? (
               // 用户消息（右侧）
-              <div className="chat-message-content user-message">
-                {/* 删除按钮 */}
-                <Popconfirm
-                  title="确认删除这轮对话？"
-                  onConfirm={() => deleteChatMessage(message.id)}
-                  okText="删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  placement="topLeft"
-                  disabled={editingMsgId === message.id}
-                >
-                  <Button
-                    className="delete-round-btn"
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    disabled={editingMsgId === message.id || isGenerating}
-                  />
-                </Popconfirm>
-                {/* 编辑按钮 */}
-                <Button
-                  className="edit-round-btn"
-                  type="text"
-                  size="small"
-                  icon={<EditOutlined />}
-                  disabled={isGenerating}
-                  onClick={() => startEdit(message)}
-                  style={{ display: editingMsgId === message.id ? 'none' : undefined }}
-                />
+              <div className={`chat-message-content user-message ${editingMsgId === message.id ? 'is-editing' : ''}`}>
                 <div className="chat-message-bubble">
                   {editingMsgId === message.id ? (
                     /* ======= 编辑模式 ======= */
@@ -428,15 +502,18 @@ export default function ResultGrid() {
                               <div key={slot} className="edit-ref-image-tile">
                                 <img src={src} alt={`参考图 ${slotNum}`} className="edit-ref-thumb" />
                                 <button
+                                  type="button"
                                   className="edit-ref-remove"
                                   onClick={() => setEditRefImages(prev => ({ ...prev, [slot]: null }))}
+                                  aria-label={`移除参考图 ${slotNum}`}
                                 >
                                   <CloseOutlined />
                                 </button>
                                 <button
+                                  type="button"
                                   className="edit-ref-replace"
                                   onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
-                                  title="点击更换图片"
+                                  aria-label={`更换参考图 ${slotNum}`}
                                 >
                                   <EditOutlined />
                                 </button>
@@ -444,9 +521,10 @@ export default function ResultGrid() {
                             ) : (
                               <button
                                 key={slot}
+                                type="button"
                                 className="edit-ref-add"
                                 onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
-                                title={`添加参考图 ${slotNum}`}
+                                aria-label={`添加参考图 ${slotNum}`}
                               >
                                 <PlusOutlined />
                               </button>
@@ -462,6 +540,7 @@ export default function ResultGrid() {
                         onChange={e => setEditContent(e.target.value)}
                         autoSize={{ minRows: 2, maxRows: 8 }}
                         placeholder="输入提示词…"
+                        aria-label="提示词"
                       />
 
                       {/* 尾帧提示词（flf2v 循环模式） */}
@@ -472,6 +551,7 @@ export default function ResultGrid() {
                           onChange={e => setEditPromptEnd(e.target.value)}
                           autoSize={{ minRows: 2, maxRows: 4 }}
                           placeholder="结束帧提示词…"
+                          aria-label="结束帧提示词"
                         />
                       )}
 
@@ -580,123 +660,176 @@ export default function ResultGrid() {
                     </>
                   )}
                 </div>
+                {editingMsgId !== message.id && (
+                  <div className="user-message-actions" aria-label="消息操作">
+                    <Button
+                      className="edit-round-btn"
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      disabled={isGenerating}
+                      onClick={() => startEdit(message)}
+                      aria-label="编辑并重新生成"
+                    />
+                    <Popconfirm
+                      title="确认删除这轮对话？"
+                      onConfirm={() => deleteChatMessage(message.id)}
+                      okText="删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                      placement="topLeft"
+                    >
+                      <Button
+                        className="delete-round-btn"
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={isGenerating}
+                        aria-label="删除本轮对话"
+                      />
+                    </Popconfirm>
+                  </div>
+                )}
               </div>
             ) : (
               // AI 回复（左侧）- 图片网格
               <div className="chat-message-content assistant-message">
-                <div 
-                  className="chat-images-grid"
-                  style={{ gridTemplateColumns: `repeat(${imagesPerRow}, 1fr)` }}
-                >
-                  {message.images && message.images.map((image, imgIndex) => (
-                    <div key={imgIndex} className="chat-image-item">
+                {message.images?.length ? (
+                  <div
+                    className="chat-images-grid"
+                    aria-busy={message.id === currentGeneratingMessageId}
+                  >
+                    {message.images.map((image, imgIndex) => (
+                    <div
+                      key={imgIndex}
+                      className={`chat-image-item ${typeof image === 'string' && stripImageKeys.has(`${message.id}:${imgIndex}`) ? 'is-strip' : ''}`}
+                      tabIndex={typeof image === 'string' ? 0 : undefined}
+                      aria-label={typeof image === 'string' ? `生成结果 ${imgIndex + 1}` : undefined}
+                    >
                       {typeof image === 'string' ? (() => {
                         const mediaKey = `${message.id}:${imgIndex}`;
                         const video = isVideo(image);
                         const stripImage = stripImageKeys.has(mediaKey);
+                        const failed = failedMediaKeys.has(mediaKey);
+                        const retryVersion = mediaRetryVersions[mediaKey] ?? 0;
 
                         return (
-                        <div 
-                          className={`chat-image-wrapper ${stripImage ? 'chat-image-wrapper-strip' : ''}`}
-                          draggable={!video}
-                          onDragStart={(e) => {
-                            if (video) return;
-                            // 设置拖放数据，确保目标可以接收到图片 URL
-                            e.dataTransfer.setData('text/uri-list', image);
-                            e.dataTransfer.setData('text/plain', image);
-                            e.dataTransfer.effectAllowed = 'copy';
-                            
-                            // 用已渲染的 img 元素同步绘制缩略图，避免显示原图大尺寸
-                            const PREVIEW_SIZE = 120;
-                            const imgEl = (e.currentTarget as HTMLElement).querySelector('img');
-                            const canvas = document.createElement('canvas');
-                            canvas.width = PREVIEW_SIZE;
-                            canvas.height = PREVIEW_SIZE;
-                            canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
-                            document.body.appendChild(canvas);
-                            if (imgEl) {
-                              const ctx = canvas.getContext('2d');
-                              const scale = Math.min(PREVIEW_SIZE / imgEl.naturalWidth, PREVIEW_SIZE / imgEl.naturalHeight);
-                              const w = imgEl.naturalWidth * scale;
-                              const h = imgEl.naturalHeight * scale;
-                              ctx?.drawImage(imgEl, (PREVIEW_SIZE - w) / 2, (PREVIEW_SIZE - h) / 2, w, h);
-                            }
-                            e.dataTransfer.setDragImage(canvas, PREVIEW_SIZE / 2, PREVIEW_SIZE / 2);
-                            setTimeout(() => document.body.removeChild(canvas), 0);
-                          }}
-                          style={{ cursor: video ? 'default' : 'grab' }}
-                        >
-                          {video ? (
-                            <video
-                              src={image}
-                              controls
-                              style={{ width: '100%', maxHeight: 400, borderRadius: 4, display: 'block' }}
-                            />
-                          ) : (
-                            <Image
-                              src={image}
-                              alt={`生成图片 ${imgIndex + 1}`}
-                              className="chat-image"
-                              preview={{ mask: '预览' }}
-                            />
-                          )}
-                          {stripImage && (
-                            <Button
-                              type="primary"
-                              size="small"
-                              className="chat-image-preview-direct"
-                              icon={<EyeOutlined />}
-                              onClick={() => setActivePreviewImage({
-                                url: image,
-                                alt: `生成图片 ${imgIndex + 1}`,
-                              })}
+                          <>
+                            <div
+                              className={`chat-image-wrapper ${stripImage ? 'chat-image-wrapper-strip' : ''}`}
+                              draggable={!video && !failed}
+                              onDragStart={(e) => {
+                                if (video || failed) return;
+                                e.dataTransfer.setData('text/uri-list', image);
+                                e.dataTransfer.setData('text/plain', image);
+                                e.dataTransfer.effectAllowed = 'copy';
+
+                                const previewSize = 120;
+                                const imageElement = (e.currentTarget as HTMLElement).querySelector('img');
+                                const canvas = document.createElement('canvas');
+                                canvas.width = previewSize;
+                                canvas.height = previewSize;
+                                canvas.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+                                document.body.appendChild(canvas);
+                                if (imageElement) {
+                                  const context = canvas.getContext('2d');
+                                  const scale = Math.min(previewSize / imageElement.naturalWidth, previewSize / imageElement.naturalHeight);
+                                  const width = imageElement.naturalWidth * scale;
+                                  const height = imageElement.naturalHeight * scale;
+                                  context?.drawImage(imageElement, (previewSize - width) / 2, (previewSize - height) / 2, width, height);
+                                }
+                                e.dataTransfer.setDragImage(canvas, previewSize / 2, previewSize / 2);
+                                setTimeout(() => document.body.removeChild(canvas), 0);
+                              }}
+                              style={{ cursor: video || failed ? 'default' : 'grab' }}
                             >
-                              预览
-                            </Button>
-                          )}
-                          <div className="chat-image-overlay">
-                            <Button
-                              type="primary"
-                              size="small"
-                              icon={<DownloadOutlined />}
-                              onClick={() => downloadImage(image, imgIndex)}
-                            >
-                              下载
-                            </Button>
-                            {video && (
-                              <>
+                              {failed ? (
+                                <div className="media-load-error" role="alert">
+                                  <PictureOutlined aria-hidden="true" />
+                                  <span>媒体加载失败</span>
+                                  <Button type="text" icon={<ReloadOutlined />} onClick={() => retryMedia(mediaKey)}>
+                                    重新加载
+                                  </Button>
+                                </div>
+                              ) : video ? (
+                                <video
+                                  key={`${mediaKey}:${retryVersion}`}
+                                  src={image}
+                                  controls
+                                  aria-label={`生成视频 ${imgIndex + 1}`}
+                                  onError={() => setFailedMediaKeys(previous => new Set(previous).add(mediaKey))}
+                                />
+                              ) : (
+                                <Image
+                                  key={`${mediaKey}:${retryVersion}`}
+                                  src={image}
+                                  alt={`生成图片 ${imgIndex + 1}`}
+                                  className="chat-image"
+                                  preview={{ mask: '预览' }}
+                                  onError={() => setFailedMediaKeys(previous => new Set(previous).add(mediaKey))}
+                                />
+                              )}
+                            </div>
+                            <div className="chat-image-overlay" aria-label={`媒体 ${imgIndex + 1} 操作`}>
+                              {!video && !failed && acceptsReferenceImage && (
+                                <Button type="text" size="small" icon={<PictureOutlined />} onClick={() => setAsReference(image)}>
+                                  设为参考
+                                </Button>
+                              )}
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<DownloadOutlined />}
+                                onClick={() => downloadImage(image, imgIndex)}
+                              >
+                                下载
+                              </Button>
+                              {video && !failed && (
                                 <Button
-                                  type="primary"
+                                  type="text"
                                   size="small"
                                   icon={<AppstoreOutlined />}
                                   onClick={() => openFrameEditor(message.id, image)}
                                 >
                                   帧导出
                                 </Button>
-                              </>
-                            )}
-                            {!video && image.startsWith('/uploads/') && (
-                              <Button
-                                type="primary"
-                                size="small"
-                                icon={<EditOutlined />}
-                                onClick={() => setImageEditor({ messageId: message.id, imageUrl: image })}
-                              >
-                                编辑
-                              </Button>
-                            )}
-                          </div>
-                        </div>
+                              )}
+                              {!video && !failed && image.startsWith('/uploads/') && (
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<EditOutlined />}
+                                  onClick={() => setImageEditor({ messageId: message.id, imageUrl: image })}
+                                >
+                                  编辑
+                                </Button>
+                              )}
+                            </div>
+                          </>
                         );
                       })() : (
-                        <div className="chat-image-loading">
-                          <Spin indicator={<LoadingOutlined style={{ fontSize: 32 }} spin />} />
-                          <div className="chat-loading-text">生成中...</div>
+                        <div className="chat-image-loading" role="status" aria-live="polite">
+                          <PictureOutlined className="chat-loading-icon" aria-hidden="true" />
+                          <div className="chat-loading-text">正在生成第 {imgIndex + 1} 个结果</div>
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    className={`assistant-result-state ${message.id === currentGeneratingMessageId ? 'is-loading' : 'is-empty'}`}
+                    role={message.id === currentGeneratingMessageId ? 'status' : 'alert'}
+                    aria-live="polite"
+                  >
+                    <PictureOutlined aria-hidden="true" />
+                    <div>
+                      <strong>{message.id === currentGeneratingMessageId ? '正在准备生成' : '本轮没有返回媒体'}</strong>
+                      <span>{message.id === currentGeneratingMessageId ? '结果会在生成后显示在这里' : '可以修改上一条提示词后重新生成'}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -704,34 +837,36 @@ export default function ResultGrid() {
         {/* 滚动锚点 */}
         <div ref={messagesEndRef} />
       </div>
-      {activePreviewImage && (
-        <Image
-          src={activePreviewImage.url}
-          alt={activePreviewImage.alt}
-          wrapperStyle={{ display: 'none' }}
-          preview={{
-            visible: true,
-            src: activePreviewImage.url,
-            onVisibleChange: visible => {
-              if (!visible) setActivePreviewImage(null);
-            },
-          }}
-        />
-      )}
-      <FrameExtractionModal
-        open={!!frameEditor}
-        videoUrl={frameEditor?.videoUrl ?? null}
-        onClose={() => setFrameEditor(null)}
-        onFrameExportGenerated={handleFrameExportGenerated}
+      <Button
+        className={`scroll-to-bottom-button ${showScrollToBottom ? 'is-visible' : ''}`}
+        type="default"
+        shape="circle"
+        icon={<ArrowDownOutlined />}
+        style={scrollButtonPosition}
+        onClick={() => scrollToBottom('smooth')}
+        aria-label="回到最新结果"
+        aria-hidden={!showScrollToBottom}
+        tabIndex={showScrollToBottom ? 0 : -1}
+        title="回到最新结果"
       />
-      {imageEditor && (
-        <ImageEditorModal
-          open
-          imageUrl={imageEditor.imageUrl}
-          onClose={() => setImageEditor(null)}
-          onSaved={handleImageEdited}
-        />
-      )}
+      <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载媒体编辑器...</div>}>
+        {frameEditor && (
+          <FrameExtractionModal
+            open
+            videoUrl={frameEditor.videoUrl}
+            onClose={() => setFrameEditor(null)}
+            onFrameExportGenerated={handleFrameExportGenerated}
+          />
+        )}
+        {imageEditor && (
+          <ImageEditorModal
+            open
+            imageUrl={imageEditor.imageUrl}
+            onClose={() => setImageEditor(null)}
+            onSaved={handleImageEdited}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

@@ -46,9 +46,13 @@ services:
       - COMFYUI_CLOUD_API_URL=
       # AI Prompt 配置
       - AI_PROMPT_PROVIDER=openai
-      - AI_PROMPT_BASE_URL=http://copilot-api-copilot-api-1:4141/v1
-      - AI_PROMPT_MODEL=gpt-4o
+      - AI_PROMPT_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
+      - AI_PROMPT_MODEL=glm-4.7
+      - AI_PROMPT_REUSE_SESSION_TITLE=true
       - AI_PROMPT_TEMPLATE=你是一个Stable Diffusion提示词专家，请将以下自然语言描述转换为SD提示词（英文标签，用逗号分隔，不要增加额外的描述）：\n描述：{desc}\n只输出提示词，不要解释：
+      # 会话标题自动总结（API 密钥由 .env 注入）
+      - SESSION_TITLE_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
+      - SESSION_TITLE_MODEL=glm-4.7
       # 认证配置
       - JWT_ALGORITHM=HS256
       - JWT_EXPIRE_MINUTES=10080
@@ -66,6 +70,7 @@ services:
       - WORKFLOWS_PATH=configs/workflows
     env_file:
       - .env
+      - .env.session-title
     networks:
       - ai-draw-network
     healthcheck:

@@ -259,7 +259,6 @@ ai-draw/
 │   │   │   ├── ChatInput.tsx
 │   │   │   ├── ChatSessionSidebar.tsx
 │   │   │   ├── ResultGrid.tsx
-│   │   │   ├── WorkflowSelector.tsx
 │   │   │   ├── SettingsModal.tsx
 │   │   │   ├── LoginModal.tsx
 │   │   │   └── ...
@@ -373,7 +372,7 @@ await apiService.generateImage({ prompt, workflow, ... });
 2. 放入 `configs/workflows/` 目录
 3. 在 `configs/app_config.yaml` 的 `workflow_files` 中注册
 4. 在 `workflow_metadata` 中配置元数据（标签、描述、参数）
-5. 前端 `WorkflowSelector` 组件会自动获取新工作流
+5. 前端状态层会自动获取工作流，`ChatInput` 和 `SettingsModal` 根据元数据渲染选项
 
 ## 更新日志
 

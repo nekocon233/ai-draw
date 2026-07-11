@@ -1,24 +1,82 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { Input, Button, message, Select, Image, Switch, Tooltip } from 'antd';
+import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { 
   SendOutlined, 
   SettingOutlined, 
   PictureOutlined, 
-  ThunderboltOutlined,
+  BulbOutlined,
   CloseOutlined,
   StopOutlined,
   PlusOutlined,
-  FormOutlined
+  UserOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { apiService } from '../api/services';
-import SettingsModal from './SettingsModal';
-import AIPromptModal from './AIPromptModal';
 import './ChatInput.css';
 
+const SettingsModal = lazy(() => import('./SettingsModal'));
+const PromptAssistantModal = lazy(() => import('./PromptAssistantModal'));
 const PoseEditorWeb = lazy(() => import('./PoseEditorWeb'));
 
 const { TextArea } = Input;
+
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+interface FrameCardProps {
+  image: string | null;
+  label: string;
+  alt: string;
+  onUpload: () => void;
+  onRemove: () => void;
+  onPose?: () => void;
+}
+
+function FrameCard({ image, label, alt, onUpload, onRemove, onPose }: FrameCardProps) {
+  return (
+    <div className={`flf2v-frame-card ${image ? 'has-image' : ''}`}>
+      {image ? (
+        <>
+          <Image src={image} alt={alt} preview={{ mask: '预览' }} />
+          <button
+            type="button"
+            className="flf2v-frame-card-remove"
+            onClick={onRemove}
+            aria-label={`移除${alt}`}
+          >
+            <CloseOutlined />
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="frame-upload-button"
+            onClick={onUpload}
+            aria-label={`上传${label}`}
+          >
+            <span className="flf2v-frame-placeholder">
+              <PlusOutlined className="flf2v-frame-placeholder-icon" />
+              <span className="flf2v-frame-placeholder-label">{label}</span>
+            </span>
+          </button>
+          {onPose && (
+            <Tooltip title="姿势参考（posemy.art）" placement="right">
+              <button
+                type="button"
+                className="flf2v-frame-pose"
+                onClick={onPose}
+                aria-label={`为${label}打开姿势参考`}
+              >
+                <UserOutlined aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function ChatInput() {
   const {
@@ -85,7 +143,7 @@ export default function ChatInput() {
     : currentWorkflow;
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [aiPromptOpen, setAiPromptOpen] = useState(false);
+  const [promptAssistantOpen, setPromptAssistantOpen] = useState(false);
   const [poseWebOpen, setPoseWebOpen] = useState(false);
   const [poseWebTargetSlot, setPoseWebTargetSlot] = useState<1 | 2 | 3>(1);
   const dragCounterRef = useRef(0);
@@ -94,18 +152,7 @@ export default function ChatInput() {
   const fileInputRef3 = useRef<HTMLInputElement>(null);
   const fileInputEndRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
-  const textAreaRef = useRef<any>(null);
-  const posePresetRef = useRef<string>('');
-
-  // 挂载时从后端拉取姿势预设提示词（同源配置）
-  useEffect(() => {
-    apiService.getPosePreset().then(res => {
-      posePresetRef.current = res.prompt;
-    }).catch(() => {
-      // 网络异常时保持空值，按钮点击时再提示
-    });
-  }, []);
-
+  const textAreaRef = useRef<TextAreaRef>(null);
   // 组件加载或切换会话时自动聚焦到输入框，并将光标移到末尾
   useEffect(() => {
     if (textAreaRef.current?.resizableTextArea?.textArea) {
@@ -137,9 +184,10 @@ export default function ChatInput() {
       const res = await apiService.uploadImage(file);
       setReferenceImage(res.image);
       message.success('\u4e0a\u4f20\u6210\u529f!');
-    } catch (err: any) {
-      setError(err.message);
-      message.error('\u4e0a\u4f20\u5931\u8d25: ' + err.message);
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err);
+      setError(errorMessage);
+      message.error('\u4e0a\u4f20\u5931\u8d25: ' + errorMessage);
     }
   };
 
@@ -153,9 +201,10 @@ export default function ChatInput() {
         const res = await apiService.uploadImage(file);
         setter(res.image);
         message.success(label);
-      } catch (err: any) {
-        setError(err.message);
-        message.error('\u4e0a\u4f20\u5931\u8d25: ' + err.message);
+      } catch (err: unknown) {
+        const errorMessage = getErrorMessage(err);
+        setError(errorMessage);
+        message.error('\u4e0a\u4f20\u5931\u8d25: ' + errorMessage);
       }
     };
 
@@ -235,9 +284,9 @@ export default function ChatInput() {
         send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
         session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,
         // PixelLab 动画参数
-        action: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabAction : undefined,
-        view: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabView : undefined,
-        direction: currentWorkflow === 'pixel_lab_animate' ? (state as any).pixelLabDirection : undefined,
+        action: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabAction : undefined,
+        view: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabView : undefined,
+        direction: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabDirection : undefined,
         // Kling 视频运行时选项（前端用 selectOptions 存储）
         kling_options: isKlingFlf2v ? state.selectOptions : undefined,
       });
@@ -248,12 +297,13 @@ export default function ChatInput() {
         setReferenceImage2(null);
         setReferenceImage3(null);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // HTTP 层面失败（任务未能提交到后台）
       useAppStore.getState().updateChatImages(messageId, []);
       useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
-      setError(err.message);
-      message.error('提交失败: ' + err.message);
+      const errorMessage = getErrorMessage(err);
+      setError(errorMessage);
+      message.error('提交失败: ' + errorMessage);
     }
   };
 
@@ -337,9 +387,10 @@ export default function ChatInput() {
           setReferenceImage(res.image);
           message.success('\u4e0a\u4f20\u6210\u529f!');
         }
-      } catch (err: any) {
-        setError(err.message);
-        message.error('上传失败: ' + err.message);
+      } catch (err: unknown) {
+        const errorMessage = getErrorMessage(err);
+        setError(errorMessage);
+        message.error('上传失败: ' + errorMessage);
       }
     };
 
@@ -420,7 +471,7 @@ export default function ChatInput() {
         const file = new File([blob], `dropped-image-${Date.now()}.png`, { type: blob.type });
         message.destroy('dropImage');
         await uploadFile(file);
-      } catch (err: any) {
+      } catch (err: unknown) {
         message.destroy('dropImage');
         console.error('Drop image error:', err);
         // 如果 fetch 失败，尝试直接使用 URL 作为参考图
@@ -460,37 +511,13 @@ export default function ChatInput() {
             {/* 双帧卡片区 */}
             <div className="flf2v-frames">
 
-              {/* 开始帧 */}
-              <div
-                className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
-                onClick={() => !referenceImage && fileInputRef.current?.click()}
-                title="上传开始帧"
-              >
-                {referenceImage ? (
-                  <>
-                    <Image
-                      src={referenceImage}
-                      alt="开始帧"
-                      width={76}
-                      height={76}
-                      style={{ objectFit: 'cover', display: 'block' }}
-                      preview={{ mask: '预览' }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <div
-                      className="flf2v-frame-card-remove"
-                      onClick={(e) => { e.stopPropagation(); setReferenceImage(null); }}
-                    >
-                      <CloseOutlined />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flf2v-frame-placeholder">
-                    <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                    <span className="flf2v-frame-placeholder-label">首帧</span>
-                  </div>
-                )}
-              </div>
+              <FrameCard
+                image={referenceImage}
+                label="首帧"
+                alt="开始帧"
+                onUpload={() => fileInputRef.current?.click()}
+                onRemove={() => setReferenceImage(null)}
+              />
 
               {/* 中间：箭头 + 循环开关 */}
               <div className="flf2v-separator-col">
@@ -509,37 +536,13 @@ export default function ChatInput() {
                 )}
               </div>
 
-              {/* 结束帧 */}
-              <div
-                className={`flf2v-frame-card ${referenceImageEnd ? 'has-image' : ''}`}
-                onClick={() => !referenceImageEnd && fileInputEndRef.current?.click()}
-                title="上传结束帧"
-              >
-                {referenceImageEnd ? (
-                  <>
-                    <Image
-                      src={referenceImageEnd}
-                      alt="结束帧"
-                      width={76}
-                      height={76}
-                      style={{ objectFit: 'cover', display: 'block' }}
-                      preview={{ mask: '预览' }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <div
-                      className="flf2v-frame-card-remove"
-                      onClick={(e) => { e.stopPropagation(); setReferenceImageEnd(null); }}
-                    >
-                      <CloseOutlined />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flf2v-frame-placeholder">
-                    <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                    <span className="flf2v-frame-placeholder-label">尾帧</span>
-                  </div>
-                )}
-              </div>
+              <FrameCard
+                image={referenceImageEnd}
+                label="尾帧"
+                alt="结束帧"
+                onUpload={() => fileInputEndRef.current?.click()}
+                onRemove={() => setReferenceImageEnd(null)}
+              />
             </div>
 
             {/* 右侧：文字描述 */}
@@ -551,6 +554,7 @@ export default function ChatInput() {
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="描述开始帧画面内容..."
+                  aria-label="首帧描述"
                   className="chat-textarea"
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   onPressEnter={(e) => {
@@ -569,6 +573,7 @@ export default function ChatInput() {
                     value={promptEnd}
                     onChange={(e) => setPromptEnd(e.target.value)}
                     placeholder="描述结束帧画面内容..."
+                    aria-label="尾帧描述"
                     className="chat-textarea"
                     autoSize={{ minRows: 2, maxRows: 4 }}
                   />
@@ -581,142 +586,44 @@ export default function ChatInput() {
             {/* 输入框行（requires_image 时包含帧卡片） */}
             <div className="chat-input-row">
               {(isRequiresImage || supportsMultiImage) && (
-                <>
-                  {/* ── 参考图 1（所有 requires_image 工作流都有，Nano Banana Pro 可选） ── */}
-                  <div
-                    className={`flf2v-frame-card ${referenceImage ? 'has-image' : ''}`}
-                    onClick={() => !referenceImage && fileInputRef.current?.click()}
-                    title={isI2I ? '上传参考图 1' : supportsMultiImage ? '上传参考图（可选）' : '上传参考图'}
-                    style={{ flexShrink: 0 }}
-                  >
-                    {referenceImage ? (
-                      <>
-                        <Image
-                          src={referenceImage}
-                          alt="参考图 1"
-                          width={76}
-                          height={76}
-                          style={{ objectFit: 'cover', display: 'block' }}
-                          preview={{ mask: '预览' }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <div
-                          className="flf2v-frame-card-remove"
-                          onClick={(e) => { e.stopPropagation(); setReferenceImage(referenceImage2); setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
-                        >
-                          <CloseOutlined />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flf2v-frame-placeholder">
-                          <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                          <span className="flf2v-frame-placeholder-label">
-                            {isI2I ? '图 1' : '参考图'}
-                          </span>
-                        </div>
-                        <Tooltip title="姿势参考（posemy.art）" placement="right">
-                          <div
-                            className="flf2v-frame-pose"
-                            onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(1); setPoseWebOpen(true); }}
-                          >
-                            🎭
-                          </div>
-                        </Tooltip>
-                      </>
-                    )}
-                  </div>
+                <div className="reference-strip" aria-label="参考图片">
+                  <FrameCard
+                    image={referenceImage}
+                    label={isI2I ? '图 1' : '参考图'}
+                    alt="参考图 1"
+                    onUpload={() => fileInputRef.current?.click()}
+                    onRemove={() => {
+                      setReferenceImage(referenceImage2);
+                      setReferenceImage2(referenceImage3);
+                      setReferenceImage3(null);
+                    }}
+                    onPose={() => { setPoseWebTargetSlot(1); setPoseWebOpen(true); }}
+                  />
 
                   {/* ── 参考图 2 / 3（i2i 和 Nano Banana Pro，逐张追加） ── */}
                   {/* 图 1 已上传后才显示图 2 槽位 */}
                   {supportsMultiImage && referenceImage && (
-                    <div
-                      className={`flf2v-frame-card ${referenceImage2 ? 'has-image' : ''}`}
-                      onClick={() => !referenceImage2 && fileInputRef2.current?.click()}
-                      title={referenceImage2 ? '参考图 2' : '添加参考图 2（可选）'}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {referenceImage2 ? (
-                        <>
-                          <Image
-                            src={referenceImage2}
-                            alt="参考图 2"
-                            width={76}
-                            height={76}
-                            style={{ objectFit: 'cover', display: 'block' }}
-                            preview={{ mask: '预览' }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <div
-                            className="flf2v-frame-card-remove"
-                            onClick={(e) => { e.stopPropagation(); setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
-                          >
-                            <CloseOutlined />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flf2v-frame-placeholder">
-                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                            <span className="flf2v-frame-placeholder-label">添加</span>
-                          </div>
-                          <Tooltip title="姿势参考（posemy.art）" placement="right">
-                            <div
-                              className="flf2v-frame-pose"
-                              onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(2); setPoseWebOpen(true); }}
-                            >
-                              🎭
-                            </div>
-                          </Tooltip>
-                        </>
-                      )}
-                    </div>
+                    <FrameCard
+                      image={referenceImage2}
+                      label="添加图 2"
+                      alt="参考图 2"
+                      onUpload={() => fileInputRef2.current?.click()}
+                      onRemove={() => { setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
+                      onPose={() => { setPoseWebTargetSlot(2); setPoseWebOpen(true); }}
+                    />
                   )}
                   {/* 图 2 已上传后才显示图 3 槽位 */}
                   {supportsMultiImage && referenceImage2 && (
-                    <div
-                      className={`flf2v-frame-card ${referenceImage3 ? 'has-image' : ''}`}
-                      onClick={() => !referenceImage3 && fileInputRef3.current?.click()}
-                      title={referenceImage3 ? '参考图 3' : '添加参考图 3（可选）'}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {referenceImage3 ? (
-                        <>
-                          <Image
-                            src={referenceImage3}
-                            alt="参考图 3"
-                            width={76}
-                            height={76}
-                            style={{ objectFit: 'cover', display: 'block' }}
-                            preview={{ mask: '预览' }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <div
-                            className="flf2v-frame-card-remove"
-                            onClick={(e) => { e.stopPropagation(); setReferenceImage3(null); }}
-                          >
-                            <CloseOutlined />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flf2v-frame-placeholder">
-                            <PlusOutlined className="flf2v-frame-placeholder-icon" />
-                            <span className="flf2v-frame-placeholder-label">添加</span>
-                          </div>
-                          <Tooltip title="姿势参考（posemy.art）" placement="right">
-                            <div
-                              className="flf2v-frame-pose"
-                              onClick={(e) => { e.stopPropagation(); setPoseWebTargetSlot(3); setPoseWebOpen(true); }}
-                            >
-                              🎭
-                            </div>
-                          </Tooltip>
-                        </>
-                      )}
-                    </div>
+                    <FrameCard
+                      image={referenceImage3}
+                      label="添加图 3"
+                      alt="参考图 3"
+                      onUpload={() => fileInputRef3.current?.click()}
+                      onRemove={() => setReferenceImage3(null)}
+                      onPose={() => { setPoseWebTargetSlot(3); setPoseWebOpen(true); }}
+                    />
                   )}
-                </>
+                </div>
               )}
               <div className="chat-textarea-wrapper">
                 <TextArea
@@ -724,6 +631,7 @@ export default function ChatInput() {
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={isNanoBananaPro ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...'}
+                  aria-label="生成提示词"
                   className="chat-textarea"
                   autoSize={{ minRows: (isRequiresImage || supportsMultiImage) ? 1 : 2, maxRows: 6 }}
                   onPressEnter={(e) => {
@@ -740,7 +648,7 @@ export default function ChatInput() {
 
         {/* 第二行：功能按钮 */}
         <div className="chat-input-buttons">
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="chat-input-tools">
             {/* 图片上传 */}
             <input
               ref={fileInputRef}
@@ -778,8 +686,8 @@ export default function ChatInput() {
                   const res = await apiService.uploadImage(file);
                   setReferenceImageEnd(res.image);
                   message.success('结束帧上传成功!');
-                } catch (err: any) {
-                  message.error('上传失败: ' + err.message);
+                } catch (err: unknown) {
+                  message.error('上传失败: ' + getErrorMessage(err));
                 }
               }}
             />
@@ -787,39 +695,25 @@ export default function ChatInput() {
 
             {/* 参数设置 */}
             <button 
+              type="button"
               className="chat-input-icon-button" 
               title="参数设置"
+              aria-label="打开生成设置"
               onClick={() => setSettingsOpen(true)}
             >
               <SettingOutlined />
             </button>
 
-            {/* AI 生成 */}
+            {/* 提示词助手 */}
             <button
+              type="button"
               className="chat-input-icon-button"
-              onClick={() => setAiPromptOpen(true)}
-              title="AI 生成英文 Prompt"
+              onClick={() => setPromptAssistantOpen(true)}
+              title="提示词助手"
+              aria-label="打开提示词助手"
             >
-              <ThunderboltOutlined />
+              <BulbOutlined />
             </button>
-
-            {/* 快捷填充姿势提示词（i2i / nano_banana_pro） */}
-            {supportsMultiImage && (
-              <Tooltip title="填充参考姿势提示词">
-                <button
-                  className="chat-input-icon-button"
-                  onClick={() => {
-                    if (!posePresetRef.current) {
-                      message.warning('预设提示词加载中，请稍后重试');
-                      return;
-                    }
-                    setPrompt(posePresetRef.current);
-                  }}
-                >
-                  <FormOutlined />
-                </button>
-              </Tooltip>
-            )}
 
             {/* Gemini 历史对话开关（仅 nano_banana_pro 工作流显示） */}
             {isNanoBananaPro && (
@@ -828,6 +722,7 @@ export default function ChatInput() {
                   size="small"
                   checked={nanoBananaSendHistory}
                   onChange={setNanoBananaSendHistory}
+                  aria-label="携带历史对话"
                 />
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                   携带历史
@@ -837,6 +732,7 @@ export default function ChatInput() {
 
             {/* 工作流选择器（图生图等同类工作流折叠为一项，具体方式在生成设置里选择） */}
             <Select
+              className="workflow-select"
               value={selectValue}
               onChange={(val) => {
                 const target = availableWorkflows.find(w => w.key === val);
@@ -858,6 +754,7 @@ export default function ChatInput() {
               style={{ minWidth: 155, width: 'auto', maxWidth: 260 }}
               popupMatchSelectWidth={false}
               options={groupedOptions}
+              aria-label="选择生成工作流"
             />
           </div>
 
@@ -869,24 +766,33 @@ export default function ChatInput() {
             disabled={!isGenerating && !!isRequiresImage && !referenceImage}
             className="chat-send-button"
             danger={isGenerating}
+            aria-label={isGenerating ? '停止生成' : '开始生成'}
+            title={isGenerating ? '停止生成' : '开始生成'}
           />
         </div>
       </div>
 
-      {/* 设置弹窗 */}
-      <SettingsModal 
-        open={settingsOpen} 
-        onClose={() => setSettingsOpen(false)} 
-      />
+      <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载设置...</div>}>
+        {settingsOpen && (
+          <SettingsModal
+            open
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+      </Suspense>
 
-      {/* AI Prompt 生成弹窗 */}
-      <AIPromptModal
-        open={aiPromptOpen}
-        onClose={() => setAiPromptOpen(false)}
-        onApply={handleApplyPrompt}
-        onApplyEnd={(p) => { setPromptEnd(p); message.success('尾帧描述已应用'); }}
-        workflowId={currentWorkflow}
-      />
+      <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载提示词助手...</div>}>
+        {promptAssistantOpen && (
+          <PromptAssistantModal
+            open
+            onClose={() => setPromptAssistantOpen(false)}
+            onApply={handleApplyPrompt}
+            onApplyEnd={(p) => { setPromptEnd(p); message.success('尾帧描述已应用'); }}
+            workflowId={currentWorkflow}
+            initialPrompt={prompt}
+          />
+        )}
+      </Suspense>
 
       {/* 姿势参考弹窗 */}
       <Suspense fallback={null}>

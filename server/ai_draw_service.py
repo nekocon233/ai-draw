@@ -15,6 +15,7 @@ from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
+from utils.image_reference import normalize_image_reference
 from utils.media_processor import merge_upscaled_alpha, resize_image_base64, resize_video_bytes
 
 
@@ -216,36 +217,21 @@ class AIDrawService:
             if workflow_type in self.comfyui.workflow_configs and workflow_type != self.comfyui.get_current_workflow_type():
                 self.comfyui.switch_workflow(workflow_type)
             
-            # 处理开始帧参考图（如果有）
-            image_base64 = None
-            if reference_image:
-                # 去除 data URL 前缀（如果有）
-                if reference_image.startswith('data:image'):
-                    # 格式: data:image/png;base64,xxxxx
-                    image_base64 = reference_image.split(',', 1)[1]
-                else:
-                    image_base64 = reference_image
-
-            def _strip_data_url(img_str: Optional[str]) -> Optional[str]:
-                if not img_str:
-                    return None
-                return img_str.split(',', 1)[1] if img_str.startswith('data:image') else img_str
-
-            image_base64_2 = _strip_data_url(reference_image_2)
-            image_base64_3 = _strip_data_url(reference_image_3)
-            
-            # 处理结束帧参考图（如果有，flf2v 专用）
-            image_end_base64 = None
-            if reference_image_end:
-                if reference_image_end.startswith('data:image'):
-                    image_end_base64 = reference_image_end.split(',', 1)[1]
-                else:
-                    image_end_base64 = reference_image_end
-            
             # 从配置中获取工作流元数据
             config = get_config()
             workflow_meta = config.workflow_defaults.workflow_metadata.get(workflow_type, {})
             requires_image = workflow_meta.get('requires_image', False)
+
+            def _prepare_reference(value: Optional[str], label: str) -> Optional[str]:
+                if not value:
+                    return None
+                return normalize_image_reference(value, config.paths.upload_dir, label)
+
+            # References may be uploaded data URLs, raw base64, or URLs of generated local files.
+            image_base64 = _prepare_reference(reference_image, "参考图 1")
+            image_base64_2 = _prepare_reference(reference_image_2, "参考图 2")
+            image_base64_3 = _prepare_reference(reference_image_3, "参考图 3")
+            image_end_base64 = _prepare_reference(reference_image_end, "尾帧参考图")
 
             # 确定后处理 resize 目标尺寸（仅 supports_original_size 工作流生效）
             target_width: Optional[int] = None
@@ -575,15 +561,8 @@ class AIDrawService:
     def _load_image_b64(self, path: str) -> Optional[str]:
         """从文件路径或 data URL 读取图片，返回 base64（不含前缀），失败返回 None"""
         try:
-            if not path:
-                return None
-            if path.startswith('data:image'):
-                return path.split(',', 1)[1]
-            elif path.startswith('/uploads/'):
-                # 服务器生成图：/uploads/generated/img_xxx.png → 相对路径
-                file_path = Path(path[1:])  # 去掉开头的 /
-                if file_path.exists():
-                    return base64.b64encode(file_path.read_bytes()).decode('utf-8')
+            if path:
+                return normalize_image_reference(path, get_config().paths.upload_dir)
         except Exception as e:
             print(f"[AIDrawService] 读取图片失败 ({str(path)[:60]}): {e}")
         return None

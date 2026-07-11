@@ -1,4 +1,4 @@
-/* App.css - AI-Draw 简约酷炫设计 */
+/* App.css - AI-Draw application shell */
 
 * {
   margin: 0;
@@ -13,47 +13,116 @@
   overflow: hidden;
 }
 
-/* ========== 主题变量 - Gemini 风格 ========== */
+/* ChatGPT-inspired neutral tokens live on :root so Ant Design portals inherit them. */
+:root,
 .light-mode {
-  --bg-primary: #f9fafb;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f3f4;
-  --text-primary: #1f1f1f;
-  --text-secondary: #5f6368;
-  --border-color: #e8eaed;
-  --shadow-sm: 0 1px 2px 0 rgba(60, 64, 67, 0.08);
-  --shadow-md: 0 2px 6px 0 rgba(60, 64, 67, 0.12);
-  --shadow-lg: 0 4px 12px 0 rgba(60, 64, 67, 0.16);
-  --accent-gradient: linear-gradient(135deg, #1a73e8 0%, #4285f4 100%);
-  --accent-color: #1a73e8;
-  --hover-bg: #f1f3f4;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f8;
+  --bg-tertiary: #ececec;
+  --text-primary: #0d0d0d;
+  --text-secondary: #5d5d5d;
+  --border-color: #e5e5e5;
+  --shadow-sm: 0 1px 2px rgba(13, 13, 13, 0.08);
+  --shadow-md: 0 4px 12px rgba(13, 13, 13, 0.1);
+  --shadow-lg: 0 12px 32px rgba(13, 13, 13, 0.14);
+  --accent-color: #0d0d0d;
+  --accent-solid: #0d0d0d;
+  --accent-hover: #2f2f2f;
+  --accent-active: #000000;
+  --accent-subtle: rgba(13, 13, 13, 0.07);
+  --accent-ring: rgba(13, 13, 13, 0.38);
+  --accent-gradient: var(--accent-solid);
+  --focus-ring: #0d0d0d;
+  --text-on-accent: #ffffff;
+  --warning-text: #8a4b08;
+  --error-color: #c23b4d;
+  --preview-color: #2563eb;
+  --control-accent: #2563eb;
+  --hover-bg: #ececec;
+  --sidebar-bg: #f9f9f9;
+  --session-bg: #f9f9f9;
+  --session-hover-bg: #ececec;
+  --session-active-bg: var(--accent-subtle);
+  --user-message-bg: #f4f4f4;
+  --user-message-text: #0d0d0d;
+  --user-message-field-bg: #ffffff;
+  --user-message-field-border: #d9d9d9;
+  --user-message-divider: rgba(13, 13, 13, 0.16);
+  --icon-color: #5d5d5d;
+  --primary-color: var(--accent-color);
 }
 
+:root[data-theme='dark'],
 .dark-mode {
-  --bg-primary: #131314;
-  --bg-secondary: #1e1f20;
-  --bg-tertiary: #2c2d30;
-  --text-primary: #e3e3e3;
-  --text-secondary: #9aa0a6;
-  --border-color: #3c4043;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 2px 6px 0 rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 4px 12px 0 rgba(0, 0, 0, 0.5);
-  --accent-gradient: linear-gradient(135deg, #8ab4f8 0%, #aecbfa 100%);
-  --accent-color: #8ab4f8;
-  --hover-bg: #2c2d30;
+  --bg-primary: #000000;
+  --bg-secondary: #212121;
+  --bg-tertiary: #2f2f2f;
+  --text-primary: #f4f4f4;
+  --text-secondary: #b4b4b4;
+  --border-color: #303030;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.48);
+  --accent-color: #f4f4f4;
+  --accent-solid: #f4f4f4;
+  --accent-hover: #d9d9d9;
+  --accent-active: #c7c7c7;
+  --accent-subtle: rgba(244, 244, 244, 0.1);
+  --accent-ring: rgba(244, 244, 244, 0.5);
+  --accent-gradient: var(--accent-solid);
+  --focus-ring: #f4f4f4;
+  --text-on-accent: #0d0d0d;
+  --warning-text: #f0b36b;
+  --error-color: #ff7185;
+  --preview-color: #6ea8fe;
+  --control-accent: #4d9fff;
+  --hover-bg: #2f2f2f;
+  --sidebar-bg: #0b0b0b;
+  --session-bg: #0b0b0b;
+  --session-hover-bg: #212121;
+  --session-active-bg: var(--accent-subtle);
+  --user-message-bg: #2f2f2f;
+  --user-message-text: #f4f4f4;
+  --user-message-field-bg: #212121;
+  --user-message-field-border: #4a4a4a;
+  --user-message-divider: rgba(244, 244, 244, 0.16);
+  --icon-color: #b4b4b4;
+  --primary-color: var(--accent-color);
 }
 
 /* ========== 布局 ========== */
 .app-layout {
   min-height: 100vh;
   background: var(--bg-primary);
+  position: relative;
+}
+
+.lazy-component-loading {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+}
+
+.result-grid-loading {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .app-content {
   display: flex;
-  height: calc(100vh - 60px);
-  height: calc(100dvh - 60px);
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -81,15 +150,11 @@
   margin: 0;
   font-size: 28px;
   font-weight: 700;
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--text-primary);
   letter-spacing: -0.5px;
-  text-shadow: 0 0 20px rgba(130, 80, 223, 0.3);
 }
 
-/* ========== Gemini 风格聊天容器 ========== */
+/* ========== Chat shell ========== */
 .chat-container {
   flex: 1;
   display: flex;
@@ -100,7 +165,7 @@
 }
 
 .chat-container.empty-state {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* ========== 结果展示区域 ========== */
@@ -133,11 +198,11 @@
   align-items: center;
   gap: 20px;
   box-shadow: none;
-  transition: transform 0.3s ease;
 }
 
 .chat-container.empty-state .chat-input-area {
-  transform: translateY(-10vh);
+  margin-block: auto;
+  transform: translateY(-6vh);
   padding: 0 24px;
 }
 
@@ -146,81 +211,29 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  animation: fadeInUp 0.6s ease;
+  gap: 8px;
+  width: 100%;
+  max-width: 900px;
+  text-align: center;
 }
 
 .welcome-title {
   margin: 0;
-  font-size: 72px;
-  font-weight: 800;
-  background: linear-gradient(
-    135deg, 
-    #1a73e8 0%, 
-    #4285f4 20%, 
-    #8ab4f8 40%, 
-    #aecbfa 50%,
-    #8ab4f8 60%, 
-    #4285f4 80%, 
-    #1a73e8 100%
-  );
-  background-size: 300% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: -2px;
-  animation: shimmer 4s ease-in-out infinite;
-  filter: 
-    drop-shadow(0 0 20px rgba(26, 115, 232, 0.4))
-    drop-shadow(0 0 40px rgba(66, 133, 244, 0.3));
-  text-transform: uppercase;
-  position: relative;
-}
-
-.welcome-title::before {
-  content: 'AI-DRAW';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(
-    135deg, 
-    rgba(26, 115, 232, 0.3) 0%, 
-    rgba(66, 133, 244, 0.3) 50%, 
-    rgba(138, 180, 248, 0.3) 100%
-  );
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  filter: blur(20px);
-  z-index: -1;
-  animation: glow 2s ease-in-out infinite alternate;
+  font-size: 32px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .welcome-subtitle {
   margin: 0;
-  font-size: 16px;
+  max-width: 560px;
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--text-secondary);
   font-weight: 400;
-  opacity: 0;
-  animation: fadeIn 0.8s ease 0.3s forwards;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fadeIn {
-  to {
-    opacity: 1;
-  }
 }
 
 @keyframes pulse {
@@ -232,22 +245,30 @@
   }
 }
 
-@keyframes shimmer {
-  0%, 100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
+.app-status-bar {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 1100;
+  max-width: min(680px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-md);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-@keyframes glow {
-  0% {
-    opacity: 0.5;
-  }
-  100% {
-    opacity: 1;
-  }
+.app-status-bar .ant-tag {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ========== 滚动条样式 ========== */
@@ -282,16 +303,23 @@
 }
 
 .ant-btn-primary {
-  background: var(--accent-gradient) !important;
-  border: none !important;
-  box-shadow: 0 0 0 1px rgba(130, 80, 223, 0.3), var(--shadow-sm) !important;
-  transition: all 0.3s ease !important;
+  background: var(--accent-solid) !important;
+  border-color: var(--accent-solid) !important;
+  color: var(--text-on-accent) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
 }
 
-.ant-btn-primary:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 0 0 1px rgba(130, 80, 223, 0.5), 0 0 16px rgba(130, 80, 223, 0.4), var(--shadow-md) !important;
-  opacity: 0.95 !important;
+.ant-btn-primary:not(:disabled):hover,
+.ant-btn-primary:not(:disabled):focus-visible {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.ant-btn-primary:not(:disabled):active {
+  background: var(--accent-active) !important;
+  border-color: var(--accent-active) !important;
 }
 
 .ant-upload-drag {
@@ -302,7 +330,7 @@
 }
 
 .ant-upload-drag:hover {
-  border-color: #6366f1;
+  border-color: var(--accent-color);
 }
 
 /* ========== 响应式设计 ========== */
@@ -318,38 +346,21 @@
   }
 
   .chat-input-area {
-    padding: 10px 12px 16px;
+    padding: 10px 12px max(16px, env(safe-area-inset-bottom));
     gap: 12px;
   }
 
-  /* 欢迎标题在手机上缩小 */
   .welcome-title {
-    font-size: 42px !important;
-    letter-spacing: -1px !important;
+    font-size: 24px;
   }
 
   .welcome-subtitle {
-    font-size: 14px !important;
+    max-width: 34ch;
+    font-size: 13px;
   }
 
-  /* empty-state 时输入区域位移减小 */
   .chat-container.empty-state .chat-input-area {
-    transform: translateY(-6vh);
+    transform: translateY(-3vh);
+    padding-inline: 12px;
   }
-}
-
-/* ========== 动画 ========== */
-@keyframes fadeInSlide {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.chat-input-area {
-  animation: fadeInSlide 0.3s ease-out;
 }

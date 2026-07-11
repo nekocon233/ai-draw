@@ -1,0 +1,32 @@
+.settings-modal .ant-modal-body {
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+
+.settings-modal .settings-control-row {
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+
+.settings-modal .settings-control-row > .ant-col:first-child {
+  min-width: 0;
+  flex: 1 1 0;
+  padding-inline: 8px;
+}
+
+.settings-modal .settings-control-row > .ant-col:last-child {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 520px) {
+  .settings-modal.ant-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+    margin: 8px auto;
+  }
+
+  .settings-modal :is(.ant-modal-container, .ant-modal-content) {
+    padding-inline: 20px;
+  }
+}

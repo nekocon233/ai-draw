@@ -42,12 +42,25 @@ class ComfyUIConfig(BaseSettings):
 
 class AIPromptConfig(BaseSettings):
     """AI Prompt 生成配置"""
-    provider: str = Field(validation_alias="AI_PROMPT_PROVIDER")
-    api_key: str = Field(validation_alias="AI_PROMPT_API_KEY")
-    base_url: str = Field(validation_alias="AI_PROMPT_BASE_URL")
-    model: str = Field(validation_alias="AI_PROMPT_MODEL")
+    provider: str = Field(default="openai", validation_alias="AI_PROMPT_PROVIDER")
+    api_key: str = Field(default="", validation_alias="AI_PROMPT_API_KEY")
+    base_url: str = Field(default="", validation_alias="AI_PROMPT_BASE_URL")
+    model: str = Field(default="", validation_alias="AI_PROMPT_MODEL")
     template: str = Field(validation_alias="AI_PROMPT_TEMPLATE")
+    reuse_session_title: bool = Field(default=True, validation_alias="AI_PROMPT_REUSE_SESSION_TITLE")
     
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class SessionTitleConfig(BaseSettings):
+    """会话标题自动总结配置。"""
+    api_key: str = Field(default="", validation_alias="SESSION_TITLE_API_KEY")
+    base_url: str = Field(
+        default="https://open.bigmodel.cn/api/coding/paas/v4",
+        validation_alias="SESSION_TITLE_BASE_URL"
+    )
+    model: str = Field(default="glm-4.7", validation_alias="SESSION_TITLE_MODEL")
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
@@ -227,6 +240,7 @@ class Config(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
+    session_title: SessionTitleConfig = Field(default_factory=SessionTitleConfig)
     nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
     pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
     gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
@@ -311,6 +325,11 @@ def get_comfyui_config() -> ComfyUIConfig:
 def get_ai_prompt_config() -> AIPromptConfig:
     """获取 AI Prompt 配置"""
     return get_config().ai_prompt
+
+
+def get_session_title_config() -> SessionTitleConfig:
+    """获取会话标题总结配置。"""
+    return get_config().session_title
 
 
 def get_nano_banana_config() -> NanoBananaConfig:

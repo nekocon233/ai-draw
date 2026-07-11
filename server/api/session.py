@@ -13,6 +13,7 @@ from typing import List, Optional
 from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
+from utils.session_title import get_session_title_generator
 
 router = APIRouter(prefix="/chat")
 
@@ -25,6 +26,9 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionTitleRequest(BaseModel):
     title: str
 
+class UpdateSessionPinnedRequest(BaseModel):
+    is_pinned: bool
+
 class UpdateMessageRequest(BaseModel):
     """更新用户消息内容请求（用于编辑后重新生成）"""
     content: Optional[str] = None
@@ -35,6 +39,7 @@ class UpdateMessageRequest(BaseModel):
 class SessionResponse(BaseModel):
     id: str
     title: str
+    is_pinned: bool
     created_at: int  # Unix 时间戳（毫秒）
     updated_at: int  # Unix 时间戳（毫秒）
     message_count: int
@@ -69,7 +74,7 @@ def get_sessions(
     """获取用户的所有会话列表"""
     sessions = db.query(ChatSession).filter(
         ChatSession.user_id == current_user.id
-    ).order_by(ChatSession.updated_at.desc()).all()
+    ).order_by(ChatSession.is_pinned.desc(), ChatSession.updated_at.desc()).all()
     
     result = []
     for session in sessions:
@@ -81,6 +86,7 @@ def get_sessions(
         result.append(SessionResponse(
             id=session.session_id,
             title=session.title,
+            is_pinned=session.is_pinned,
             created_at=int(session.created_at.timestamp() * 1000),
             updated_at=int(session.updated_at.timestamp() * 1000),
             message_count=message_count
@@ -128,6 +134,7 @@ def create_session(
     return {
         "session_id": session.session_id,
         "title": session.title,
+        "is_pinned": session.is_pinned,
         "created_at": int(session.created_at.timestamp() * 1000),
         "updated_at": int(session.updated_at.timestamp() * 1000)
     }
@@ -185,6 +192,66 @@ def update_session_title(
     
     print(f"[Session] 用户 {current_user.username} 更新会话标题: {session_id} -> {request.title}")
     return {"message": "会话标题更新成功"}
+
+@router.patch("/sessions/{session_id}/pin")
+def update_session_pin(
+    session_id: str,
+    request: UpdateSessionPinnedRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """置顶或取消置顶会话。"""
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.user_id == current_user.id
+    ).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在"
+        )
+
+    session.is_pinned = request.is_pinned
+    db.commit()
+    return {"is_pinned": session.is_pinned}
+
+@router.post("/sessions/{session_id}/summarize-title")
+def summarize_session_title(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """根据会话中的用户消息生成并保存简短标题。"""
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.user_id == current_user.id
+    ).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在"
+        )
+
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.content.isnot(None)
+    ).order_by(ChatMessage.created_at.asc()).all()
+    content = "\n".join(
+        f"{'用户' if message.type == 'user' else '助手'}：{message.content.strip()}"
+        for message in messages
+        if message.content and message.content.strip()
+    )
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话中没有可总结的内容"
+        )
+
+    title = get_session_title_generator().generate(content)
+    session.title = title
+    db.commit()
+    return {"title": title}
 
 @router.put("/sessions/{session_id}/config")
 def update_session_config(

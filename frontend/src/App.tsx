@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Layout, ConfigProvider, theme, App as AntApp, message } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import ChatInput from './components/ChatInput';
-import ResultGrid from './components/ResultGrid';
 import StatusBar from './components/StatusBar';
 import ChatSessionSidebar from './components/ChatSessionSidebar';
 import LoginModal from './components/LoginModal';
@@ -13,19 +12,26 @@ import { isLoggedIn } from './utils/helpers';
 import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
 import './App.css';
 
+const ResultGrid = lazy(() => import('./components/ResultGrid'));
+
 function AppContent() {
   const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore();
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [messageApi, contextHolder] = message.useMessage();
   const [forceLoginOpen] = useState(!isLoggedIn());
 
   // 主题检测
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDark(mediaQuery.matches);
+    const applyTheme = (dark: boolean) => {
+      setIsDark(dark);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    };
+
+    applyTheme(mediaQuery.matches);
 
     const handleThemeChange = (e: MediaQueryListEvent) => {
-      setIsDark(e.matches);
+      applyTheme(e.matches);
     };
 
     mediaQuery.addEventListener('change', handleThemeChange);
@@ -135,7 +141,7 @@ function AppContent() {
       unsubscribe();
       wsManager.disconnect();
     };
-  }, [setServiceStatus, setError, loadUserConfig, loadSessions]);
+  }, [setServiceStatus, setError, loadUserConfig, loadSessions, messageApi]);
 
   return (
     <ConfigProvider
@@ -143,9 +149,22 @@ function AppContent() {
       theme={{
         algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#8250df',
+          colorPrimary: isDark ? '#f4f4f4' : '#0d0d0d',
+          colorPrimaryHover: isDark ? '#d9d9d9' : '#2f2f2f',
+          colorPrimaryActive: isDark ? '#c7c7c7' : '#000000',
+          colorTextLightSolid: isDark ? '#0d0d0d' : '#ffffff',
+          colorInfo: isDark ? '#6ea8fe' : '#2563eb',
+          colorSuccess: isDark ? '#6fcf97' : '#248a5a',
+          colorWarning: isDark ? '#f0b36b' : '#a85c24',
+          colorError: isDark ? '#ff7185' : '#c23b4d',
+          colorText: isDark ? '#f4f4f4' : '#0d0d0d',
+          colorTextSecondary: isDark ? '#b4b4b4' : '#5d5d5d',
+          colorBgBase: isDark ? '#000000' : '#ffffff',
+          colorBgContainer: isDark ? '#212121' : '#f7f7f8',
+          colorBgElevated: isDark ? '#212121' : '#ffffff',
+          colorFillSecondary: isDark ? '#2f2f2f' : '#ececec',
+          colorBorder: isDark ? '#303030' : '#e5e5e5',
           borderRadius: 12,
-          colorBgContainer: isDark ? '#161b22' : '#ffffff',
         },
       }}
     >
@@ -154,23 +173,11 @@ function AppContent() {
         <LoginModal
           open={forceLoginOpen}
           onClose={() => {}}
-          onSuccess={(_username) => { window.location.reload(); }}
+          onSuccess={() => { window.location.reload(); }}
           closable={false}
         />
         <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
-          {/* 顶部状态栏 */}
-          <div style={{ 
-            padding: '12px 24px',
-            paddingLeft: 'max(24px, env(safe-area-inset-left, 24px))',
-            paddingRight: 'max(24px, env(safe-area-inset-right, 24px))',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-            background: isDark ? 'rgba(22, 27, 34, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(10px)',
-            position: 'relative',
-            zIndex: 100,
-          }}>
-            <StatusBar />
-          </div>
+          <StatusBar />
 
           <div className="app-content">
             {/* 左侧会话栏 */}
@@ -180,15 +187,19 @@ function AppContent() {
             <div className={`chat-container ${chatHistory.length === 0 ? 'empty-state' : ''}`}>
               {/* 结果展示区域 */}
               <div className={`results-area ${chatHistory.length === 0 ? 'empty' : ''}`}>
-                <ResultGrid />
+                {chatHistory.length > 0 && (
+                  <Suspense fallback={<div className="result-grid-loading" role="status">正在加载创作记录...</div>}>
+                    <ResultGrid />
+                  </Suspense>
+                )}
               </div>
               
               {/* 聊天输入区域 */}
               <div className="chat-input-area">
                 {chatHistory.length === 0 && (
                   <div className="chat-welcome">
-                    <h2 className="welcome-title">AI-DRAW</h2>
-                    <p className="welcome-subtitle">用文字描述，创造无限可能</p>
+                    <h1 className="welcome-title">今天想创作什么？</h1>
+                    <p className="welcome-subtitle">描述画面、添加参考图，或选择视频工作流开始创作</p>
                   </div>
                 )}
                 <ChatInput />

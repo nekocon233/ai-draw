@@ -13,13 +13,14 @@ import {
   deleteGuestSession,
   loadGuestSessionConfig,
   saveGuestSessionConfig,
-  deleteGuestSessionConfig
+  deleteGuestSessionConfig,
+  restoreSessionImages
 } from '../utils/helpers';
-import { saveImages, deleteMessageImages } from '../utils/indexedDB';
+import { saveImage, saveImages, deleteMessageImages } from '../utils/indexedDB';
 import { clearScrollPosition } from '../utils/scrollPosition';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
-import type { WorkflowMetadata } from '../types/api';
+import type { WorkflowMetadata, WorkflowParameterValue } from '../types/api';
 
 interface ChatMessage {
   id: string;
@@ -44,6 +45,21 @@ interface ChatMessage {
     endFrameCount?: number;    // flf2v 结束帧长度
     frameCount?: number;       // i2v 总帧数
   }
+}
+
+export interface GenerationSettingsDraft {
+  workflow: string;
+  strength: number;
+  count: number;
+  loraPrompt: string;
+  width: number | null;
+  height: number | null;
+  useOriginalSize: boolean;
+  startFrameCount: number | null;
+  endFrameCount: number | null;
+  frameRate: number | null;
+  frameCount: number | null;
+  selectOptions: Record<string, WorkflowParameterValue>;
 }
 
 interface AppState {
@@ -85,7 +101,7 @@ interface AppState {
   pixelLabView: string;          // 视角
   pixelLabDirection: string;      // 朝向
   // select 类型参数的运行时值（按参数名存，如 { duration, aspect_ratio, resolution }），跨工作流共享；切换工作流时按当前可选项校验、必要时重置；仅前端 localStorage 持久化
-  selectOptions: Record<string, any>;
+  selectOptions: Record<string, WorkflowParameterValue>;
   
   // Gemini 多轮对话开关（nano_banana_pro 专用）
   nanoBananaSendHistory: boolean;
@@ -119,6 +135,7 @@ interface AppState {
   setServiceStatus: (status: { available: boolean; is_generating: boolean; is_generating_prompt: boolean }) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setCurrentWorkflow: (workflow: string) => void;
+  commitGenerationSettings: (draft: GenerationSettingsDraft) => void;
   setPrompt: (prompt: string) => void;
   setLoraPrompt: (prompt: string) => void;
   setPromptEnd: (prompt: string) => void;
@@ -137,7 +154,7 @@ interface AppState {
   setPixelLabAction: (v: string) => void;
   setPixelLabView: (v: string) => void;
   setPixelLabDirection: (v: string) => void;
-  setSelectOption: (name: string, value: any) => void;
+  setSelectOption: (name: string, value: WorkflowParameterValue) => void;
   setReferenceImage: (image: string | null) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
@@ -170,11 +187,93 @@ interface AppState {
   deleteSession: (sessionId: string) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   
   // 会话配置管理
   saveSessionConfig: () => void;
   loadSessionConfig: (sessionId: string) => Promise<void>;
 }
+
+const buildWorkflowTransition = (state: AppState, workflow: string): Partial<AppState> => {
+  const workflowMeta = state.availableWorkflows.find(item => item.key === workflow);
+  if (!workflowMeta) return { currentWorkflow: workflow };
+
+  const updates: Partial<AppState> = {
+    currentWorkflow: workflow,
+    isLoop: false,
+    useOriginalSize: true,
+  };
+  const parameterNames = new Set(workflowMeta.parameters.map(param => param.name));
+
+  workflowMeta.parameters.forEach(param => {
+    if (param.name === 'prompt') updates.prompt = String(param.default);
+    if (param.name === 'strength') updates.strength = Number(param.default);
+    if (param.name === 'count') updates.count = Number(param.default);
+    if (param.name === 'lora_prompt') updates.loraPrompt = String(param.default);
+    if (param.name === 'width') updates.width = Number(param.default);
+    if (param.name === 'height') updates.height = Number(param.default);
+    if (param.name === 'startFrameCount') updates.startFrameCount = Number(param.default);
+    if (param.name === 'endFrameCount') updates.endFrameCount = Number(param.default);
+    if (param.name === 'frameRate') updates.frameRate = Number(param.default);
+    if (param.name === 'frameCount') updates.frameCount = Number(param.default);
+  });
+
+  if (!parameterNames.has('lora_prompt')) updates.loraPrompt = '';
+  if (!parameterNames.has('strength')) updates.strength = DEFAULT_CONFIG.STRENGTH;
+  if (!parameterNames.has('count')) updates.count = DEFAULT_CONFIG.COUNT;
+  if (!parameterNames.has('width')) updates.width = null;
+  if (!parameterNames.has('height')) updates.height = null;
+  if (!parameterNames.has('startFrameCount')) updates.startFrameCount = null;
+  if (!parameterNames.has('endFrameCount')) updates.endFrameCount = null;
+  if (!parameterNames.has('frameRate')) updates.frameRate = null;
+  if (!parameterNames.has('frameCount')) updates.frameCount = null;
+
+  const stash = { ...state.workflowImageStash };
+  stash[state.currentWorkflow] = {
+    referenceImage: state.referenceImage,
+    referenceImage2: state.referenceImage2,
+    referenceImage3: state.referenceImage3,
+    referenceImageEnd: state.referenceImageEnd,
+    promptEnd: state.promptEnd,
+    prompt: state.prompt,
+    loraPrompt: state.loraPrompt,
+  };
+  const saved = stash[workflow];
+  updates.referenceImage = saved?.referenceImage ?? null;
+  updates.referenceImage2 = saved?.referenceImage2 ?? null;
+  updates.referenceImage3 = saved?.referenceImage3 ?? null;
+  updates.referenceImageEnd = saved?.referenceImageEnd ?? null;
+  updates.promptEnd = saved?.promptEnd ?? '';
+  if (saved?.prompt !== undefined) updates.prompt = saved.prompt;
+  if (saved?.loraPrompt !== undefined) updates.loraPrompt = saved.loraPrompt;
+  updates.workflowImageStash = stash;
+
+  const nextSelectOptions = { ...state.selectOptions };
+  workflowMeta.parameters.forEach(param => {
+    if (param.type !== 'select') return;
+    const current = nextSelectOptions[param.name];
+    const valid = current !== undefined && (!param.options || param.options.includes(String(current)));
+    if (!valid) nextSelectOptions[param.name] = param.default;
+  });
+  updates.selectOptions = nextSelectOptions;
+
+  return updates;
+};
+
+const getRememberedMethodUpdate = (state: AppState, workflow: string) => {
+  const workflowMeta = state.availableWorkflows.find(item => item.key === workflow);
+  const sameCategoryCount = state.availableWorkflows.filter(
+    item => item.category && item.category === workflowMeta?.category,
+  ).length;
+  if (!workflowMeta?.category || sameCategoryCount <= 1) return null;
+  return { ...state.rememberedMethod, [workflowMeta.category]: workflow };
+};
+
+const createLocalSessionTitle = (content: string) => {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '新对话';
+  return normalized.length > 20 ? `${normalized.slice(0, 20)}…` : normalized;
+};
 
 // 加载游客配置或使用默认值
 const guestConfig = loadGuestConfig();
@@ -241,137 +340,52 @@ export const useAppStore = create<AppState>((set, get) => ({
     isGeneratingPrompt: status.is_generating_prompt,
   }),
   
-  setCurrentWorkflow: async (workflow) => {
+  setCurrentWorkflow: (workflow) => {
     const state = get();
-    const workflowMeta = state.availableWorkflows.find(w => w.key === workflow);
-    
-    // 切换工作流时，根据工作流参数配置重置参数为默认值或置空
-    if (workflowMeta) {
-      const updates: Partial<AppState> = { currentWorkflow: workflow };
-      
-      // 检查工作流是否有对应的参数，如果没有则置空
-      const hasStrength = workflowMeta.parameters.some(p => p.name === 'strength');
-      const hasCount = workflowMeta.parameters.some(p => p.name === 'count');
-      const hasLoraPrompt = workflowMeta.parameters.some(p => p.name === 'lora_prompt');
-      const hasWidth = workflowMeta.parameters.some(p => p.name === 'width');
-      const hasHeight = workflowMeta.parameters.some(p => p.name === 'height');
-      const hasStartFrameCount = workflowMeta.parameters.some(p => p.name === 'startFrameCount');
-      const hasEndFrameCount = workflowMeta.parameters.some(p => p.name === 'endFrameCount');
-      const hasFrameRate = workflowMeta.parameters.some(p => p.name === 'frameRate');
-      const hasFrameCount = workflowMeta.parameters.some(p => p.name === 'frameCount');
-      
-      workflowMeta.parameters.forEach(param => {
-        if (param.name === 'prompt') {
-          updates.prompt = param.default as string;
-        } else if (param.name === 'strength') {
-          updates.strength = param.default as number;
-        } else if (param.name === 'count') {
-          updates.count = param.default as number;
-        } else if (param.name === 'lora_prompt') {
-          updates.loraPrompt = param.default as string;
-        } else if (param.name === 'width') {
-          updates.width = param.default as number;
-        } else if (param.name === 'height') {
-          updates.height = param.default as number;
-        } else if (param.name === 'startFrameCount') {
-          updates.startFrameCount = param.default as number;
-        } else if (param.name === 'endFrameCount') {
-          updates.endFrameCount = param.default as number;
-        } else if (param.name === 'frameRate') {
-          updates.frameRate = param.default as number;
-        } else if (param.name === 'frameCount') {
-          updates.frameCount = param.default as number;
-        }
-      });
-      
-      // 如果工作流没有对应参数，置空或设为默认值
-      if (!hasLoraPrompt) {
-        updates.loraPrompt = '';
-      }
-      if (!hasStrength) {
-        updates.strength = DEFAULT_CONFIG.STRENGTH;
-      }
-      if (!hasCount) {
-        updates.count = DEFAULT_CONFIG.COUNT;
-      }
-      if (!hasWidth) {
-        updates.width = null;
-      }
-      if (!hasHeight) {
-        updates.height = null;
-      }
-      if (!hasStartFrameCount) {
-        updates.startFrameCount = null;
-      }
-      if (!hasEndFrameCount) {
-        updates.endFrameCount = null;
-      }
-      if (!hasFrameRate) {
-        updates.frameRate = null;
-      }
-      if (!hasFrameCount) {
-        updates.frameCount = null;
-      }
-      // 切换工作流时重置 isLoop
-      (updates as any).isLoop = false;
-      (updates as any).useOriginalSize = true;
+    const updates = buildWorkflowTransition(state, workflow);
+    const rememberedMethod = getRememberedMethodUpdate(state, workflow);
+    if (rememberedMethod) updates.rememberedMethod = rememberedMethod;
 
-      // 将当前工作流的图片暂存，恢复目标工作流之前保存的图片
-      const currentWorkflow = state.currentWorkflow;
-      const stash = { ...state.workflowImageStash };
-      stash[currentWorkflow] = {
-        referenceImage: state.referenceImage,
-        referenceImage2: state.referenceImage2,
-        referenceImage3: state.referenceImage3,
-        referenceImageEnd: state.referenceImageEnd,
-        promptEnd: state.promptEnd,
-        prompt: state.prompt,
-        loraPrompt: state.loraPrompt,
-      };
-      const saved = stash[workflow];
-      (updates as any).referenceImage = saved?.referenceImage ?? null;
-      (updates as any).referenceImage2 = saved?.referenceImage2 ?? null;
-      (updates as any).referenceImage3 = saved?.referenceImage3 ?? null;
-      (updates as any).referenceImageEnd = saved?.referenceImageEnd ?? null;
-      (updates as any).promptEnd = saved?.promptEnd ?? '';
-      // 恢复工作流独立 prompt/loraPrompt，无暂存时才使用 yaml 默认值
-      if (saved?.prompt !== undefined) {
-        (updates as any).prompt = saved.prompt;
-      }
-      if (saved?.loraPrompt !== undefined) {
-        (updates as any).loraPrompt = saved.loraPrompt;
-      }
-      (updates as any).workflowImageStash = stash;
-
-      // select 类型参数初始化到 selectOptions（保留已选值；缺省或不在当前可选项内时填默认）
-      const newSelectOptions: Record<string, any> = { ...(state.selectOptions || {}) };
-      workflowMeta.parameters.forEach(param => {
-        if (param.type === 'select') {
-          const cur = newSelectOptions[param.name];
-          const valid = !param.options || param.options.includes(String(cur));
-          if (cur === undefined || !valid) {
-            newSelectOptions[param.name] = param.default;
-          }
-        }
-      });
-      (updates as any).selectOptions = newSelectOptions;
-      localStorage.setItem('selectOptions', JSON.stringify(newSelectOptions));
-
-      set(updates);
-    } else {
-      set({ currentWorkflow: workflow });
+    set(updates);
+    if (updates.selectOptions) {
+      localStorage.setItem('selectOptions', JSON.stringify(updates.selectOptions));
     }
-
-    // 反向同步：仅多种方式的分组（如图生图、图生视频）需要记住所选方式
-    const newMeta = state.availableWorkflows.find(w => w.key === workflow);
-    const sameCategoryCount = state.availableWorkflows.filter(w => w.category && w.category === newMeta?.category).length;
-    if (newMeta?.category && sameCategoryCount > 1) {
-      const updated = { ...state.rememberedMethod, [newMeta.category]: workflow };
-      set({ rememberedMethod: updated });
-      localStorage.setItem('rememberedMethod', JSON.stringify(updated));
+    if (rememberedMethod) {
+      localStorage.setItem('rememberedMethod', JSON.stringify(rememberedMethod));
     }
+    get().saveSessionConfig();
+  },
+  commitGenerationSettings: (draft) => {
+    const state = get();
+    const updates = buildWorkflowTransition(state, draft.workflow);
+    const rememberedMethod = getRememberedMethodUpdate(state, draft.workflow);
+    const mergedSelectOptions = {
+      ...(updates.selectOptions ?? state.selectOptions),
+      ...draft.selectOptions,
+    };
 
-    state.saveSessionConfig();
+    Object.assign(updates, {
+      currentWorkflow: draft.workflow,
+      strength: draft.strength,
+      count: draft.count,
+      loraPrompt: draft.loraPrompt,
+      width: draft.width,
+      height: draft.height,
+      useOriginalSize: draft.useOriginalSize,
+      startFrameCount: draft.startFrameCount,
+      endFrameCount: draft.endFrameCount,
+      frameRate: draft.frameRate,
+      frameCount: draft.frameCount,
+      selectOptions: mergedSelectOptions,
+    });
+    if (rememberedMethod) updates.rememberedMethod = rememberedMethod;
+
+    set(updates);
+    localStorage.setItem('selectOptions', JSON.stringify(mergedSelectOptions));
+    if (rememberedMethod) {
+      localStorage.setItem('rememberedMethod', JSON.stringify(rememberedMethod));
+    }
+    get().saveSessionConfig();
   },
   setPrompt: async (prompt) => {
     set({ prompt });
@@ -495,6 +509,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           const newSession: ChatSession = {
             id: sessionId,
             title: response.title,
+            is_pinned: response.is_pinned,
             created_at: response.created_at,
             updated_at: response.updated_at,
             message_count: 0,
@@ -514,6 +529,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const newSession: ChatSession = {
           id: newSessionId,
           title: '新对话',
+          is_pinned: false,
           created_at: Date.now(),
           updated_at: Date.now(),
           message_count: 0,
@@ -532,7 +548,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: '会话创建失败，请重试' });
       return '';
     }
-    
     const messageId = `msg-${Date.now()}`;
     const userMessage: ChatMessage = {
       id: messageId,
@@ -566,9 +581,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const newHistory = [...state.chatHistory, userMessage, assistantMessage];
       // 更新会话的消息数量和更新时间
-      const updatedSessions = state.sessions.map(s => 
+      const updatedSessions = state.sessions.map(s =>
         s.id === sessionId 
-          ? { ...s, message_count: s.message_count + 2, updated_at: Date.now() }
+          ? {
+              ...s,
+              title: !isLoggedIn() ? createLocalSessionTitle(prompt) : s.title,
+              message_count: s.message_count + 2,
+              updated_at: Date.now(),
+            }
           : s
       );
       
@@ -604,7 +624,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         start_frame_count: startFrameCount ?? undefined,
         end_frame_count: endFrameCount ?? undefined,
         frame_count: frameCount ?? undefined,
-      }).catch(err => console.error('保存用户消息失败:', err));
+      }).then(async () => {
+        const response = await apiService.summarizeSessionTitle(sessionId);
+        set(current => ({
+          sessions: current.sessions.map(session =>
+            session.id === sessionId ? { ...session, title: response.title } : session
+          ),
+        }));
+      }).catch(err => console.error('保存用户消息或总结标题失败:', err));
     }
     
     return `${messageId}-reply`;
@@ -676,12 +703,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           const message = newHistory.find(m => m.id === messageId);
           if (message && message.session_id) {
             // 保存单张图片到 IndexedDB（跳过视频，游客模式仅临时展示）
-            import('../utils/indexedDB').then(({ saveImage }) => {
-              if (!image.startsWith('data:video/') && !image.includes('/video/')) {
-                saveImage(message.session_id, messageId, image, index)
-                  .catch(err => console.error('保存图片到 IndexedDB 失败:', err));
-              }
-            });
+            if (!image.startsWith('data:video/') && !image.includes('/video/')) {
+              saveImage(message.session_id, messageId, image, index)
+                .catch(err => console.error('保存图片到 IndexedDB 失败:', err));
+            }
           }
           // 保存消息元数据到 localStorage
           saveGuestSessionHistory(state.currentSessionId, newHistory);
@@ -1039,14 +1064,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         
         // 异步恢复图片数据
-        import('../utils/helpers').then(async ({ restoreSessionImages }) => {
-          try {
-            const chatHistory = await restoreSessionImages(currentSessionId, chatHistoryWithoutImages);
-            set({ chatHistory });
-          } catch (error) {
-            console.error('恢复图片数据失败:', error);
-          }
-        });
+        restoreSessionImages(currentSessionId, chatHistoryWithoutImages)
+          .then(chatHistory => set({ chatHistory }))
+          .catch(error => console.error('恢复图片数据失败:', error));
         
         // 加载当前会话的配置
         await get().loadSessionConfig(currentSessionId);
@@ -1091,7 +1111,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 创建新会话
   createSession: async (title?: string) => {
     const state = get();
-    const newTitle = title || `对话 ${new Date().toLocaleString('zh-CN')}`;
+    const newTitle = title || '新对话';
     const sessionId = `session-${Date.now()}`;
     
     // 保存当前会话的配置（如果存在）
@@ -1126,6 +1146,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newSession: ChatSession = {
       id: sessionId,
       title: newTitle,
+      is_pinned: false,
       created_at: Date.now(),
       updated_at: Date.now(),
       message_count: 0,
@@ -1317,15 +1338,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const historyWithoutImages = loadGuestSessionHistory(sessionId);
       
       // 异步恢复图片数据
-      import('../utils/helpers').then(async ({ restoreSessionImages }) => {
-        try {
-          const chatHistory = await restoreSessionImages(sessionId, historyWithoutImages);
-          set({ chatHistory });
-        } catch (error) {
+      restoreSessionImages(sessionId, historyWithoutImages)
+        .then(chatHistory => set({ chatHistory }))
+        .catch(error => {
           console.error('恢复图片数据失败:', error);
-          set({ chatHistory: historyWithoutImages }); // 失败时使用原始数据
-        }
-      });
+          set({ chatHistory: historyWithoutImages });
+        });
       
       // 先设置不带图片的数据，避免界面空白
       set({ chatHistory: historyWithoutImages });
@@ -1351,6 +1369,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 游客模式：保存到 localStorage
       const state = get();
       saveGuestSessions(state.sessions);
+    }
+  },
+
+  setSessionPinned: async (sessionId: string, pinned: boolean) => {
+    const previous = get().sessions.find(session => session.id === sessionId)?.is_pinned ?? false;
+    set(state => ({
+      sessions: state.sessions.map(session =>
+        session.id === sessionId ? { ...session, is_pinned: pinned } : session
+      ),
+    }));
+
+    if (!isLoggedIn()) {
+      saveGuestSessions(get().sessions);
+      return;
+    }
+
+    try {
+      await apiService.updateSessionPin(sessionId, pinned);
+    } catch (error) {
+      set(state => ({
+        sessions: state.sessions.map(session =>
+          session.id === sessionId ? { ...session, is_pinned: previous } : session
+        ),
+      }));
+      console.error('更新会话置顶状态失败:', error);
     }
   },
   

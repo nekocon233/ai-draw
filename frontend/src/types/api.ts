@@ -16,7 +16,6 @@ export interface GeneratePromptRequest {
 }
 
 export interface GeneratePromptResponse {
-  success: boolean;
   prompt: string;
 }
 
@@ -48,7 +47,7 @@ export interface GenerateMediaRequest {
   view?: string;
   direction?: string;
   // Kling 首尾帧图生视频参数（kling_flf2v 专用）
-  kling_options?: Record<string, any>;
+  kling_options?: Record<string, WorkflowParameterValue>;
 }
 
 export interface GenerateMediaResponse {
@@ -65,6 +64,8 @@ export interface UploadImageResponse {
 
 // 工作流列表
 // 工作流元数据
+export type WorkflowParameterValue = string | number;
+
 export interface WorkflowParameter {
   name: string;
   label: string;
@@ -73,7 +74,7 @@ export interface WorkflowParameter {
   max?: number;
   step?: number;
   options?: string[];  // type === 'select' 时的可选项
-  default: string | number;
+  default: WorkflowParameterValue;
 }
 
 export interface WorkflowMetadata {

@@ -15,6 +15,7 @@ import type {
   UploadImageResponse,
   WorkflowsResponse,
 } from '../types/api';
+import type { ChatSession } from '../types/models';
 
 import type { AuthResponse, UserConfig } from '../types/models';
 
@@ -172,10 +173,10 @@ export const apiService = {
     client.delete('/config/user'),
   
   // 会话管理
-  getSessions: (): Promise<any[]> =>
+  getSessions: (): Promise<ChatSession[]> =>
     client.get('/chat/sessions'),
   
-  createSession: (title?: string): Promise<{ session_id: string; title: string; created_at: number; updated_at: number }> =>
+  createSession: (title?: string): Promise<{ session_id: string; title: string; is_pinned: boolean; created_at: number; updated_at: number }> =>
     client.post('/chat/sessions', { session_id: `session-${Date.now()}`, title: title || '新对话' }),
   
   deleteSession: (sessionId: string): Promise<{ message: string }> =>
@@ -194,6 +195,12 @@ export const apiService = {
 
   updateSessionTitle: (sessionId: string, title: string): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}`, { title }),
+
+  updateSessionPin: (sessionId: string, isPinned: boolean): Promise<{ is_pinned: boolean }> =>
+    client.patch(`/chat/sessions/${sessionId}/pin`, { is_pinned: isPinned }),
+
+  summarizeSessionTitle: (sessionId: string): Promise<{ title: string }> =>
+    client.post(`/chat/sessions/${sessionId}/summarize-title`),
   
   // 会话配置
   getSessionConfig: (sessionId: string): Promise<{

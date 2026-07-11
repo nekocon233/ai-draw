@@ -48,6 +48,7 @@ export interface SessionConfig {
 export interface ChatSession {
   id: string;
   title: string;
+  is_pinned: boolean;
   created_at: number;
   updated_at: number;
   message_count: number;
@@ -62,6 +63,7 @@ export interface DBChatSession {
   session_id: string;
   user_id: number;
   title: string;
+  is_pinned: boolean;
   created_at: string;
   updated_at: string;
 }

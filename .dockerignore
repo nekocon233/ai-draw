@@ -50,8 +50,8 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Environment (will be mounted separately)
-.env
+# Environment (injected by Compose, never copied into image context)
+.env*
 
 # Development files
 OPTIMIZATION_TODO.md

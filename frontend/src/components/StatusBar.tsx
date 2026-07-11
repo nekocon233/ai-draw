@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { Space, Tag, Button, Dropdown } from 'antd';
+import { Tag, Button, Dropdown } from 'antd';
 import { LoadingOutlined, UserOutlined, LogoutOutlined, LoginOutlined } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import LoginModal from './LoginModal';
 import { isLoggedIn as checkLoggedIn, getUsername, clearAccessToken } from '../utils/helpers';
 
-export default function StatusBar() {
-  const { isGenerating, isGeneratingPrompt, error } = useAppStore();
+export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [username, setUsername] = useState(getUsername() || '');
   const isLoggedIn = checkLoggedIn();
@@ -33,50 +32,61 @@ export default function StatusBar() {
   ];
 
   return (
-    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-      <Space>
-        {isGenerating && (
-          <Tag icon={<LoadingOutlined />} color="processing">
-            生成中...
-          </Tag>
-        )}
-
-        {isGeneratingPrompt && (
-          <Tag icon={<LoadingOutlined />} color="processing">
-            生成提示词中...
-          </Tag>
-        )}
-
-        {error && (
-          <Tag color="error">
-            错误: {error}
-          </Tag>
-        )}
-      </Space>
-
-      <Space style={{ marginLeft: 'auto' }}>
-        {isLoggedIn ? (
-          <Dropdown menu={{ items: userMenuItems }} placement="topRight">
-            <Button type="text" icon={<UserOutlined />}>
-              {username}
-            </Button>
-          </Dropdown>
-        ) : (
+    <>
+      {isLoggedIn ? (
+        <Dropdown menu={{ items: userMenuItems }} placement="topLeft" trigger={['click']}>
           <Button
-            type="primary"
-            icon={<LoginOutlined />}
-            onClick={() => setLoginModalOpen(true)}
+            className="account-menu-button"
+            type="text"
+            icon={<UserOutlined />}
+            aria-label={collapsed ? `账户：${username}` : undefined}
           >
-            登录
+            {!collapsed && <span>{username}</span>}
           </Button>
-        )}
-      </Space>
-      
+        </Dropdown>
+      ) : (
+        <Button
+          className="account-menu-button"
+          type="text"
+          icon={<LoginOutlined />}
+          onClick={() => setLoginModalOpen(true)}
+          aria-label={collapsed ? '登录' : undefined}
+        >
+          {!collapsed && <span>登录</span>}
+        </Button>
+      )}
+
       <LoginModal
         open={loginModalOpen}
         onClose={() => setLoginModalOpen(false)}
         onSuccess={handleLoginSuccess}
       />
-    </Space>
+    </>
+  );
+}
+
+export default function StatusBar() {
+  const { isGenerating, isGeneratingPrompt, error } = useAppStore();
+
+  if (!isGenerating && !isGeneratingPrompt && !error) return null;
+
+  return (
+    <div className="app-status-bar" role="status" aria-live="polite">
+      {isGenerating && (
+        <Tag icon={<LoadingOutlined />} color="processing">
+          正在生成
+        </Tag>
+      )}
+      {isGeneratingPrompt && (
+        <Tag icon={<LoadingOutlined />} color="processing">
+          正在生成提示词
+        </Tag>
+      )}
+      {error && (
+        <Tag color="error" role="alert">
+          {error}
+        </Tag>
+      )}
+    </div>
   );
 }

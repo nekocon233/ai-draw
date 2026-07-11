@@ -2,6 +2,7 @@
  * 前端工具函数
  */
 import { STORAGE_KEYS } from './constants';
+import { clearAllData, deleteSessionImages, loadSessionImages } from './indexedDB';
 
 // ============ 本地存储 ============
 
@@ -119,7 +120,6 @@ export function loadGuestSessionHistory(sessionId: string): any[] {
  */
 export async function restoreSessionImages(sessionId: string, messages: any[]): Promise<any[]> {
   try {
-    const { loadSessionImages } = await import('./indexedDB');
     const imageMap = await loadSessionImages(sessionId);
     
     // 将图片数据恢复到消息中
@@ -242,11 +242,9 @@ export function deleteGuestSession(sessionId: string): void {
     saveGuestSessions(sessions);
     
     // 同时删除 IndexedDB 中的图片数据
-    import('./indexedDB').then(({ deleteSessionImages }) => {
-      deleteSessionImages(sessionId).catch(err => 
-        console.error('删除会话图片失败:', err)
-      );
-    });
+    deleteSessionImages(sessionId).catch(err =>
+      console.error('删除会话图片失败:', err)
+    );
   } catch (error) {
     console.error('删除游客会话失败:', error);
   }
@@ -265,11 +263,9 @@ export function clearAllGuestData(): void {
     localStorage.removeItem(STORAGE_KEYS.GUEST_CONFIG);
     
     // 同时清理 IndexedDB
-    import('./indexedDB').then(({ clearAllData }) => {
-      clearAllData()
-        .then(() => console.info('已清理所有游客数据（包括 IndexedDB）'))
-        .catch(err => console.error('清理 IndexedDB 失败:', err));
-    });
+    clearAllData()
+      .then(() => console.info('已清理所有游客数据（包括 IndexedDB）'))
+      .catch(err => console.error('清理 IndexedDB 失败:', err));
   } catch (error) {
     console.error('清理游客数据失败:', error);
   }
