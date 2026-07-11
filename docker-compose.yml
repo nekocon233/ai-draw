@@ -70,7 +70,6 @@ services:
       - WORKFLOWS_PATH=configs/workflows
     env_file:
       - .env
-      - .env.session-title
     networks:
       - ai-draw-network
     healthcheck:
