@@ -73,6 +73,7 @@ type VideoSpriteMarker = 'loop' | 'jump' | 'duplicate' | 'manual';
 type SimilarityMarker = Exclude<VideoSpriteMarker, 'manual'>;
 type ReduceKeepPosition = 'first' | 'last';
 type CanvasTool = 'brush' | 'eraser' | 'fill' | 'replace' | 'background' | 'soften';
+type EraserMode = 'restore' | 'transparent';
 const transparentReplaceMatchModeOptions: Array<{ label: string; value: TransparentReplaceMatchMode }> = [
   { label: '全图基础色', value: 'global' },
   { label: '点击连通', value: 'connected' },
@@ -1645,6 +1646,10 @@ function FrameCanvasEditor({
 }: FrameCanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const initialCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const restoreStrokeSourceRef = useRef<ImageData | null>(null);
+  const restoreStrokeMaskRef = useRef<HTMLCanvasElement | null>(null);
+  const restoreStrokeLayerRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const drawingRef = useRef(false);
   const panningRef = useRef({ active: false, startX: 0, startY: 0, panX: 0, panY: 0 });
@@ -1675,6 +1680,7 @@ function FrameCanvasEditor({
   const [tool, setTool] = useState<CanvasTool>('replace');
   const [color, setColor] = useState('#ffffff');
   const [replaceWithTransparency, setReplaceWithTransparency] = useState(true);
+  const [eraserMode, setEraserMode] = useState<EraserMode>('restore');
   const [replaceMatchMode, setReplaceMatchMode] = useState<TransparentReplaceMatchMode>(DEFAULT_TRANSPARENT_REPLACE_MATCH_MODE);
   const [replaceEdgeEnhancementMode, setReplaceEdgeEnhancementMode] = useState<TransparentEdgeEnhancementMode>(DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT_MODE);
   const [replaceEdgeCleanup, setReplaceEdgeCleanup] = useState(DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT);
@@ -1698,6 +1704,7 @@ function FrameCanvasEditor({
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [replacePreviewActive, setReplacePreviewActive] = useState(false);
   const baseUrl = getFrameExportUrl(frame);
   const frameLabel = `#${String(frame.index + 1).padStart(3, '0')}`;
   const backgroundOptionsState = backgroundOptions.state;
@@ -1803,12 +1810,14 @@ function FrameCanvasEditor({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
     historyRef.current.push({
-      image: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      image,
       contentDirty: contentDirtyRef.current,
     });
     trimCanvasHistory(historyRef.current);
     redoRef.current = [];
+    return image;
   }, []);
 
   const fitCanvasToStage = useCallback(() => {
@@ -1879,11 +1888,25 @@ function FrameCanvasEditor({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
+      if (!initialCanvasRef.current) {
+        const initialCanvas = document.createElement('canvas');
+        initialCanvas.width = canvas.width;
+        initialCanvas.height = canvas.height;
+        const initialCtx = initialCanvas.getContext('2d');
+        if (initialCtx) {
+          initialCtx.drawImage(canvas, 0, 0);
+          initialCanvasRef.current = initialCanvas;
+        }
+      }
       setImageReady(true);
       historyRef.current = [];
       redoRef.current = [];
+      restoreStrokeSourceRef.current = null;
+      restoreStrokeMaskRef.current = null;
+      restoreStrokeLayerRef.current = null;
       updateContentDirty(false);
       liveFloodRef.current = null;
+      setReplacePreviewActive(false);
       softenSourceRef.current = null;
       autoFitRef.current = true;
       window.requestAnimationFrame(fitCanvasToStage);
@@ -1933,6 +1956,7 @@ function FrameCanvasEditor({
       updateContentDirty(true);
       setCanvasSize({ width: image.naturalWidth, height: image.naturalHeight });
       liveFloodRef.current = null;
+      setReplacePreviewActive(false);
       softenSourceRef.current = null;
     } catch (err: unknown) {
       if (requestId === backgroundPreviewRequestIdRef.current) {
@@ -2037,19 +2061,61 @@ function FrameCanvasEditor({
     };
   };
 
+  const renderRestoreStroke = () => {
+    const canvas = canvasRef.current;
+    const initialCanvas = initialCanvasRef.current;
+    const source = restoreStrokeSourceRef.current;
+    const maskCanvas = restoreStrokeMaskRef.current;
+    const restoreLayer = restoreStrokeLayerRef.current;
+    const ctx = canvas?.getContext('2d');
+    const layerCtx = restoreLayer?.getContext('2d');
+    if (!canvas || !initialCanvas || !source || !maskCanvas || !restoreLayer || !ctx || !layerCtx) return;
+    if (source.width !== canvas.width || source.height !== canvas.height) return;
+
+    ctx.putImageData(source, 0, 0);
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(maskCanvas, 0, 0);
+    ctx.restore();
+
+    layerCtx.clearRect(0, 0, restoreLayer.width, restoreLayer.height);
+    layerCtx.save();
+    layerCtx.drawImage(initialCanvas, 0, 0, restoreLayer.width, restoreLayer.height);
+    layerCtx.globalCompositeOperation = 'destination-in';
+    layerCtx.drawImage(maskCanvas, 0, 0);
+    layerCtx.restore();
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(restoreLayer, 0, 0);
+    ctx.restore();
+  };
+
   const drawAt = (x: number, y: number) => {
     const canvas = canvasRef.current;
     const strokeCanvas = strokeCanvasRef.current;
     if (!canvas || !strokeCanvas) return;
     if (tool === 'eraser') {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      if (eraserMode === 'restore') {
+        const maskCtx = restoreStrokeMaskRef.current?.getContext('2d');
+        if (!maskCtx) return;
+        maskCtx.save();
+        maskCtx.fillStyle = '#fff';
+        maskCtx.beginPath();
+        maskCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+        maskCtx.fill();
+        maskCtx.restore();
+        renderRestoreStroke();
+      } else {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
       return;
     }
     const ctx = strokeCanvas.getContext('2d');
@@ -2066,6 +2132,38 @@ function FrameCanvasEditor({
     const canvas = canvasRef.current;
     const strokeCanvas = strokeCanvasRef.current;
     if (!canvas || !strokeCanvas) return;
+    if (tool === 'eraser') {
+      if (eraserMode === 'restore') {
+        const maskCtx = restoreStrokeMaskRef.current?.getContext('2d');
+        if (!maskCtx) return;
+        maskCtx.save();
+        maskCtx.strokeStyle = '#fff';
+        maskCtx.lineWidth = brushSize;
+        maskCtx.lineCap = 'round';
+        maskCtx.lineJoin = 'round';
+        maskCtx.beginPath();
+        maskCtx.moveTo(from.x, from.y);
+        maskCtx.lineTo(to.x, to.y);
+        maskCtx.stroke();
+        maskCtx.restore();
+        renderRestoreStroke();
+      } else {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+      return;
+    }
     const targetCanvas = tool === 'brush' ? strokeCanvas : canvas;
     const ctx = targetCanvas.getContext('2d');
     if (!ctx) return;
@@ -2073,12 +2171,7 @@ function FrameCanvasEditor({
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    if (tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = '#000';
-    } else {
-      ctx.strokeStyle = color;
-    }
+    ctx.strokeStyle = color;
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);
@@ -2286,6 +2379,7 @@ function FrameCanvasEditor({
     if (!canvas || !ctx) return;
     if (!softenSourceRef.current) {
       liveFloodRef.current = null;
+      setReplacePreviewActive(false);
       pushHistory();
       updateContentDirty(true);
       softenSourceRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -2328,21 +2422,38 @@ function FrameCanvasEditor({
       updateContentDirty(true);
       softenSourceRef.current = null;
       liveFloodRef.current = { tool, x, y, source };
+      setReplacePreviewActive(tool === 'replace');
       floodFill(x, y, tool === 'replace', source);
       return;
     }
     cancelPendingPreviewRender();
     cancelBackgroundPreviewActivity();
-    pushHistory();
+    const strokeSource = pushHistory();
     updateContentDirty(true);
     liveFloodRef.current = null;
+    setReplacePreviewActive(false);
     softenSourceRef.current = null;
+    restoreStrokeSourceRef.current = null;
+    restoreStrokeMaskRef.current = null;
+    restoreStrokeLayerRef.current = null;
     if (tool === 'brush') {
       const canvas = canvasRef.current;
       const strokeCanvas = strokeCanvasRef.current;
       if (!canvas || !strokeCanvas) return;
       strokeCanvas.width = canvas.width;
       strokeCanvas.height = canvas.height;
+    } else if (tool === 'eraser' && eraserMode === 'restore') {
+      const canvas = canvasRef.current;
+      if (!canvas || !strokeSource) return;
+      const maskCanvas = document.createElement('canvas');
+      const restoreLayer = document.createElement('canvas');
+      maskCanvas.width = canvas.width;
+      maskCanvas.height = canvas.height;
+      restoreLayer.width = canvas.width;
+      restoreLayer.height = canvas.height;
+      restoreStrokeSourceRef.current = strokeSource;
+      restoreStrokeMaskRef.current = maskCanvas;
+      restoreStrokeLayerRef.current = restoreLayer;
     }
     drawingRef.current = true;
     lastDrawPointRef.current = { x, y };
@@ -2378,6 +2489,9 @@ function FrameCanvasEditor({
     }
     drawingRef.current = false;
     lastDrawPointRef.current = null;
+    restoreStrokeSourceRef.current = null;
+    restoreStrokeMaskRef.current = null;
+    restoreStrokeLayerRef.current = null;
   };
 
   const onStagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2435,6 +2549,7 @@ function FrameCanvasEditor({
     ctx.putImageData(previous.image, 0, 0);
     updateContentDirty(previous.contentDirty);
     liveFloodRef.current = null;
+    setReplacePreviewActive(false);
     softenSourceRef.current = null;
   }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
 
@@ -2454,6 +2569,7 @@ function FrameCanvasEditor({
     ctx.putImageData(next.image, 0, 0);
     updateContentDirty(next.contentDirty);
     liveFloodRef.current = null;
+    setReplacePreviewActive(false);
     softenSourceRef.current = null;
   }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
 
@@ -2500,6 +2616,7 @@ function FrameCanvasEditor({
       onSaved(res.image_url);
       resetBackgroundPreview();
       liveFloodRef.current = null;
+      setReplacePreviewActive(false);
       softenSourceRef.current = null;
       historyRef.current = [];
       redoRef.current = [];
@@ -2664,11 +2781,26 @@ function FrameCanvasEditor({
             {tool === 'eraser' && (
               <div className="frame-canvas-replace-settings">
                 <div className="frame-editor-section-title">橡皮擦参数</div>
+                <label className="frame-editor-field">
+                  <span>擦除方式</span>
+                  <Select
+                    value={eraserMode}
+                    options={[
+                      { label: '恢复初始图像', value: 'restore' },
+                      { label: '擦除为透明', value: 'transparent' },
+                    ]}
+                    onChange={value => { setEraserMode(value); markParameterDirty(); }}
+                  />
+                </label>
                 <div className="frame-editor-slider">
                   <span>笔刷大小 {brushSize}</span>
                   <Slider min={1} max={200} value={brushSize} onChange={value => { setBrushSize(value); markParameterDirty(); }} />
                 </div>
-                <p className="frame-editor-help">笔刷大小会立即同步到画布预览。</p>
+                <p className="frame-editor-help">
+                  {eraserMode === 'restore'
+                    ? '擦除区域会恢复为本次打开编辑器时的图像。'
+                    : '擦除区域会变为透明，适合直接移除当前图像内容。'}
+                </p>
               </div>
             )}
             {tool === 'fill' && (
@@ -2745,9 +2877,11 @@ function FrameCanvasEditor({
                 </div>
               )}
               <p className="frame-editor-help">
-                {replaceWithTransparency
-                  ? `匹配：${transparentReplaceMatchModeHelp[replaceMatchMode]} 增强：${transparentEdgeEnhancementModeHelp[replaceEdgeEnhancementMode]}`
-                  : '只替换与画布边缘连通的相似颜色，主体内部不连通的同色区域会被保留。'}
+                {!replacePreviewActive
+                  ? '请先点击画布选择换色目标。使用其他工具修改画布后，需要重新点击目标区域；参数会用于下一次换色。'
+                  : replaceWithTransparency
+                    ? `正在实时预览。匹配：${transparentReplaceMatchModeHelp[replaceMatchMode]} 增强：${transparentEdgeEnhancementModeHelp[replaceEdgeEnhancementMode]}`
+                    : '正在实时预览。只替换与画布边缘连通的相似颜色，主体内部不连通的同色区域会被保留。'}
               </p>
             </div>
             )}

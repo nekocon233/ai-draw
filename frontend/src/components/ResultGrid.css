@@ -2127,8 +2127,8 @@
 
 .frame-canvas-brush-preview.eraser {
   border-color: rgba(255, 255, 255, 0.95);
-  background: rgba(0, 0, 0, 0.18);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.72);
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.62);
 }
 
 .frame-canvas-stage.panning,
