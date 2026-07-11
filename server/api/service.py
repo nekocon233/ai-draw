@@ -4,6 +4,7 @@
 from fastapi import APIRouter, Depends
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
+from server.auth import get_current_user
 from server.schemas import ServiceStatusResponse
 
 router = APIRouter(prefix="/service", tags=["服务管理"])
@@ -18,17 +19,17 @@ async def get_service_status(service: AIDrawService = Depends(get_ai_draw_servic
     )
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[Depends(get_current_user)])
 async def start_service(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """启动服务"""
     await service.start_service()
     return {"success": True, "message": "服务已启动"}
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(get_current_user)])
 async def stop_service(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """停止服务"""
-    await service.stop_service()
+    service.stop_service()
     return {"success": True, "message": "服务已停止"}
 
 
@@ -74,7 +75,7 @@ async def get_workflow_defaults() -> dict:
     }
 
 
-@router.post("/workflow/switch")
+@router.post("/workflow/switch", dependencies=[Depends(get_current_user)])
 async def switch_workflow(
     workflow_type: str,
     service: AIDrawService = Depends(get_ai_draw_service)

@@ -4,13 +4,33 @@
 import { STORAGE_KEYS } from './constants';
 import { clearAllData, deleteSessionImages, loadSessionImages } from './indexedDB';
 
+export const AUTH_REQUIRED_EVENT = 'ai-draw:auth-required';
+
+export function requireAuthentication(): void {
+  window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+}
+
 // ============ 本地存储 ============
 
 /**
  * 检查用户是否已登录
  */
 export function isLoggedIn(): boolean {
-  return !!localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+  const expiresAt = getAccessTokenExpiry();
+  return expiresAt !== null && expiresAt > Date.now();
+}
+
+export function getAccessTokenExpiry(): number | null {
+  const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+  if (!token) return null;
+  try {
+    const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, '=');
+    const payload = JSON.parse(atob(paddedPayload)) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -33,6 +53,7 @@ export function setAccessToken(token: string): void {
 export function clearAccessToken(): void {
   localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
   localStorage.removeItem(STORAGE_KEYS.USERNAME);
+  requireAuthentication();
 }
 
 /**

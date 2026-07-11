@@ -3533,7 +3533,7 @@ function FrameCanvasEditor({
           </small>
         </div>
       )}
-      width={1180}
+      width={1440}
       className="frame-canvas-editor-modal"
       footer={(
         <div className="frame-canvas-footer">

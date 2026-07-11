@@ -3,7 +3,7 @@
  */
 import axios, { AxiosError } from 'axios';
 import { message } from 'antd';
-import { getAccessToken, clearAccessToken } from '../utils/helpers';
+import { getAccessToken, clearAccessToken, requireAuthentication } from '../utils/helpers';
 
 /**
  * API 错误响应格式
@@ -13,19 +13,19 @@ interface APIErrorResponse {
   error: {
     code: string;
     message: string;
-    details?: Record<string, any>;
+    details?: Record<string, unknown>;
   };
 }
 
 /**
  * API 成功响应格式
  */
-interface APISuccessResponse<T = any> {
+interface APISuccessResponse<T = unknown> {
   success: true;
   data: T;
 }
 
-export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;
+export type APIResponse<T = unknown> = APISuccessResponse<T> | APIErrorResponse;
 
 const client = axios.create({
   baseURL: '/api',
@@ -41,6 +41,17 @@ client.interceptors.request.use(
     const token = getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else {
+      const path = config.url || '';
+      const isPublicRequest = path.startsWith('/auth/login')
+        || path.startsWith('/auth/register')
+        || path.startsWith('/service/status')
+        || path.startsWith('/service/workflows')
+        || path.startsWith('/service/workflow/defaults');
+      if (!isPublicRequest) {
+        requireAuthentication();
+        return Promise.reject(new Error('登录已过期，请重新登录'));
+      }
     }
     return config;
   },
@@ -93,7 +104,7 @@ client.interceptors.response.use(
           
         case 'VALIDATION_ERROR':
           // 验证错误显示详细信息
-          if (data.error.details?.errors) {
+          if (Array.isArray(data.error.details?.errors)) {
             const validationErrors = data.error.details.errors as Array<{
               field: string;
               message: string;
@@ -118,7 +129,8 @@ client.interceptors.response.use(
       }
     } else {
       // 兼容旧版错误格式
-      errorMessage = (data as any)?.detail || error.message || '请求失败';
+      const legacyData = data as unknown as { detail?: string };
+      errorMessage = legacyData?.detail || error.message || '请求失败';
       
       // HTTP 状态码处理
       switch (status) {
@@ -147,10 +159,11 @@ client.interceptors.response.use(
     }
     
     // 创建统一的错误对象
-    const apiError = new Error(errorMessage);
-    (apiError as any).code = errorCode;
-    (apiError as any).status = status;
-    (apiError as any).details = data?.error?.details;
+    const apiError = Object.assign(new Error(errorMessage), {
+      code: errorCode,
+      status,
+      details: data?.error?.details,
+    });
     
     return Promise.reject(apiError);
   }

@@ -2,6 +2,7 @@
  * WebSocket 管理器
  */
 import type { WSMessage } from '../types/api';
+import { clearAccessToken, getAccessToken } from '../utils/helpers';
 
 type MessageHandler = (data: WSMessage) => void;
 
@@ -24,13 +25,15 @@ class WebSocketManager {
   }
 
   connect() {
+    const token = getAccessToken();
+    if (!token) return;
     if (this.ws?.readyState === WebSocket.OPEN) {
       console.log('WebSocket already connected');
       return;
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -55,9 +58,13 @@ class WebSocketManager {
         console.error('WebSocket 错误:', error);
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = event => {
         console.log('WebSocket 连接关闭');
         this.ws = null;
+        if (event.code === 1008) {
+          clearAccessToken();
+          return;
+        }
         this.scheduleReconnect();
       };
     } catch (error) {
@@ -71,7 +78,7 @@ class WebSocketManager {
     return () => this.handlers.delete(handler);
   }
 
-  send(data: any) {
+  send(data: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
     } else {

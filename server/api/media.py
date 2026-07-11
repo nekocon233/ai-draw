@@ -14,6 +14,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
+from server.auth import get_current_user
 from server.image_upscale_methods import build_upscale_method_registry
 from server.schemas import GenerateMediaRequest, GenerateMediaResponse
 from utils.config_loader import get_config, get_image_upscale_config, get_video_frames_config
@@ -33,7 +34,7 @@ from utils.video_frames import (
     zip_frames,
 )
 
-router = APIRouter(prefix="/media", tags=["媒体生成"])
+router = APIRouter(prefix="/media", tags=["媒体生成"], dependencies=[Depends(get_current_user)])
 
 
 class BackgroundOptionsRequest(BaseModel):

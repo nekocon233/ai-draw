@@ -9,6 +9,8 @@ import asyncio
 import json
 
 from server.ai_draw_service import get_ai_draw_service
+from server.auth import get_user_from_token
+from server.database import SessionLocal
 
 router = APIRouter()
 
@@ -88,6 +90,17 @@ _callbacks_initialized = False
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket 连接端点"""
     global _callbacks_initialized
+
+    token = websocket.query_params.get("token")
+    db = SessionLocal()
+    try:
+        user = get_user_from_token(token or "", db)
+    finally:
+        db.close()
+    if user is None:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     
     # 首次连接时设置回调
     if not _callbacks_initialized:

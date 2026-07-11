@@ -9,7 +9,7 @@ import { wsManager } from './api/websocket';
 import { apiService } from './api/services';
 import { useAppStore } from './stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
-import { isLoggedIn } from './utils/helpers';
+import { AUTH_REQUIRED_EVENT, clearAccessToken, getAccessTokenExpiry, isLoggedIn } from './utils/helpers';
 import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
 import './App.css';
 
@@ -25,7 +25,7 @@ function AppContent() {
   })));
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [messageApi, contextHolder] = message.useMessage();
-  const [forceLoginOpen] = useState(!isLoggedIn());
+  const [forceLoginOpen, setForceLoginOpen] = useState(!isLoggedIn());
 
   // 主题检测
   useEffect(() => {
@@ -44,6 +44,35 @@ function AppContent() {
     mediaQuery.addEventListener('change', handleThemeChange);
     return () => {
       mediaQuery.removeEventListener('change', handleThemeChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const expiresAt = getAccessTokenExpiry();
+    if (expiresAt === null) return;
+    const delay = expiresAt - Date.now();
+    if (delay <= 0) {
+      clearAccessToken();
+      return;
+    }
+    const timer = window.setTimeout(clearAccessToken, delay);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const lockApplication = () => {
+      setForceLoginOpen(true);
+      wsManager.disconnect();
+      useAppStore.setState({ isGenerating: false, currentGeneratingMessageId: null });
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'access_token' && !event.newValue) lockApplication();
+    };
+    window.addEventListener(AUTH_REQUIRED_EVENT, lockApplication);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, lockApplication);
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
@@ -68,7 +97,7 @@ function AppContent() {
     loadData();
 
     // 连接 WebSocket
-    wsManager.connect();
+    if (isLoggedIn()) wsManager.connect();
 
     // 订阅 WebSocket 消息
     const unsubscribe = wsManager.subscribe((message) => {
@@ -173,6 +202,12 @@ function AppContent() {
           colorBorder: isDark ? '#303030' : '#e5e5e5',
           borderRadius: 12,
         },
+        components: {
+          Switch: {
+            colorPrimary: isDark ? '#6ea8fe' : '#2563eb',
+            colorPrimaryHover: isDark ? '#8bb9ff' : '#1d4ed8',
+          },
+        },
       }}
     >
       <AntApp>
@@ -183,7 +218,11 @@ function AppContent() {
           onSuccess={() => { window.location.reload(); }}
           closable={false}
         />
-        <Layout className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}>
+        <Layout
+          className={`app-layout ${isDark ? 'dark-mode' : 'light-mode'}`}
+          inert={forceLoginOpen}
+          aria-hidden={forceLoginOpen}
+        >
           <StatusBar />
 
           <div className="app-content">
