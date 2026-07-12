@@ -119,7 +119,8 @@ class ImageUpscaleBatchRequest(BaseModel):
 
 class RemoveBackgroundRequest(BackgroundOptionsRequest):
     """单图移除背景请求"""
-    image_url: str
+    image_url: Optional[str] = None
+    image: Optional[str] = None
 
 
 def _resolve_upload_path(upload_url: str, label: str = '文件') -> Path:
@@ -496,7 +497,7 @@ async def probe_video_meta(request: VideoMetaRequest) -> dict:
 @router.post("/video-frame-backgrounds")
 async def remove_video_frame_backgrounds(request: VideoFrameBackgroundBatchRequest) -> dict:
     """批量帧移除背景，结果写入透明 PNG，供工作台第 2 步使用。"""
-    frames = _load_frame_urls(request.frame_urls, mode='RGB')
+    frames = _load_frame_urls(request.frame_urls, mode='RGBA')
     cfg = get_video_frames_config()
     bg_options = _background_options(request, fallback_mode=cfg.background_mode)
 
@@ -846,14 +847,21 @@ async def get_export_progress(progress_id: str) -> dict:
 @router.post("/remove-background")
 async def remove_background(request: RemoveBackgroundRequest) -> dict:
     """单图移除背景 → 透明 PNG。复用视频抽帧那套 apply_background_removal 抠图逻辑。"""
-    image_path = _resolve_upload_path(request.image_url, label='图片')
     cfg = get_video_frames_config()
     bg_options = _background_options(request, fallback_mode=cfg.background_mode)
 
     try:
-        with Image.open(image_path) as img:
-            frame = img.convert('RGB')
+        if request.image:
+            frame = _decode_data_png(request.image)
+        elif request.image_url:
+            image_path = _resolve_upload_path(request.image_url, label='图片')
+            with Image.open(image_path) as img:
+                frame = img.convert('RGBA')
+        else:
+            raise HTTPException(status_code=400, detail='请提供图片 URL 或 PNG 数据')
         [result] = await asyncio.to_thread(apply_background_removal, [frame], bg_options)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'移除背景失败: {e}')
 

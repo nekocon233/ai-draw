@@ -755,7 +755,7 @@ class AIDrawService:
         在线程池中执行：创建任务 → 轮询至完成 → 下载视频。
         """
         from utils.config_loader import get_kling_config
-        from utils.kling_video import generate_image2video_flf2v, DEFAULT_BASE_URL
+        from utils.kling_video import generate_image2video_flf2v
         import requests as _requests
 
         cfg = get_kling_config()
@@ -774,7 +774,7 @@ class AIDrawService:
             prompt=prompt,
             model_name=cfg.model,
             duration=duration,
-            base_url=cfg.base_url or DEFAULT_BASE_URL,
+            base_url=cfg.base_url,
         )
 
         # 下载视频字节流（阻塞，放线程池）

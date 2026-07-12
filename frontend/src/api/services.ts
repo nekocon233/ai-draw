@@ -348,7 +348,8 @@ export const apiService = {
 
   // 单图 → 移除背景（透明 PNG），复用视频抽帧那套抠图逻辑
   removeBackground: (data: {
-    image_url: string;
+    image_url?: string;
+    image?: string;
   } & VideoBackgroundOptions): Promise<{ success: boolean; image_url: string; background_mode: VideoBackgroundMode }> =>
     client.post('/media/remove-background', data, {
       timeout: 300000,

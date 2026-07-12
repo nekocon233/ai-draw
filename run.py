@@ -1,5 +1,5 @@
 """
-AI-Draw 启动脚本
+ai-draw 启动脚本
 
 快速启动开发服务器
 """
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     server_config = config.server
     
     print("=" * 60)
-    print(f"🚀 AI-Draw v{config.app.version}")
+    print(f"🚀 ai-draw v{config.app.version}")
     print("=" * 60)
     print(f"📡 服务地址: http://{server_config.host}:{server_config.port}")
     print(f"📚 API 文档: http://localhost:{server_config.port}/docs")

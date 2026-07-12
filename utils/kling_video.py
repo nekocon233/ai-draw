@@ -15,9 +15,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# 默认基础地址（UniAPI 的 Kling 兼容入口）
-DEFAULT_BASE_URL = "https://api.uniapi.io/kling"
-
 # 任务终态
 _TASK_SUCCEED = "succeed"
 _TASK_FAILED = "failed"
@@ -26,7 +23,7 @@ _TASK_FAILED = "failed"
 class KlingVideoSDK:
     """Kling 视频生成 API SDK（requests + Bearer 鉴权）"""
 
-    def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: int = 120):
+    def __init__(self, api_key: str, base_url: str, timeout: int = 120):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -42,7 +39,7 @@ class KlingVideoSDK:
         self,
         image: Optional[str] = None,
         image_tail: Optional[str] = None,
-        model_name: str = "kling-v3",
+        model_name: Optional[str] = None,
         prompt: Optional[str] = None,
         negative_prompt: Optional[str] = None,
         mode: str = "std",
@@ -72,6 +69,8 @@ class KlingVideoSDK:
         """
         if not image and not image_tail:
             raise ValueError("image 与 image_tail 至少需要提供一项")
+        if not model_name:
+            raise ValueError("必须显式提供 Kling 模型名称")
 
         url = f"{self.base_url}/v1/videos/image2video"
         payload: Dict[str, Any] = {
@@ -157,10 +156,10 @@ def generate_image2video_flf2v(
     start_image: str,
     end_image: str,
     prompt: str = "",
-    model_name: str = "kling-v3",
+    model_name: Optional[str] = None,
     duration: str = "5",
     mode: str = "std",
-    base_url: str = DEFAULT_BASE_URL,
+    base_url: Optional[str] = None,
     poll_interval: int = 5,
     max_wait_time: int = 600,
 ) -> str:
@@ -190,6 +189,10 @@ def generate_image2video_flf2v(
         raise ValueError("未配置 KLING_API_KEY，无法调用 Kling")
     if not start_image or not end_image:
         raise ValueError("Kling 首尾帧生视频需要同时提供首帧和尾帧图片")
+    if not model_name:
+        raise ValueError("未配置 KLING_MODEL，无法调用 Kling")
+    if not base_url:
+        raise ValueError("未配置 KLING_BASE_URL，无法调用 Kling")
 
     sdk = KlingVideoSDK(api_key=api_key, base_url=base_url)
 

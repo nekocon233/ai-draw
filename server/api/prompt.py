@@ -1,7 +1,6 @@
 """
 AI Prompt 生成相关 API
 """
-import os
 import asyncio
 import base64
 from fastapi import APIRouter, HTTPException, Depends
@@ -44,15 +43,13 @@ async def get_pose_preset() -> PosePresetResponse:
 @router.post("/analyze-image", response_model=AnalyzeImageForPromptResponse)
 async def analyze_image_for_prompt(request: AnalyzeImageForPromptRequest) -> AnalyzeImageForPromptResponse:
     """使用 Gemini 分析单张图片的风格、元素、动作、镜头等，生成适合文生图（Z-Image）的中文提示词"""
-    api_key = os.getenv('NANO_BANANA_API_KEY', '')
-    if not api_key:
+    nb_cfg = get_nano_banana_config()
+    if not nb_cfg.api_key:
         raise HTTPException(status_code=500, detail="未配置 NANO_BANANA_API_KEY，无法使用 AI 以图生词功能")
     if not request.image:
         raise HTTPException(status_code=400, detail="请提供图片")
     if not request.description or not request.description.strip():
         raise HTTPException(status_code=400, detail="请指定要描述的内容")
-
-    nb_cfg = get_nano_banana_config()
 
     def strip_prefix(img: str) -> str:
         return img.split(',', 1)[1] if ',' in img else img
@@ -63,8 +60,8 @@ async def analyze_image_for_prompt(request: AnalyzeImageForPromptRequest) -> Ana
 
         client = genai.Client(
             http_options=types.HttpOptions(base_url=nb_cfg.base_url),
-            api_key=api_key,
-        ) if nb_cfg.base_url else genai.Client(api_key=api_key)
+            api_key=nb_cfg.api_key,
+        )
 
         system_instruction = (
             "你是一个专业的 AI 图像生成提示词工程师，擅长为文生图模型（Z-Image，基于 Lumina2 架构）编写中文自然语言提示词。"
@@ -85,7 +82,7 @@ async def analyze_image_for_prompt(request: AnalyzeImageForPromptRequest) -> Ana
             types.Content(role="model", parts=[types.Part(text="好的，我会分析图片并按照格式生成中文自然语言提示词。")]),
             types.Content(role="user", parts=user_parts),
         ]
-        response = client.models.generate_content(model="gemini-3.1-flash-image-preview", contents=contents)
+        response = client.models.generate_content(model=nb_cfg.analysis_model, contents=contents)
         texts = [p.text for p in response.candidates[0].content.parts if hasattr(p, 'text') and p.text]
         return ''.join(texts).strip()
 
@@ -99,13 +96,11 @@ async def analyze_image_for_prompt(request: AnalyzeImageForPromptRequest) -> Ana
 @router.post("/analyze-frames", response_model=AnalyzeFramesForPromptResponse)
 async def analyze_frames_for_prompt(request: AnalyzeFramesForPromptRequest) -> AnalyzeFramesForPromptResponse:
     """使用 Gemini 分析首尾帧过渡方向，分别生成「首帧→尾帧」和「尾帧→首帧」的 flf2v 过渡提示词"""
-    api_key = os.getenv('NANO_BANANA_API_KEY', '')
-    if not api_key:
+    nb_cfg = get_nano_banana_config()
+    if not nb_cfg.api_key:
         raise HTTPException(status_code=500, detail="未配置 NANO_BANANA_API_KEY，无法使用 AI 以图生词功能")
     if not request.image_start and not request.image_end:
         raise HTTPException(status_code=400, detail="请至少提供一张图片（首帧或尾帧）")
-
-    nb_cfg = get_nano_banana_config()
 
     def strip_prefix(img: str) -> str:
         return img.split(',', 1)[1] if ',' in img else img
@@ -118,8 +113,8 @@ async def analyze_frames_for_prompt(request: AnalyzeFramesForPromptRequest) -> A
 
         client = genai.Client(
             http_options=types.HttpOptions(base_url=nb_cfg.base_url),
-            api_key=api_key,
-        ) if nb_cfg.base_url else genai.Client(api_key=api_key)
+            api_key=nb_cfg.api_key,
+        )
 
         def make_part(data_url: str) -> types.Part:
             raw_b64 = strip_prefix(data_url)
@@ -160,7 +155,7 @@ async def analyze_frames_for_prompt(request: AnalyzeFramesForPromptRequest) -> A
             types.Content(role="model", parts=[types.Part(text="好的，我会分析图片并生成指定方向的视频过渡提示词。")]),
             types.Content(role="user", parts=user_parts),
         ]
-        response = client.models.generate_content(model="gemini-3.1-flash-image-preview", contents=contents)
+        response = client.models.generate_content(model=nb_cfg.analysis_model, contents=contents)
         texts = [p.text for p in response.candidates[0].content.parts if hasattr(p, 'text') and p.text]
         return ''.join(texts).strip()
 

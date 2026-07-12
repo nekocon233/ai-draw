@@ -4,7 +4,7 @@
  * 由 useBackgroundOptions 驱动，视频帧与聊天结果的图片编辑器共用，
  * 复用 .frame-editor-* 样式。
  */
-import { Checkbox, Select, Slider } from 'antd';
+import { Checkbox, Select } from 'antd';
 import type { BackgroundOptionsState, useBackgroundOptions } from '../hooks/useBackgroundOptions';
 
 interface BackgroundOptionsFieldsProps {
@@ -86,22 +86,13 @@ export default function BackgroundOptionsFields({ opts, title = '背景', inline
               onChange={value => updateOption('birefnet_model', value)}
               options={[
                 { value: 'ZhengPeng7/BiRefNet', label: 'BiRefNet' },
+                { value: 'joelseytre/toonout', label: 'ToonOut（动漫专用）' },
                 { value: 'ZhengPeng7/BiRefNet_HR-matting', label: 'HR-matting' },
                 { value: 'ZhengPeng7/BiRefNet_dynamic', label: 'dynamic' },
                 { value: 'ZhengPeng7/BiRefNet-matting', label: 'matting' },
               ]}
             />
           </label>
-          <div className="frame-editor-slider">
-            <span>尺寸 {state.birefnet_image_size}</span>
-            <Slider
-              min={256}
-              max={2304}
-              step={128}
-              value={state.birefnet_image_size}
-              onChange={value => updateOption('birefnet_image_size', value)}
-            />
-          </div>
           <label className="frame-editor-field">
             <span>设备</span>
             <Select

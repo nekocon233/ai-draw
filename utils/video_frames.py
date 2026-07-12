@@ -33,6 +33,9 @@ DEFAULT_MAX_FRAMES = 64          # 透明（需 rembg，较慢）
 
 ProgressFn = Optional[Callable[[int, int], None]]
 BackgroundMode = Literal['none', 'ai', 'inspyrenet', 'birefnet', 'edge']
+TOONOUT_MODEL = 'joelseytre/toonout'
+TOONOUT_WEIGHTS = 'birefnet_finetuned_toonout.pth'
+BIREFNET_INPUT_SIZE = 1024
 
 
 @dataclass(frozen=True)
@@ -266,7 +269,7 @@ def remove_backgrounds(
     total = len(frames)
     for i, frame in enumerate(frames):
         out.append(remove(
-            frame,
+            frame.convert('RGB'),
             session=session,
             alpha_matting=options.alpha_matting,
             alpha_matting_foreground_threshold=options.alpha_matting_foreground_threshold,
@@ -327,6 +330,18 @@ def remove_backgrounds_by_inspyrenet(
 _birefnet_models: dict = {}  # (model, size, device, precision) -> (model, torch, transforms, device, dtype)
 
 
+def _clean_toonout_state_dict(state_dict: dict) -> dict:
+    """移除 ToonOut 训练检查点中的分布式/编译器前缀。"""
+    clean_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith('module._orig_mod.'):
+            key = key[len('module._orig_mod.'):]
+        elif key.startswith('module.'):
+            key = key[len('module.'):]
+        clean_state_dict[key] = value
+    return clean_state_dict
+
+
 def _get_birefnet_model(model_name: str, image_size: int, device_name: str, precision: str):
     """获取（必要时创建）BiRefNet 模型。"""
     try:
@@ -353,10 +368,17 @@ def _get_birefnet_model(model_name: str, image_size: int, device_name: str, prec
 
     key = (model_name, image_size, str(device), str(dtype))
     if key not in _birefnet_models:
+        architecture_name = 'ZhengPeng7/BiRefNet' if model_name == TOONOUT_MODEL else model_name
         model = AutoModelForImageSegmentation.from_pretrained(
-            model_name,
+            architecture_name,
             trust_remote_code=True,
         )
+        if model_name == TOONOUT_MODEL:
+            from huggingface_hub import hf_hub_download
+
+            weights_path = hf_hub_download(repo_id=TOONOUT_MODEL, filename=TOONOUT_WEIGHTS)
+            state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
+            model.load_state_dict(_clean_toonout_state_dict(state_dict))
         model.to(device)
         # HF 权重可能以 fp16 存储；CPU/FP32 路径也要显式转 dtype，
         # 否则会出现 input=float32 但 bias=float16 的卷积错误。
@@ -533,34 +555,45 @@ def apply_background_removal(
     if options.mode == 'none':
         return [frame.convert('RGBA') for frame in frames]
     if options.mode == 'inspyrenet':
-        return remove_backgrounds_by_inspyrenet(
+        processed = remove_backgrounds_by_inspyrenet(
             frames,
             mode=options.inspyrenet_mode,
             resize=options.inspyrenet_resize,
             on_progress=on_progress,
         )
-    if options.mode == 'birefnet':
-        return remove_backgrounds_by_birefnet(
+    elif options.mode == 'birefnet':
+        processed = remove_backgrounds_by_birefnet(
             frames,
             model_name=options.birefnet_model,
-            image_size=options.birefnet_image_size,
+            image_size=BIREFNET_INPUT_SIZE,
             device_name=options.birefnet_device,
             precision=options.birefnet_precision,
             on_progress=on_progress,
         )
-    if options.mode == 'edge':
-        return remove_backgrounds_by_edge_color(
+    elif options.mode == 'edge':
+        processed = remove_backgrounds_by_edge_color(
             frames,
             threshold=options.edge_threshold,
             feather=options.edge_feather,
             on_progress=on_progress,
         )
-    return remove_backgrounds(
-        frames,
-        model=options.rembg_model,
-        on_progress=on_progress,
-        options=options,
-    )
+    else:
+        processed = remove_backgrounds(
+            frames,
+            model=options.rembg_model,
+            on_progress=on_progress,
+            options=options,
+        )
+
+    results: List[Image.Image] = []
+    for source, result in zip(frames, processed):
+        rgba = result.convert('RGBA')
+        source_alpha = source.convert('RGBA').getchannel('A')
+        if source_alpha.size != rgba.size:
+            source_alpha = source_alpha.resize(rgba.size, Image.LANCZOS)
+        rgba.putalpha(ImageChops.multiply(rgba.getchannel('A'), source_alpha))
+        results.append(rgba)
+    return results
 
 
 # ── 打包：网格 PNG / APNG / GIF / ZIP ─────────────────────────────────────

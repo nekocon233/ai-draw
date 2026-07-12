@@ -1,524 +1,299 @@
-# AI-Draw
+# ai-draw
 
-> AI 辅助绘画工具，基于 ComfyUI 的智能图像生成平台
+> 面向 AI 图像、视频生成与素材处理的浏览器工作台。
 
-![AI-Draw 界面预览](frontend/public/example.png)
+![ai-draw 界面预览](frontend/public/example.png)
 
-## 🎉 v2.0 稳定版
+ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发到 ComfyUI、Gemini/Nano Banana、OpenAI 兼容图像 API 和 Kling API。生成结果、聊天会话与用户配置持久化到 PostgreSQL，任务状态和结果通过 WebSocket 推送到前端。
 
-**当前状态**: 全栈应用完成 ✅ | 生产可用 🚀
+## 主要功能
 
-- ✅ 后端模块化架构（API 拆分为独立模块）
-- ✅ React 前端完整实现
-- ✅ 用户认证和数据持久化
-- ✅ 聊天式交互界面
-- ✅ 多会话管理
-- ✅ Docker 容器化部署
+- 文生图、单图/多参考图编辑和图生图。
+- Wan 首尾帧生视频、Wan 图生视频和 Kling 首尾帧生视频。
+- 按工作流生成提示词，支持参考图分析、首尾帧过渡分析和姿势预设。
+- 聊天式创作流程，支持会话置顶、标题总结、历史分页、编辑后重新生成和删除对话轮次。
+- 图片背景移除、2x/4x 放大和批量放大。
+- 视频抽帧、帧范围与帧率控制、逐帧编辑、背景处理和颜色替换。
+- 导出原始帧 ZIP、精灵图、GIF 和 APNG。
+- JWT 登录、邀请码注册、用户配置和创作记录持久化。
 
-## 项目简介
+## 生成工作流
 
-AI-Draw 是一个现代化的 AI 辅助绘画 Web 应用，为插画师、设计师和创作者提供便捷的 AI 图像生成能力。采用 FastAPI + React 前后端分离架构，通过简单的提示词和参数设置，结合本地或云端 ComfyUI 后端，即可一键生成高质量的创意图像。
+可选工作流来自 `configs/app_config.yaml` 的 `workflow_defaults.workflow_metadata`，前端通过 `/api/service/workflows` 动态加载。
 
-## 主要特性
+| ID | 后端 | 输入 | 输出 |
+|---|---|---|---|
+| `t2i` | ComfyUI / Z-Image | 文本 | 图片 |
+| `i2i` | ComfyUI / Q-Image | 1-3 张参考图 | 图片 |
+| `nano_banana_pro` | Gemini / Nano Banana | 文本，可选 1-3 张参考图 | 图片 |
+| `gpt_image` | OpenAI 兼容 API | 文本，可选 1-3 张参考图 | 图片 |
+| `flf2v` | ComfyUI / Wan | 首帧和尾帧 | 视频 |
+| `kling_flf2v` | Kling API | 首帧和尾帧 | 视频 |
+| `i2v` | ComfyUI / Wan | 起始参考图 | 视频 |
 
-- 🎨 **多种工作流**：支持"文生图"、"图生图"、"参考图（SDXL/Z-Image）"等多种专业工作流
-- 🤖 **智能 Prompt 生成**：接入 OpenAI 兼容 API，根据中文描述自动生成英文提示词
-- ⚡ **实时通信**：基于 WebSocket 的实时状态推送和进度更新
-- 🖼️ **图片上传**：支持拖拽、粘贴、文件选择多种图片上传方式
-- 🎛️ **精准控制**：重绘强度、生成数量、LoRA 提示词等参数可调
-- 📊 **批量生成**：支持一次生成多张图像（1-8 张）
-- 💬 **聊天式界面**：现代化对话式交互，支持多会话管理
-- 👤 **用户系统**：注册登录、配置持久化、数据隔离
-- 🌐 **现代化界面**：React + TypeScript + Ant Design 构建的响应式 UI
-- 🐳 **容器化部署**：Docker Compose 一键部署，开箱即用
+`image_upscale` 和 `image_upscale_invsr` 是内部放大工作流，不会出现在生成工作流选择器中。
 
 ## 技术栈
 
 ### 后端
-- **FastAPI** - 现代 Python Web 框架
-- **WebSocket** - 实时双向通信
-- **Pydantic v2** - 数据验证和配置管理
-- **SQLAlchemy 2.0** - ORM 数据库操作
-- **PostgreSQL 15** - 关系型数据库
-- **JWT (python-jose)** - 用户认证和授权
-- **ComfyUI** - AI 图像生成后端
+
+- Python 3.10、FastAPI、Uvicorn
+- SQLAlchemy 2.0、PostgreSQL 15
+- Pydantic v2、pydantic-settings
+- JWT、WebSocket
+- Pillow、OpenCV、ffmpeg
+- rembg、InSPyReNet、BiRefNet
+- ComfyUI、Google GenAI、OpenAI 兼容 API、Kling API
 
 ### 前端
-- **React 19** + **TypeScript 5.9** - 现代前端框架
-- **Zustand 5** - 轻量级状态管理
-- **Ant Design 6** - 企业级 UI 组件库
-- **Axios** - HTTP 客户端
-- **Vite 7** - 快速构建工具
-## 快速开始
 
-### 环境要求
-- Python 3.13+
-- Node.js 18+
-- PostgreSQL 15+
-- ComfyUI（本地或云端）
+- React 19、TypeScript 5.9
+- Zustand 5、Ant Design 6
+- Axios、Vite 7
 
-### SSH 远程 Docker 部署（推荐）🐳
+### 部署
 
-**快速启动**
-
-```powershell
-# 1. 克隆项目
-git clone https://github.com/nekocon233/ai-draw.git
-cd ai-draw
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入必要配置（API密钥、数据库密码等）
-
-# 3. 使用远程 Docker Engine
-$env:DOCKER_HOST = "ssh://nekocon-server"
-
-# 4. 启动所有服务
-docker compose up -d
-
-# 5. 查看运行状态
-docker compose ps
-
-# 6. 访问应用
-# 前端：https://aidraw.nekocon.cn/
-# 后端 API：http://<server>:14600/docs
-```
-
-**常用命令**
-
-```powershell
-# 查看日志
-docker compose logs -f ai-draw-backend
-
-# 停止服务
-docker compose down
-
-# 重新构建并刷新前端静态资源（代码更新后）
-docker compose down
-docker volume rm ai-draw_frontend-dist 2>$null
-docker compose build
-docker compose up -d
-```
-
-### 本地开发
-
-1. **安装后端依赖**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Linux/Mac
-   # .venv\Scripts\activate   # Windows
-   pip install -r requirements.txt
-   ```
-
-2. **配置数据库**
-   - 安装并启动 PostgreSQL
-   - 创建数据库：`ai_draw`
-   - 在 `.env` 中配置数据库连接信息
-
-3. **安装前端依赖**
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-4. **启动服务**
-   ```bash
-   # 后端（项目根目录）
-   python run.py
-   
-   # 前端（frontend目录）
-   npm run dev
-   ```
-
-5. **访问应用**
-   - 前端：http://localhost:5173（开发模式）
-   - 后端 API：http://localhost:14600/docs
-
-### ComfyUI 配置
-
-AI-Draw 需要 ComfyUI 作为图像生成后端：
-
-**远程 Docker 环境访问 ComfyUI**
-- 默认在 `docker-compose.yml` 中使用 `COMFYUI_HOST=comfyui`
-- 如果 ComfyUI 不在同一 Docker 网络中，改成远程服务器可访问的主机名或 IP
-
-**本地开发**
-- 确保 ComfyUI 运行在 8188 端口
-- 或在环境变量中配置 `COMFYUI_HOST` 和 `COMFYUI_PORT`
-
-## 工作流配置
-
-当前支持的工作流类型（在 `configs/app_config.yaml` 中配置）：
-
-| 工作流 ID | 名称 | 描述 | 需要参考图 |
-|-----------|------|------|-----------|
-| `t2i` | 文生图（Z-Image） | 纯文本生成图像 | ❌ |
-| `i2i` | 图生图（Q-Image） | 基于参考图重绘 | ✅ |
-| `reference` | 参考图（SDXL） | SDXL 参考图工作流 | ✅ |
-| `reference_zimage` | 参考图（Z-Image） | Z-Image Turbo 参考图工作流 | ✅ |
-
-工作流文件位于 `configs/workflows/` 目录，前端通过 `/api/service/workflows` 接口动态获取可用工作流列表。
-
-## 配置说明
-
-### 配置系统架构
-
-AI-Draw 采用**单一数据源**原则管理配置：
-
-| 配置类型 | 唯一来源 | 示例 |
-|---------|---------|------|
-| **端口** | `docker-compose.yml` environment | `SERVER_PORT=14600` |
-| **密钥/密码** | `.env` | `AI_PROMPT_API_KEY=sk-xxx` |
-| **工作流配置** | `configs/app_config.yaml` | 工作流元数据和参数定义 |
-
-### .env 环境变量
-
-```env
-# AI Prompt API 密钥（必需）
-AI_PROMPT_API_KEY=your-api-key-here
-
-# JWT 认证密钥（必需）
-JWT_SECRET_KEY=your-jwt-secret-key-here
-
-# 数据库密码（必需）
-DB_PASSWORD=your-secure-password-here
-
-# Redis 密码（可选）
-REDIS_PASSWORD=
-
-# 生产环境域名
-PRODUCTION_DOMAIN=https://your-domain.com
-```
-
-### docker-compose.yml 端口配置
-
-```yaml
-environment:
-  - SERVER_PORT=14600          # 后端 API 端口
-  - FRONTEND_HTTP_PORT=14601   # 前端 HTTP 端口
-  - FRONTEND_HTTPS_PORT=14602  # 前端 HTTPS 端口
-```
-
-## API 文档
-
-启动服务后访问：
-- Swagger UI: http://localhost:14600/docs
-- ReDoc: http://localhost:14600/redoc
-
-### 主要端点
-
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/api/service/status` | GET | 检查服务状态 |
-| `/api/service/workflows` | GET | 获取可用工作流列表 |
-| `/api/prompt/generate` | POST | 生成 AI Prompt |
-| `/api/image/generate` | POST | 生成图像 |
-| `/api/image/upload` | POST | 上传参考图片 |
-| `/api/user/register` | POST | 用户注册 |
-| `/api/user/login` | POST | 用户登录 |
-| `/api/user/config` | GET/PUT | 用户配置 |
-| `/api/session/*` | - | 聊天会话管理 |
-| `/ws` | WebSocket | 实时通信 |
-
-## 项目结构
-
-```
-ai-draw/
-├── run.py                    # 应用启动入口
-├── requirements.txt          # Python 依赖
-├── docker-compose.yml        # SSH 远程 Docker 部署配置
-├── Dockerfile                # 后端容器构建文件
-│
-├── server/                   # FastAPI 后端
-│   ├── main.py              # 应用入口和生命周期
-│   ├── ai_draw_service.py   # 核心业务服务
-│   ├── database.py          # 数据库连接
-│   ├── models.py            # ORM 模型
-│   ├── schemas.py           # Pydantic 数据模型
-│   ├── auth.py              # JWT 认证
-│   ├── api/                 # REST API 路由模块
-│   │   ├── __init__.py      # 路由聚合
-│   │   ├── image.py         # 图像生成 API
-│   │   ├── prompt.py        # Prompt 生成 API
-│   │   ├── service.py       # 服务管理 API
-│   │   ├── user.py          # 用户认证 API
-│   │   └── session.py       # 会话管理 API
-│   ├── middleware/          # 中间件
-│   │   └── error_handler.py # 统一错误处理
-│   └── websocket/           # WebSocket 处理
-│
-├── frontend/                 # React 前端
-│   ├── src/
-│   │   ├── App.tsx          # 应用主组件
-│   │   ├── main.tsx         # 入口文件
-│   │   ├── api/             # API 客户端
-│   │   │   ├── client.ts    # Axios 配置
-│   │   │   ├── services.ts  # API 方法封装
-│   │   │   └── websocket.ts # WebSocket 管理
-│   │   ├── components/      # UI 组件
-│   │   │   ├── ChatInput.tsx
-│   │   │   ├── ChatSessionSidebar.tsx
-│   │   │   ├── ResultGrid.tsx
-│   │   │   ├── SettingsModal.tsx
-│   │   │   ├── LoginModal.tsx
-│   │   │   └── ...
-│   │   ├── stores/          # Zustand 状态管理
-│   │   │   └── appStore.ts
-│   │   ├── types/           # TypeScript 类型
-│   │   └── utils/           # 工具函数
-│   └── package.json
-│
-├── comfyui/                  # ComfyUI 集成
-│   ├── comfyui_service.py   # ComfyUI 服务封装
-│   ├── requests/            # 请求处理
-│   └── structures/          # 数据结构
-│
-├── configs/                  # 配置文件
-│   ├── app_config.yaml      # 应用主配置
-│   └── workflows/           # ComfyUI 工作流 JSON
-│       ├── t2i_workflow_api.json
-│       ├── qwen_image_edit_workflow_api.json
-│       ├── reference_workflow_api.json
-│       └── reference_zimage_workflow_api.json
-│
-├── utils/                    # 工具模块
-│   ├── config_loader.py     # 配置加载器
-│   ├── ai_prompt.py         # AI 提示词生成
-│   ├── image_processor.py   # 图像处理
-│   └── file_storage.py      # 文件存储
-│
-└── nginx/                    # Nginx 配置
-    ├── nginx.conf
-    └── docker-entrypoint.sh
-```
-## 使用说明
-
-### 聊天式交互
-
-AI-Draw 采用聊天式界面，支持：
-- 📝 输入中文描述，自动生成英文提示词
-- 🖼️ 上传参考图进行图生图
-- 💬 多会话管理，历史记录自动保存
-- ⚙️ 参数面板调整生成参数
-
-## 用户认证与多用户支持
-
-### 功能特性
-- ✅ **用户注册/登录**：支持多用户独立账户
-- ✅ **配置持久化**：用户配置自动保存到数据库
-- ✅ **多会话管理**：支持创建和切换多个聊天会话
-- ✅ **聊天历史**：每个会话的对话和生成记录独立存储
-- ✅ **数据隔离**：用户之间数据完全隔离
-- ✅ **游客模式**：未登录也可使用，但配置不保存
-
-### 使用流程
-
-1. **游客使用**：无需登录即可使用，配置仅保存在浏览器本地
-2. **注册账户**：点击右上角"登录"按钮，切换到"注册"
-3. **登录使用**：配置自动保存，支持多设备同步
-4. **退出登录**：点击右上角用户名，选择"退出登录"
-
-## 开发指南
-
-### 后端开发
-
-**核心服务层**（单例模式）：
-```python
-# server/ai_draw_service.py
-class AIDrawService:
-    def __init__(self):
-        self.comfyui = ComfyUIService(request=LocalComfyUIRequest())
-        self.ai_prompt = AIPrompt()
-    
-    async def generate_image(self, prompt, workflow, ...):
-        # 图像生成逻辑
-        pass
-```
-
-**依赖注入**：
-```python
-# API 端点使用
-from server.ai_draw_service import get_ai_draw_service
-
-@router.post("/api/image/generate")
-async def generate(service: AIDrawService = Depends(get_ai_draw_service)):
-    await service.generate_image(...)
-```
-
-### 前端开发
-
-**状态管理**（Zustand）：
-```typescript
-// stores/appStore.ts
-const { 
-  prompt, setPrompt,
-  currentWorkflow,
-  chatSessions,
-  loadUserConfig,
-} = useAppStore();
-```
-
-**API 调用**：
-```typescript
-// api/services.ts
-await apiService.login({ username, password });
-await apiService.getUserConfig();
-await apiService.generateImage({ prompt, workflow, ... });
-```
-
-### 添加新工作流
-
-1. 在 ComfyUI 中设计工作流，导出 API JSON
-2. 放入 `configs/workflows/` 目录
-3. 在 `configs/app_config.yaml` 的 `workflow_files` 中注册
-4. 在 `workflow_metadata` 中配置元数据（标签、描述、参数）
-5. 前端状态层会自动获取工作流，`ChatInput` 和 `SettingsModal` 根据元数据渲染选项
-
-## 更新日志
-
-### v2.0 (2026-01)
-
-- ✨ **全新架构**：FastAPI + React 19 前后端分离
-- ✨ **用户系统**：支持注册/登录，多用户数据隔离
-- ✨ **多会话管理**：支持创建和切换多个聊天会话
-- ✨ **配置持久化**：用户配置自动保存到 PostgreSQL
-- ✨ **聊天历史**：对话记录永久保存，支持加载历史
-- 🎨 **现代 UI**：Ant Design 6，响应式设计
-- ⚡ **实时通信**：WebSocket 推送生成状态和进度
-- 🐳 **容器化**：Docker Compose 一键部署
-- 📱 **移动友好**：适配多种屏幕尺寸
-
-### v1.x (旧版)
-
-- 支持多种工作流
-- AI Prompt 生成
-- 基础图像生成功能
-
-## 常见问题
-
-### 安装与配置
-
-**Q: ComfyUI 连接失败？**  
-A: 确认 ComfyUI 服务正在运行（默认端口 8188），检查 docker-compose.yml 中的 `COMFYUI_HOST` 配置
-
-**Q: 数据库连接错误？**  
-A: 确认 PostgreSQL 服务正在运行，`.env` 中的 `DB_PASSWORD` 已正确配置
-
-**Q: 前端无法连接后端？**  
-A: 确认后端服务运行正常，检查 CORS 配置是否包含前端地址
-
-**Q: AI Prompt 生成失败？**  
-A: 检查 `.env` 中的 `AI_PROMPT_API_KEY` 是否有效
-
-### 使用问题
-
-**Q: 配置不保存？**  
-A: 未登录时配置仅保存在浏览器本地，需要登录账户才能持久化
-
-**Q: 生成图片失败？**  
-A: 检查 ComfyUI 工作流配置文件是否正确，模型文件是否存在
+- Docker 多阶段构建：Node 22 构建前端，Python 3.10 运行后端
+- Docker Compose：FastAPI、PostgreSQL、Nginx
+- SSH Docker Engine：`ssh://nekocon-server`
 
 ## 架构概览
 
-### 后端架构
-```
-FastAPI Application
-├── REST API (/api/*)
-│   ├── service/   - 服务管理
-│   ├── image/     - 图像生成
-│   ├── prompt/    - Prompt 生成
-│   ├── user/      - 用户认证
-│   └── session/   - 会话管理
-├── WebSocket (/ws) - 实时状态推送
-├── Middleware - 统一错误处理
-└── Database (PostgreSQL) - 用户数据持久化
-```
-
-### 前端架构
-```
-React Application
-├── Components - UI 组件
-├── Stores (Zustand) - 全局状态管理
-└── API Layer - REST + WebSocket
+```text
+Browser
+  |-- REST /api/* ----------> Nginx ----------> FastAPI routers
+  |-- WebSocket /ws --------> Nginx ----------> ConnectionManager
+  |-- /uploads/* -----------> Nginx ----------> uploads volume
+                                                   |
+FastAPI BackgroundTasks -> AIDrawService singleton |
+  |-- ComfyUI HTTP workflows                       |
+  |-- Gemini / GPT Image / Kling APIs              |
+  |-- media processing helpers                     |
+  `-- PostgreSQL <---------------------------------'
 ```
 
-## 错误处理
+`POST /api/media/generate` 会快速返回，实际生成在 FastAPI 进程内的后台任务中执行。生成状态和结果通过需要 JWT 的 WebSocket 连接发送。
 
-### 后端统一错误响应
+## 环境要求
 
-```json
-{
-  "success": false,
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "错误描述"
-  }
-}
-```
+### 远程部署
 
-### 前端自动错误处理
+- Docker 和 Docker Compose
+- 可用的 SSH 主机别名 `nekocon-server`
+- 一台可从后端容器访问的 ComfyUI 服务，用于 ComfyUI 工作流
+- 启用外部 API 工作流时，对应的 API 凭据
 
-- Axios 拦截器自动解析后端错误
-- 自动显示 Ant Design 错误提示
-- React ErrorBoundary 捕获组件错误
+`docker-compose.yml` 不包含 ComfyUI、Redis 或 TLS 终止服务。生产域名的 HTTPS 由仓库外部的反向代理提供。
 
-## Docker 高级配置
+### 本地开发
 
-### SSH 远程部署
+- Python 3.10+
+- Node.js 22，或满足 Vite 要求的 Node.js `^20.19.0 || >=22.12.0`
+- PostgreSQL 15+
+- ffmpeg 和 ffprobe
+- 可访问的 ComfyUI 服务
+
+## 配置
+
+复制完整配置清单：
 
 ```powershell
-$env:DOCKER_HOST = "ssh://nekocon-server"
+Copy-Item .env.example .env
+```
+
+配置来源：
+
+| 内容 | 来源 |
+|---|---|
+| 应用、端口、数据库、认证、模型和外部 API | `.env` |
+| 工作流文件映射、元数据和参数默认值 | `configs/app_config.yaml` |
+| ComfyUI API 工作流 | `configs/workflows/*.json` |
+
+注意事项：
+
+- `.env.example` 中声明的变量都必须存在，不能通过删除变量来禁用功能。
+- 未启用的外部服务可将对应 API Key 留空；URL 和模型名等必填字段仍需保留有效值。
+- `AI_PROMPT_REUSE_SESSION_TITLE=true` 时，提示词生成会复用会话标题服务的凭据和模型。
+- 注册需要 `INVITE_CODE`，请为 `JWT_SECRET_KEY`、数据库密码和邀请码设置安全值。
+- `COMFYUI_HOST=comfyui` 只在该主机名对后端容器可解析时有效；Compose 本身不会创建 ComfyUI 服务。
+- Redis 配置目前仅为预留字段，应用没有部署或使用 Redis。
+- 不要提交包含真实密钥的 `.env`。
+
+## SSH 远程部署
+
+项目的可部署构建以 Docker 为准。VS Code 中运行默认构建任务 `deploy: remote`，其等价 PowerShell 命令如下：
+
+```powershell
+$env:DOCKER_HOST="ssh://nekocon-server"
 docker compose down
-docker volume rm ai-draw_frontend-dist 2>$null
+docker volume rm --force ai-draw_frontend-dist
 docker compose build
 docker compose up -d
+docker compose ps
 ```
 
-### 常用运维命令
+必须删除 `ai-draw_frontend-dist`，否则 Nginx 可能继续提供旧的前端静态文件。该流程只删除前端构建卷，不删除 PostgreSQL、上传文件和 Hugging Face 模型缓存卷。
 
-```bash
-# 进入后端容器
-docker exec -it ai-draw-backend bash
+默认访问地址：
 
-# 数据库备份
-docker exec ai-draw-postgres pg_dump -U ai_draw ai_draw > backup.sql
+- 线上站点：<https://aidraw.nekocon.cn/>
+- 远程 Nginx HTTP：`http://<server>:14601`
+- 后端 Swagger：`http://<server>:14600/docs`
+- 后端 ReDoc：`http://<server>:14600/redoc`
 
-# 查看容器资源使用
-docker stats
+常用运维命令：
+
+```powershell
+$env:DOCKER_HOST="ssh://nekocon-server"
+docker compose ps
+docker compose logs -f --tail=200
+docker compose restart
 ```
 
-### 网络配置
+## 本地开发
 
-**访问 ComfyUI**:
-- 默认：`COMFYUI_HOST=comfyui`
-- 访问远程服务器上的独立 ComfyUI 时，配置为服务器 Docker 网络可访问的主机名或 IP
+1. 创建并配置 `.env`。本地运行时至少将数据库和 ComfyUI 主机改为本机可访问地址。
+2. 安装后端依赖。
 
-## 路线图
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-### 已完成 ✅
-- [x] 后端模块化架构
-- [x] React 前端完整实现
-- [x] 用户认证和数据持久化
-- [x] 多会话管理
-- [x] Docker 容器化部署
-- [x] 统一错误处理
+3. 安装前端依赖。
 
-### 计划中 📋
-- [ ] 图片历史记录分页和搜索
-- [ ] 主题切换（亮/暗）
-- [ ] 性能优化（图片懒加载、React.memo）
-- [ ] 后台任务队列（Celery）
-- [ ] 单元测试和 E2E 测试
+```powershell
+npm --prefix frontend ci
+```
 
-## 反馈与贡献
+4. 启动后端。当前 Vite 开发代理指向 `localhost:8000`，因此本地联调需要将后端端口覆盖为 `8000`。
 
-欢迎提交 issue 或 PR 参与改进！
+```powershell
+$env:DB_HOST="127.0.0.1"
+$env:COMFYUI_HOST="127.0.0.1"
+$env:SERVER_PORT="8000"
+python run.py
+```
 
-📧 联系方式: [GitHub Issues](https://github.com/nekocon233/ai-draw/issues)
+5. 在另一个终端启动前端。
 
----
+```powershell
+npm --prefix frontend run dev
+```
 
-**最后更新**: 2026-01-04  
-**维护者**: nekocon233
+访问 `http://localhost:5173`。直接按 `.env.example` 的 `SERVER_PORT=14600` 启动后端时，需要同步修改 `frontend/vite.config.ts` 的代理端口。
 
-> 🎨 让 AI 成为你的创作助手，释放更多灵感！
+## API 概览
+
+所有 REST 路由由 FastAPI 挂载在 `/api` 下。
+
+### 公开接口
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/auth/register` | 使用邀请码注册并获取 JWT |
+| `POST` | `/api/auth/login` | 登录并获取 JWT |
+| `GET` | `/api/service/status` | 后端和 ComfyUI 状态 |
+| `GET` | `/api/service/workflows` | 可选工作流元数据 |
+| `GET` | `/api/service/workflow/defaults` | 工作流默认配置 |
+| `GET` | `/health` | 应用健康信息 |
+
+### 认证接口
+
+| 路径组 | 用途 |
+|---|---|
+| `/api/media/*` | 生成、上传、抽帧、背景移除、放大和导出 |
+| `/api/prompt/*` | 提示词生成、姿势预设、图片和首尾帧分析 |
+| `/api/config/user` | 用户配置读取、保存和删除 |
+| `/api/chat/*` | 会话、消息、历史和会话配置 |
+| `/api/reference-image` | 用户参考图管理 |
+| `/api/service/start`、`stop`、`workflow/switch` | 服务控制 |
+| `/ws?token=<JWT>` | 生成状态与结果推送 |
+
+错误响应目前兼容统一错误结构和 FastAPI 的 `{"detail": "..."}` 结构，前端 Axios 拦截器会处理两种格式。
+
+## 媒体处理
+
+媒体接口集中在 `server/api/media.py`：
+
+- 视频元数据、帧预览、工作帧集和编辑帧保存。
+- rembg、InSPyReNet、BiRefNet 和边缘模式背景处理。
+- Lanczos、APISR、Real-CUGAN、Real-ESRGAN 和 InvSR 放大。
+- ZIP、spritesheet、GIF、APNG 导出及导出进度查询。
+
+Docker 镜像已安装 ffmpeg。BiRefNet 等 Hugging Face 权重首次使用时会下载到持久化的 `huggingface-cache` 卷。
+
+## 项目结构
+
+```text
+ai-draw/
+|-- .env.example                 # 完整环境变量清单
+|-- .vscode/tasks.json           # SSH 远程部署任务
+|-- Dockerfile                   # 前后端多阶段构建
+|-- docker-compose.yml           # 远程部署服务和持久卷
+|-- run.py                       # 后端启动入口
+|-- configs/
+|   |-- app_config.yaml          # 工作流元数据和默认值
+|   `-- workflows/               # ComfyUI API JSON
+|-- server/
+|   |-- main.py                  # FastAPI 应用和生命周期
+|   |-- ai_draw_service.py       # 生成任务编排
+|   |-- api/                     # media、prompt、service、user、session
+|   |-- image_upscale_methods.py # 放大方法注册
+|   |-- models.py                # SQLAlchemy 模型
+|   `-- websocket/               # WebSocket 连接管理
+|-- comfyui/                     # ComfyUI 服务和 HTTP 请求实现
+|-- utils/                       # 外部 API、存储和媒体处理工具
+|-- frontend/
+|   |-- src/api/                 # REST 和 WebSocket 客户端
+|   |-- src/components/          # 聊天、结果和抽帧工作台
+|   |-- src/stores/appStore.ts   # Zustand 全局状态
+|   `-- tests/                   # TypeScript 单元测试
+|-- tests/                       # Python unittest 测试
+`-- nginx/                       # 生产静态资源和反向代理
+```
+
+## 验证
+
+```powershell
+# Python 单元测试
+python -B -m unittest discover -s tests -p "test_*.py"
+
+# 前端单元测试
+npm --prefix frontend test
+
+# 前端静态检查与生产构建
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```
+
+Docker 构建是最终的可部署构建路径；当前仓库没有 CI、后端 lint 或后端类型检查配置。
+
+## 添加工作流
+
+### ComfyUI 生成工作流
+
+1. 从 ComfyUI 导出 API JSON 到 `configs/workflows/`。
+2. 在 `workflow_files` 中添加文件映射。
+3. 在 `workflow_metadata` 中添加前端可见的标签、能力和参数。
+4. 检查 `AIDrawService` 的通用分发是否适用；特殊输入或输出需要增加显式分发逻辑。
+5. 搜索前端 store、`ChatInput` 和 `SettingsModal` 中按工作流 ID 分支的行为。
+
+### 外部 API 工作流
+
+1. 在 `.env.example` 和 `utils/config_loader.py` 中添加完整配置。
+2. 添加 API 客户端和 `AIDrawService` 分发逻辑。
+3. 添加 `workflow_metadata`，不需要伪造 ComfyUI JSON。
+4. 同步后端 schema、前端 API 类型和特殊参数控件。
+
+## 当前运行约束
+
+- 生成状态由进程内单例 `AIDrawService` 管理，不是按用户隔离的持久任务队列；后端重启会丢失进行中的任务。
+- WebSocket 服务状态目前广播给所有已认证连接，前端再按本地任务状态决定是否接收结果。
+- `/uploads` 由静态文件服务直接提供，生成文件 URL 不具备逐请求授权。
+- 数据库启动使用 `create_all()` 和少量幂等 DDL；仓库尚未建立 Alembic 迁移目录。
+
+## 反馈
+
+问题和建议请提交到 [GitHub Issues](https://github.com/nekocon233/ai-draw/issues)。

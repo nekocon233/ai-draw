@@ -18,7 +18,7 @@ class OpenAIImageGenerator:
     def __init__(self, api_key: str, base_url: str, model: str):
         # 延迟导入，避免启动时 import 失败
         from openai import OpenAI
-        self.client = OpenAI(base_url=base_url or None, api_key=api_key)
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.model = model
 
     @staticmethod

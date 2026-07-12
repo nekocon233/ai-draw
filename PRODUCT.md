@@ -6,7 +6,7 @@ product
 
 ## Users
 
-AI-Draw serves illustrators, designers, content creators, and other visual makers who use AI generation, reference images, and generated video outputs as part of a practical creative workflow. They need fast, browser-based tools that help them move from prompt or media output to usable assets without switching products.
+ai-draw serves illustrators, designers, content creators, and other visual makers who use AI generation, reference images, and generated video outputs as part of a practical creative workflow. They need fast, browser-based tools that help them move from prompt or media output to usable assets without switching products.
 
 ## Product Purpose
 
@@ -26,7 +26,7 @@ Keep the creative output central.
 Expose professional controls progressively.
 Make every processing step visible and reversible where possible.
 Prefer clear production language over decorative copy.
-Preserve the existing AI-Draw product shell and interaction model.
+Preserve the existing ai-draw product shell and interaction model.
 
 ## Accessibility & Inclusion
 

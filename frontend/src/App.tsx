@@ -179,6 +179,10 @@ function AppContent() {
     };
   }, [setServiceStatus, setError, loadUserConfig, loadSessions, messageApi]);
 
+  const controlSelectedColor = isDark ? '#6ea8fe' : '#2563eb';
+  const controlSelectedHoverColor = isDark ? '#8bb9ff' : '#1d4ed8';
+  const controlSelectedTextColor = isDark ? '#0d0d0d' : '#ffffff';
+
   return (
     <ConfigProvider
       locale={zhCN}
@@ -204,8 +208,17 @@ function AppContent() {
         },
         components: {
           Switch: {
-            colorPrimary: isDark ? '#6ea8fe' : '#2563eb',
-            colorPrimaryHover: isDark ? '#8bb9ff' : '#1d4ed8',
+            colorPrimary: controlSelectedColor,
+            colorPrimaryHover: controlSelectedHoverColor,
+          },
+          Checkbox: {
+            colorPrimary: controlSelectedColor,
+            colorPrimaryHover: controlSelectedHoverColor,
+            colorWhite: controlSelectedTextColor,
+          },
+          Segmented: {
+            itemSelectedBg: controlSelectedColor,
+            itemSelectedColor: controlSelectedTextColor,
           },
         },
       }}

@@ -179,3 +179,60 @@ export function applyHardTransparentReplacement(
 
   return result
 }
+
+export function applyConnectedColorReplacement(
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  targetColor: readonly [number, number, number],
+  replacementColor: readonly [number, number, number],
+  tolerance: number,
+  opacity: number,
+): Uint8ClampedArray | null {
+  if (!isHardTransparentReplacementTarget(source, width, height, x, y)) return null
+
+  const pixelCount = width * height
+  const selected = new Uint8Array(pixelCount)
+  const stack = new Int32Array(pixelCount)
+  let stackSize = 0
+  let selectedCount = 0
+  const normalizedTolerance = Number.isFinite(tolerance) ? Math.max(0, tolerance) : 0
+  const enqueue = (pixelIndex: number) => {
+    if (selected[pixelIndex]) return
+    const offset = pixelIndex * 4
+    const distance = Math.max(
+      Math.abs(source[offset] - targetColor[0]),
+      Math.abs(source[offset + 1] - targetColor[1]),
+      Math.abs(source[offset + 2] - targetColor[2]),
+    )
+    if (source[offset + 3] === 0 || distance > normalizedTolerance) return
+    selected[pixelIndex] = 1
+    selectedCount += 1
+    stack[stackSize++] = pixelIndex
+  }
+
+  enqueue(y * width + x)
+  while (stackSize) {
+    const pixelIndex = stack[--stackSize]
+    const pixelX = pixelIndex % width
+    if (pixelX < width - 1) enqueue(pixelIndex + 1)
+    if (pixelX > 0) enqueue(pixelIndex - 1)
+    if (pixelIndex < pixelCount - width) enqueue(pixelIndex + width)
+    if (pixelIndex >= width) enqueue(pixelIndex - width)
+  }
+  if (!selectedCount) return null
+
+  const result = new Uint8ClampedArray(source)
+  const normalizedOpacity = Math.min(1, Math.max(0, opacity))
+  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
+    if (!selected[pixelIndex]) continue
+    const offset = pixelIndex * 4
+    result[offset] = replacementColor[0]
+    result[offset + 1] = replacementColor[1]
+    result[offset + 2] = replacementColor[2]
+    result[offset + 3] = Math.round(source[offset + 3] * normalizedOpacity)
+  }
+  return result
+}

@@ -1296,29 +1296,14 @@
   outline-offset: 1px;
 }
 
-.frame-editor-modal-root .ant-checkbox .ant-checkbox-inner {
+.frame-editor-modal-root .ant-checkbox:not(.ant-checkbox-checked):not(.ant-checkbox-indeterminate) .ant-checkbox-inner {
   border-color: var(--text-secondary);
   background: var(--bg-primary);
 }
 
-.frame-editor-check .ant-checkbox .ant-checkbox-inner {
+.frame-editor-check .ant-checkbox:not(.ant-checkbox-checked):not(.ant-checkbox-indeterminate) .ant-checkbox-inner {
   border-color: rgba(255, 255, 255, 0.92);
   background: transparent;
-}
-
-.frame-editor-modal-root .ant-checkbox-checked .ant-checkbox-inner,
-.frame-editor-modal-root .ant-checkbox-indeterminate .ant-checkbox-inner {
-  border-color: var(--control-accent);
-  background: var(--control-accent);
-}
-
-.frame-editor-modal-root .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled):hover .ant-checkbox-inner,
-.frame-editor-modal-root .ant-checkbox:not(.ant-checkbox-disabled):hover .ant-checkbox-inner {
-  border-color: var(--control-accent);
-}
-
-.frame-editor-modal-root .ant-checkbox-checked .ant-checkbox-inner::after {
-  border-color: #fff;
 }
 
 .frame-editor-empty {

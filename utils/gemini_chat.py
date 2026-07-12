@@ -53,13 +53,10 @@ class GeminiChat:
         from google.genai import types
 
         # ── 创建客户端 ────────────────────────────────────────────────────
-        if self.base_url:
-            client = genai.Client(
-                http_options=types.HttpOptions(base_url=self.base_url),
-                api_key=self.api_key,
-            )
-        else:
-            client = genai.Client(api_key=self.api_key)
+        client = genai.Client(
+            http_options=types.HttpOptions(base_url=self.base_url),
+            api_key=self.api_key,
+        )
 
         # ── 构建历史对话内容 ──────────────────────────────────────────────
         # AI 生成图片放回 user 角色（紧跟当轮用户消息），

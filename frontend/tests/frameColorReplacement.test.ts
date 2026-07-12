@@ -8,6 +8,7 @@ import {
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT,
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT_MODE,
   DEFAULT_TRANSPARENT_REPLACE_MATCH_MODE,
+  applyConnectedColorReplacement,
   applyHardTransparentReplacement,
   isHardTransparentReplacementTarget,
 } from '../src/utils/frameColorReplacement.ts'
@@ -297,4 +298,56 @@ test('returns null for invalid dimensions, coordinates, or source length', () =>
     applyHardTransparentReplacement(new Uint8ClampedArray(3), 1, 1, 0, 0, 0, 0),
     null,
   )
+})
+
+test('recolors an opaque subject surrounded by transparent pixels', () => {
+  const source = new Uint8ClampedArray([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 100, 110, 120, 255, 101, 111, 121, 128,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ])
+
+  const result = applyConnectedColorReplacement(
+    source,
+    3,
+    3,
+    1,
+    1,
+    [100, 110, 120],
+    [200, 20, 30],
+    2,
+    0.5,
+  )
+
+  assert.deepEqual(Array.from(result ?? []), [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 200, 20, 30, 128, 200, 20, 30, 64,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ])
+})
+
+test('connected recoloring preserves disconnected matches', () => {
+  const source = new Uint8ClampedArray([
+    10, 20, 30, 255,
+    255, 255, 255, 255,
+    10, 20, 30, 255,
+  ])
+
+  const result = applyConnectedColorReplacement(
+    source,
+    3,
+    1,
+    0,
+    0,
+    [10, 20, 30],
+    [1, 2, 3],
+    0,
+    1,
+  )
+
+  assert.deepEqual(Array.from(result ?? []), [
+    1, 2, 3, 255,
+    255, 255, 255, 255,
+    10, 20, 30, 255,
+  ])
 })

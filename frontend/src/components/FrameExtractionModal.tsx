@@ -55,6 +55,7 @@ import {
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT,
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT_MODE,
   DEFAULT_TRANSPARENT_REPLACE_MATCH_MODE,
+  applyConnectedColorReplacement,
   applyHardTransparentReplacement,
   isHardTransparentReplacementTarget,
   type TransparentEdgeEnhancementMode,
@@ -393,64 +394,6 @@ const findClosestReplacementPoint = (
   return closest;
 };
 
-const applyEdgeConnectedColorReplacement = (
-  source: Uint8ClampedArray,
-  width: number,
-  height: number,
-  targetColor: readonly [number, number, number],
-  replacementColor: string,
-  tolerance: number,
-  opacity: number,
-) => {
-  const result = new Uint8ClampedArray(source);
-  const seen = new Uint8Array(width * height);
-  const selected = new Uint8Array(width * height);
-  const stack = new Int32Array(width * height);
-  let stackSize = 0;
-  let selectedCount = 0;
-  const enqueue = (pixelIndex: number) => {
-    if (seen[pixelIndex]) return;
-    seen[pixelIndex] = 1;
-    const offset = pixelIndex * 4;
-    const distance = Math.max(
-      Math.abs(source[offset] - targetColor[0]),
-      Math.abs(source[offset + 1] - targetColor[1]),
-      Math.abs(source[offset + 2] - targetColor[2]),
-    );
-    if (source[offset + 3] === 0 || distance > tolerance) return;
-    selected[pixelIndex] = 1;
-    selectedCount += 1;
-    stack[stackSize++] = pixelIndex;
-  };
-  for (let x = 0; x < width; x += 1) {
-    enqueue(x);
-    enqueue((height - 1) * width + x);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    enqueue(y * width);
-    enqueue(y * width + width - 1);
-  }
-  while (stackSize) {
-    const pixelIndex = stack[--stackSize];
-    const x = pixelIndex % width;
-    if (x < width - 1) enqueue(pixelIndex + 1);
-    if (x > 0) enqueue(pixelIndex - 1);
-    if (pixelIndex < width * height - width) enqueue(pixelIndex + width);
-    if (pixelIndex >= width) enqueue(pixelIndex - width);
-  }
-  if (!selectedCount) return null;
-  const rgb = hexToRgb(replacementColor);
-  for (let pixelIndex = 0; pixelIndex < selected.length; pixelIndex += 1) {
-    if (!selected[pixelIndex]) continue;
-    const offset = pixelIndex * 4;
-    result[offset] = rgb.r;
-    result[offset + 1] = rgb.g;
-    result[offset + 2] = rgb.b;
-    result[offset + 3] = Math.round(opacity * 255);
-  }
-  return result;
-};
-
 const replaceImageColors = async (url: string, options: WorksetColorReplacementOptions) => {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const nextImage = new window.Image();
@@ -482,6 +425,7 @@ const replaceImageColors = async (url: string, options: WorksetColorReplacementO
     options.replaceWithTransparency,
   );
   if (!targetPoint) return null;
+  const replacementRgb = hexToRgb(options.replacementColor);
   const result = options.replaceWithTransparency
     ? applyHardTransparentReplacement(
         imageData.data,
@@ -495,12 +439,14 @@ const replaceImageColors = async (url: string, options: WorksetColorReplacementO
         options.replaceEdgeEnhancementMode,
         options.targetColor,
       )
-    : applyEdgeConnectedColorReplacement(
+    : applyConnectedColorReplacement(
         imageData.data,
         canvas.width,
         canvas.height,
+        targetPoint.x,
+        targetPoint.y,
         options.targetColor,
-        options.replacementColor,
+        [replacementRgb.r, replacementRgb.g, replacementRgb.b],
         options.colorReplaceTolerance,
         options.opacity,
       );
@@ -2327,6 +2273,7 @@ function FrameCanvasEditor({
   const imageLoadIdRef = useRef(0);
   const backgroundPreviewRequestIdRef = useRef(0);
   const backgroundPreviewTimerRef = useRef<number | null>(null);
+  const backgroundPreviewSourceRef = useRef<string | null>(null);
   const observedBackgroundOptionsKeyRef = useRef('');
   const skipReloadUrlRef = useRef<string | null>(null);
   const historyRef = useRef<CanvasHistoryEntry[]>([]);
@@ -2339,7 +2286,6 @@ function FrameCanvasEditor({
   const floodOutputRef = useRef<ImageData | null>(null);
   const floodSeenRef = useRef<Uint8Array | null>(null);
   const floodStackRef = useRef<Int32Array | null>(null);
-  const floodMaskRef = useRef<Uint8Array | null>(null);
   const worksetReplaceTargetRef = useRef<Pick<
     WorksetColorReplacementOptions,
     'targetColor' | 'targetXRatio' | 'targetYRatio'
@@ -2521,6 +2467,7 @@ function FrameCanvasEditor({
 
   const resetBackgroundPreview = useCallback(() => {
     cancelBackgroundPreviewActivity();
+    backgroundPreviewSourceRef.current = null;
     observedBackgroundOptionsKeyRef.current = '';
     setBackgroundPreviewEnabled(false);
   }, [cancelBackgroundPreviewActivity]);
@@ -2675,16 +2622,18 @@ function FrameCanvasEditor({
   }, [loadImage]);
 
   const runBackgroundPreview = useCallback(async (request: VideoBackgroundOptions) => {
+    const source = backgroundPreviewSourceRef.current;
+    if (!source) return;
     cancelBackgroundPreviewActivity();
     const requestId = backgroundPreviewRequestIdRef.current + 1;
     backgroundPreviewRequestIdRef.current = requestId;
     setBackgroundPreviewLoading(true);
     try {
-      const res = await apiService.removeVideoFrameBackgrounds({
-        frame_urls: [frame.sourceUrl],
+      const res = await apiService.removeBackground({
+        image: source,
         ...request,
       });
-      const imageUrl = res.frames[0]?.image_url;
+      const imageUrl = res.image_url;
       if (requestId !== backgroundPreviewRequestIdRef.current || !imageUrl) return;
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const nextImage = new window.Image();
@@ -2698,7 +2647,6 @@ function FrameCanvasEditor({
       const ctx = canvas?.getContext('2d');
       if (!canvas || !ctx) return;
       cancelPendingPreviewRender();
-      pushHistory();
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
       const strokeCanvas = strokeCanvasRef.current;
@@ -2722,12 +2670,17 @@ function FrameCanvasEditor({
         setBackgroundPreviewLoading(false);
       }
     }
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, frame.sourceUrl, pushHistory, updateContentDirty]);
+  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
 
   const applyBackgroundPreview = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     cancelBackgroundPreviewActivity();
+    cancelPendingPreviewRender();
+    pushHistory();
+    backgroundPreviewSourceRef.current = canvas.toDataURL('image/png');
     worksetReplaceTargetRef.current = null;
-    observedBackgroundOptionsKeyRef.current = `${frame.sourceUrl}:${JSON.stringify(backgroundOptionsState)}`;
+    observedBackgroundOptionsKeyRef.current = JSON.stringify(backgroundOptionsState);
     setBackgroundPreviewEnabled(true);
     void runBackgroundPreview(backgroundOptionsToRequest());
   };
@@ -2808,7 +2761,7 @@ function FrameCanvasEditor({
 
   useEffect(() => {
     if (!backgroundPreviewEnabled || !open || !imageReady || saving || backgroundLoading) return;
-    const key = `${frame.sourceUrl}:${JSON.stringify(backgroundOptionsState)}`;
+    const key = JSON.stringify(backgroundOptionsState);
     if (key === observedBackgroundOptionsKeyRef.current) return;
     observedBackgroundOptionsKeyRef.current = key;
     if (backgroundPreviewTimerRef.current !== null) window.clearTimeout(backgroundPreviewTimerRef.current);
@@ -2821,7 +2774,7 @@ function FrameCanvasEditor({
       void runBackgroundPreview(backgroundOptionsToRequest());
     }, 350);
     return cancelBackgroundPreviewActivity;
-  }, [backgroundLoading, backgroundOptionsState, backgroundOptionsToRequest, backgroundPreviewEnabled, cancelBackgroundPreviewActivity, frame.sourceUrl, imageReady, open, runBackgroundPreview, saving]);
+  }, [backgroundLoading, backgroundOptionsState, backgroundOptionsToRequest, backgroundPreviewEnabled, cancelBackgroundPreviewActivity, imageReady, open, runBackgroundPreview, saving]);
 
   useEffect(() => {
     if (!open) return;
@@ -3013,59 +2966,19 @@ function FrameCanvasEditor({
         return;
       }
 
-      if (target[3] === 0) return;
-      if (!floodMaskRef.current || floodMaskRef.current.length !== pixelCount) floodMaskRef.current = new Uint8Array(pixelCount);
-      else floodMaskRef.current.fill(0);
-      const selectionMask = floodMaskRef.current;
-      const distanceToTarget = (pointIndex: number) => {
-        const p = pointIndex * 4;
-        return Math.max(
-          Math.abs(data[p] - target[0]),
-          Math.abs(data[p + 1] - target[1]),
-          Math.abs(data[p + 2] - target[2]),
-        );
-      };
-      if (!floodSeenRef.current || floodSeenRef.current.length !== pixelCount) floodSeenRef.current = new Uint8Array(pixelCount);
-      else floodSeenRef.current.fill(0);
-      if (!floodStackRef.current || floodStackRef.current.length !== pixelCount) floodStackRef.current = new Int32Array(pixelCount);
-      const seen = floodSeenRef.current;
-      const stack = floodStackRef.current;
-      let stackSize = 0;
-      const enqueue = (pointIndex: number) => {
-        if (seen[pointIndex]) return;
-        seen[pointIndex] = 1;
-        const p = pointIndex * 4;
-        if (data[p + 3] === 0 || distanceToTarget(pointIndex) > colorReplaceTolerance) return;
-        selectionMask[pointIndex] = 255;
-        stack[stackSize++] = pointIndex;
-      };
-
-      for (let edgeX = 0; edgeX < canvas.width; edgeX += 1) {
-        enqueue(edgeX);
-        enqueue((canvas.height - 1) * canvas.width + edgeX);
-      }
-      for (let edgeY = 1; edgeY < canvas.height - 1; edgeY += 1) {
-        enqueue(edgeY * canvas.width);
-        enqueue(edgeY * canvas.width + canvas.width - 1);
-      }
-
-      while (stackSize) {
-        const pointIndex = stack[--stackSize];
-        const cx = pointIndex % canvas.width;
-        if (cx < canvas.width - 1) enqueue(pointIndex + 1);
-        if (cx > 0) enqueue(pointIndex - 1);
-        if (pointIndex < pixelCount - canvas.width) enqueue(pointIndex + canvas.width);
-        if (pointIndex >= canvas.width) enqueue(pointIndex - canvas.width);
-      }
-
-      for (let pointIndex = 0; pointIndex < pixelCount; pointIndex += 1) {
-        if (!selectionMask[pointIndex]) continue;
-        const p = pointIndex * 4;
-        data[p] = rgb.r;
-        data[p + 1] = rgb.g;
-        data[p + 2] = rgb.b;
-        data[p + 3] = Math.round(opacity * 255);
-      }
+      const result = applyConnectedColorReplacement(
+        data,
+        canvas.width,
+        canvas.height,
+        startX,
+        startY,
+        [target[0], target[1], target[2]],
+        [rgb.r, rgb.g, rgb.b],
+        colorReplaceTolerance,
+        opacity,
+      );
+      if (!result) return;
+      data.set(result);
       ctx.putImageData(imageData, 0, 0);
       return;
     }

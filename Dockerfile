@@ -1,4 +1,4 @@
-# AI-Draw 多阶段构建 Dockerfile
+# ai-draw 多阶段构建 Dockerfile
 # Stage 1: 前端构建
 # Stage 2: 后端依赖安装
 # Stage 3: 最终运行镜像
