@@ -954,14 +954,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   stopGeneration: async () => {
     await apiService.stopGeneration();
     const messageId = get().currentGeneratingMessageId;
-    set(state => ({
+    if (messageId) {
+      get().updateChatImages(messageId, []);
+    }
+    set({
       loading: false,
       isGenerating: false,
       currentGeneratingMessageId: null,
-      chatHistory: messageId
-        ? state.chatHistory.map(message => message.id === messageId ? { ...message, images: [] } : message)
-        : state.chatHistory,
-    }));
+    });
   },
   reset: () => set({
     prompt: '',

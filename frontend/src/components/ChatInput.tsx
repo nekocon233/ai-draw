@@ -1,15 +1,19 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Input, Button, message, Select, Image, Switch, Tooltip } from 'antd';
+import { Input, Button, message, Select, Image, Switch } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { 
-  SendOutlined, 
+  ArrowUpOutlined,
   SettingOutlined, 
   PictureOutlined, 
   BulbOutlined,
   CloseOutlined,
-  StopOutlined,
   PlusOutlined,
-  UserOutlined
+  UserOutlined,
+  FontColorsOutlined,
+  VideoCameraOutlined,
+  CheckOutlined,
+  ArrowRightOutlined,
+  SwapOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -24,16 +28,31 @@ const { TextArea } = Input;
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+type WorkflowKind = 'text' | 'image' | 'video';
+
+interface WorkflowSelectOption {
+  label: string;
+  value: string;
+  description: string;
+  methodCount: number;
+  kind: WorkflowKind;
+}
+
+function WorkflowKindIcon({ kind }: { kind: WorkflowKind }) {
+  if (kind === 'video') return <VideoCameraOutlined />;
+  if (kind === 'image') return <PictureOutlined />;
+  return <FontColorsOutlined />;
+}
+
 interface FrameCardProps {
   image: string | null;
   label: string;
   alt: string;
   onUpload: () => void;
   onRemove: () => void;
-  onPose?: () => void;
 }
 
-function FrameCard({ image, label, alt, onUpload, onRemove, onPose }: FrameCardProps) {
+function FrameCard({ image, label, alt, onUpload, onRemove }: FrameCardProps) {
   return (
     <div className={`flf2v-frame-card ${image ? 'has-image' : ''}`}>
       {image ? (
@@ -61,20 +80,31 @@ function FrameCard({ image, label, alt, onUpload, onRemove, onPose }: FrameCardP
               <span className="flf2v-frame-placeholder-label">{label}</span>
             </span>
           </button>
-          {onPose && (
-            <Tooltip title="姿势参考（posemy.art）" placement="right">
-              <button
-                type="button"
-                className="flf2v-frame-pose"
-                onClick={onPose}
-                aria-label={`为${label}打开姿势参考`}
-              >
-                <UserOutlined aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
         </>
       )}
+    </div>
+  );
+}
+
+interface ReferenceThumbnailProps {
+  image: string;
+  index: number;
+  onRemove: () => void;
+}
+
+function ReferenceThumbnail({ image, index, onRemove }: ReferenceThumbnailProps) {
+  return (
+    <div className="reference-thumbnail">
+      <Image src={image} alt={`参考图 ${index}`} preview={{ mask: null }} />
+      <span className="reference-thumbnail-index" aria-hidden="true">{index}</span>
+      <button
+        type="button"
+        className="reference-thumbnail-remove"
+        onClick={onRemove}
+        aria-label={`移除参考图 ${index}`}
+      >
+        <CloseOutlined />
+      </button>
     </div>
   );
 }
@@ -149,7 +179,6 @@ export default function ChatInput() {
   const isFlf2v = workflowMeta?.requires_end_image === true;
   const isI2V = currentWorkflow === 'i2v'; // Wan i2v：图生视频
   const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
-  const isI2I = currentWorkflow === 'i2i'; // Q-Image：最多 3 张参考图
   const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
   const isKlingFlf2v = currentWorkflow === 'kling_flf2v'; // Kling 首尾帧图生视频
   const supportsMultiImage = workflowMeta?.supports_multi_image === true; // 多参考图工作流（图生图类目）
@@ -158,15 +187,33 @@ export default function ChatInput() {
   // 下拉分组：同 category 的工作流折叠为一项（如 图生图：i2i / nano_banana_pro）
   const groupedOptions = (() => {
     const seen = new Set<string>();
-    const out: { label: string; value: string }[] = [];
+    const out: WorkflowSelectOption[] = [];
     for (const w of availableWorkflows) {
-      if (w.category) {
-        if (seen.has(w.category)) continue; // 同组只保留第一个成员
-        seen.add(w.category);
-        out.push({ label: w.category, value: w.key });
-      } else {
-        out.push({ label: w.label, value: w.key });
-      }
+      const label = w.category || w.label;
+      if (seen.has(label)) continue;
+      seen.add(label);
+
+      const members = w.category
+        ? availableWorkflows.filter(item => item.category === w.category)
+        : [w];
+      const kind: WorkflowKind = members.some(item => item.output_type === 'video')
+        ? 'video'
+        : members.some(item => item.requires_image || item.supports_multi_image)
+          ? 'image'
+          : 'text';
+      const description = kind === 'video'
+        ? '用参考帧生成动态视频'
+        : kind === 'image'
+          ? '上传参考图进行编辑与重绘'
+          : '从文字描述开始创作图像';
+
+      out.push({
+        label,
+        value: w.key,
+        description,
+        methodCount: members.length,
+        kind,
+      });
     }
     return out;
   })();
@@ -188,6 +235,36 @@ export default function ChatInput() {
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<TextAreaRef>(null);
   const submissionPendingRef = useRef(false);
+  const hasReferenceImages = Boolean(referenceImage || referenceImage2 || referenceImage3);
+  const canAddReference = !supportsMultiImage || !(referenceImage && referenceImage2 && referenceImage3);
+
+  const getNextReferenceSlot = (): 1 | 2 | 3 => {
+    if (!referenceImage || !supportsMultiImage) return 1;
+    if (!referenceImage2) return 2;
+    return 3;
+  };
+
+  const openReferenceImagePicker = () => {
+    const slot = getNextReferenceSlot();
+    if (slot === 1) fileInputRef.current?.click();
+    else if (slot === 2) fileInputRef2.current?.click();
+    else fileInputRef3.current?.click();
+  };
+
+  const openPoseReference = () => {
+    setPoseWebTargetSlot(getNextReferenceSlot());
+    setPoseWebOpen(true);
+  };
+
+  const swapFrameImages = () => {
+    if (!referenceImage && !referenceImageEnd) return;
+    useAppStore.setState({
+      referenceImage: referenceImageEnd || null,
+      referenceImageEnd: referenceImage || null,
+    });
+    useAppStore.getState().saveSessionConfig();
+  };
+
   // 组件加载或切换会话时自动聚焦到输入框，并将光标移到末尾
   useEffect(() => {
     if (textAreaRef.current?.resizableTextArea?.textArea) {
@@ -559,40 +636,63 @@ export default function ChatInput() {
           <div className="flf2v-input-area">
             {/* 双帧卡片区 */}
             <div className="flf2v-frames">
+              <div className="flf2v-frame-row">
+                <FrameCard
+                  image={referenceImage}
+                  label="首帧"
+                  alt="开始帧"
+                  onUpload={() => fileInputRef.current?.click()}
+                  onRemove={() => setReferenceImage(null)}
+                />
 
-              <FrameCard
-                image={referenceImage}
-                label="首帧"
-                alt="开始帧"
-                onUpload={() => fileInputRef.current?.click()}
-                onRemove={() => setReferenceImage(null)}
-              />
+                <button
+                  type="button"
+                  className="flf2v-frame-swap"
+                  onClick={swapFrameImages}
+                  disabled={!referenceImage && !referenceImageEnd}
+                  title={referenceImage && referenceImageEnd
+                    ? '互换首帧和尾帧'
+                    : referenceImage
+                      ? '将首帧移至尾帧'
+                      : referenceImageEnd
+                        ? '将尾帧移至首帧'
+                        : '添加图片后可移动'}
+                  aria-label="互换首帧和尾帧"
+                >
+                  <SwapOutlined aria-hidden="true" />
+                </button>
 
-              {/* 中间：箭头 + 循环开关 */}
-              <div className="flf2v-separator-col">
-                <span className="flf2v-frame-separator">⇄</span>
-                {workflowMeta?.supports_loop && (
-                  <div className="flf2v-loop-toggle">
-                    <Switch
-                      size="small"
-                      checked={isLoop}
-                      onChange={setIsLoop}
-                      aria-label={`视频过渡模式：${isLoop ? '循环' : '单程'}`}
-                    />
-                    <span className="flf2v-loop-label">
-                      {isLoop ? '循环' : '单程'}
-                    </span>
-                  </div>
-                )}
+                <FrameCard
+                  image={referenceImageEnd}
+                  label="尾帧"
+                  alt="结束帧"
+                  onUpload={() => fileInputEndRef.current?.click()}
+                  onRemove={() => setReferenceImageEnd(null)}
+                />
               </div>
 
-              <FrameCard
-                image={referenceImageEnd}
-                label="尾帧"
-                alt="结束帧"
-                onUpload={() => fileInputEndRef.current?.click()}
-                onRemove={() => setReferenceImageEnd(null)}
-              />
+              {workflowMeta?.supports_loop && (
+                <div className="flf2v-mode-switch" role="group" aria-label="视频过渡模式">
+                  <button
+                    type="button"
+                    className={`flf2v-mode-option${!isLoop ? ' is-active' : ''}`}
+                    onClick={() => setIsLoop(false)}
+                    aria-pressed={!isLoop}
+                  >
+                    <ArrowRightOutlined aria-hidden="true" />
+                    <span>单程</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`flf2v-mode-option${isLoop ? ' is-active' : ''}`}
+                    onClick={() => setIsLoop(true)}
+                    aria-pressed={isLoop}
+                  >
+                    <SwapOutlined aria-hidden="true" />
+                    <span>循环</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* 右侧：文字描述 */}
@@ -633,44 +733,36 @@ export default function ChatInput() {
           </div>
         ) : (
           <>
-            {/* 输入框行（requires_image 时包含帧卡片） */}
+            {/* 输入框行：仅展示已添加的紧凑参考图，不预占空槽 */}
             <div className="chat-input-row">
-              {(isRequiresImage || supportsMultiImage) && (
+              {hasReferenceImages && (
                 <div className="reference-strip" aria-label="参考图片">
-                  <FrameCard
-                    image={referenceImage}
-                    label={isI2I ? '图 1' : '参考图'}
-                    alt="参考图 1"
-                    onUpload={() => fileInputRef.current?.click()}
-                    onRemove={() => {
-                      setReferenceImage(referenceImage2);
-                      setReferenceImage2(referenceImage3);
-                      setReferenceImage3(null);
-                    }}
-                    onPose={() => { setPoseWebTargetSlot(1); setPoseWebOpen(true); }}
-                  />
-
-                  {/* ── 参考图 2 / 3（i2i 和 Nano Banana Pro，逐张追加） ── */}
-                  {/* 图 1 已上传后才显示图 2 槽位 */}
-                  {supportsMultiImage && referenceImage && (
-                    <FrameCard
-                      image={referenceImage2}
-                      label="添加图 2"
-                      alt="参考图 2"
-                      onUpload={() => fileInputRef2.current?.click()}
-                      onRemove={() => { setReferenceImage2(referenceImage3); setReferenceImage3(null); }}
-                      onPose={() => { setPoseWebTargetSlot(2); setPoseWebOpen(true); }}
+                  {referenceImage && (
+                    <ReferenceThumbnail
+                      image={referenceImage}
+                      index={1}
+                      onRemove={() => {
+                        setReferenceImage(referenceImage2);
+                        setReferenceImage2(referenceImage3);
+                        setReferenceImage3(null);
+                      }}
                     />
                   )}
-                  {/* 图 2 已上传后才显示图 3 槽位 */}
-                  {supportsMultiImage && referenceImage2 && (
-                    <FrameCard
+                  {referenceImage2 && (
+                    <ReferenceThumbnail
+                      image={referenceImage2}
+                      index={2}
+                      onRemove={() => {
+                        setReferenceImage2(referenceImage3);
+                        setReferenceImage3(null);
+                      }}
+                    />
+                  )}
+                  {referenceImage3 && (
+                    <ReferenceThumbnail
                       image={referenceImage3}
-                      label="添加图 3"
-                      alt="参考图 3"
-                      onUpload={() => fileInputRef3.current?.click()}
+                      index={3}
                       onRemove={() => setReferenceImage3(null)}
-                      onPose={() => { setPoseWebTargetSlot(3); setPoseWebOpen(true); }}
                     />
                   )}
                 </div>
@@ -683,7 +775,7 @@ export default function ChatInput() {
                   placeholder={isNanoBananaPro ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...'}
                   aria-label="生成提示词"
                   className="chat-textarea"
-                  autoSize={{ minRows: (isRequiresImage || supportsMultiImage) ? 1 : 2, maxRows: 6 }}
+                  autoSize={{ minRows: 1, maxRows: 6 }}
                   onPressEnter={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
@@ -741,7 +833,33 @@ export default function ChatInput() {
                 }
               }}
             />
-            {/* 预留：文生图不显示上传按钮（isT2I 时无任何图片入口） */}
+
+            {(isRequiresImage || supportsMultiImage) && (
+              <>
+                <button
+                  type="button"
+                  className="chat-input-attachment-button"
+                  onClick={openReferenceImagePicker}
+                  disabled={!canAddReference}
+                  title={canAddReference ? '添加普通参考图' : '最多添加 3 张参考图'}
+                  aria-label={canAddReference ? '添加普通参考图' : '参考图已达上限'}
+                >
+                  <PictureOutlined aria-hidden="true" />
+                  <span>普通图</span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-input-attachment-button"
+                  onClick={openPoseReference}
+                  disabled={!canAddReference}
+                  title={canAddReference ? '从姿势编辑器添加参考图' : '最多添加 3 张参考图'}
+                  aria-label={canAddReference ? '添加姿势参考图' : '参考图已达上限'}
+                >
+                  <UserOutlined aria-hidden="true" />
+                  <span>姿势图</span>
+                </button>
+              </>
+            )}
 
             {/* 参数设置 */}
             <button 
@@ -783,6 +901,7 @@ export default function ChatInput() {
             {/* 工作流选择器（图生图等同类工作流折叠为一项，具体方式在生成设置里选择） */}
             <Select
               className="workflow-select"
+              classNames={{ popup: { root: 'workflow-select-popup' } }}
               value={selectValue}
               onChange={(val) => {
                 const target = availableWorkflows.find(w => w.key === val);
@@ -800,10 +919,48 @@ export default function ChatInput() {
                   setCurrentWorkflow(val);
                 }
               }}
-              size="small"
-              style={{ minWidth: 155, width: 'auto', maxWidth: 260 }}
               popupMatchSelectWidth={false}
               options={groupedOptions}
+              labelRender={({ value }) => {
+                const option = groupedOptions.find(item => item.value === value);
+                if (!option) return value;
+                return (
+                  <span className="workflow-select-label">
+                    <span className="workflow-select-label-icon" aria-hidden="true">
+                      <WorkflowKindIcon kind={option.kind} />
+                    </span>
+                    <span className="workflow-select-label-text">{option.label}</span>
+                    {workflowMeta?.method && (
+                      <span className="workflow-select-current-method">{workflowMeta.method}</span>
+                    )}
+                  </span>
+                );
+              }}
+              optionRender={(option) => {
+                const item = groupedOptions.find(candidate => candidate.value === option.value);
+                if (!item) return option.label;
+                const isSelected = item.value === selectValue;
+                return (
+                  <div className="workflow-option">
+                    <span className="workflow-option-icon" aria-hidden="true">
+                      <WorkflowKindIcon kind={item.kind} />
+                    </span>
+                    <span className="workflow-option-copy">
+                      <span className="workflow-option-heading">
+                        <span className="workflow-option-title">{item.label}</span>
+                        {item.methodCount > 1 && (
+                          <span className="workflow-option-count">{item.methodCount} 种方式</span>
+                        )}
+                      </span>
+                      <span className="workflow-option-description">{item.description}</span>
+                    </span>
+                    <CheckOutlined
+                      className={`workflow-option-check ${isSelected ? 'is-visible' : ''}`}
+                      aria-hidden="true"
+                    />
+                  </div>
+                );
+              }}
               aria-label="选择生成工作流"
             />
           </div>
@@ -811,7 +968,7 @@ export default function ChatInput() {
           {/* 发送/停止按钮 */}
           <Button
             type="primary"
-            icon={isGenerating ? <StopOutlined /> : <SendOutlined />}
+            icon={isGenerating ? <span className="chat-stop-icon" aria-hidden="true" /> : <ArrowUpOutlined />}
             onClick={handleSend}
             disabled={isSubmitting || (!isGenerating && !!isRequiresImage && !referenceImage)}
             loading={isSubmitting}
