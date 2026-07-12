@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-12T09:38:05.2265908Z",
+  "title": "Design System: ai-draw",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "primary",
+        "displayName": "Ink Black",
+        "canonical": "#0d0d0d",
+        "tonalRamp": ["#0d0d0d", "#212121", "#383838", "#555555", "#777777", "#a3a3a3", "#d1d1d1", "#f4f4f4"]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas White",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#171717", "#2f2f2f", "#4a4a4a", "#6b6b6b", "#919191", "#b8b8b8", "#dedede", "#ffffff"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Workbench Surface",
+        "canonical": "#f7f7f8",
+        "tonalRamp": ["#171719", "#303033", "#4a4a4e", "#6b6b70", "#929298", "#b9b9be", "#dedee2", "#f7f7f8"]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "Muted Surface",
+        "canonical": "#ececec",
+        "tonalRamp": ["#171717", "#303030", "#4a4a4a", "#6b6b6b", "#919191", "#b8b8b8", "#d8d8d8", "#ececec"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Text",
+        "canonical": "#5d5d5d",
+        "tonalRamp": ["#171717", "#2d2d2d", "#444444", "#5d5d5d", "#7e7e7e", "#a5a5a5", "#d0d0d0", "#f2f2f2"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline Border",
+        "canonical": "#e5e5e5",
+        "tonalRamp": ["#171717", "#303030", "#4a4a4a", "#6b6b6b", "#929292", "#b8b8b8", "#d3d3d3", "#e5e5e5"]
+      },
+      "signal-blue": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "#2563eb",
+        "tonalRamp": ["#081a45", "#0d2f78", "#1747ac", "#2563eb", "#4d7ff0", "#7ca2f5", "#b3c9fa", "#e8efff"]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Success Green",
+        "canonical": "#248a5a",
+        "tonalRamp": ["#08291a", "#0d472c", "#16673f", "#248a5a", "#49a878", "#79c59b", "#b1e0c3", "#e7f7ed"]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "Production Amber",
+        "canonical": "#a85c24",
+        "tonalRamp": ["#351b08", "#5a2e0d", "#814315", "#a85c24", "#c87943", "#df9f72", "#efc8a8", "#faeee4"]
+      },
+      "error": {
+        "role": "secondary",
+        "displayName": "Error Rose",
+        "canonical": "#c23b4d",
+        "tonalRamp": ["#3f0d16", "#6b1825", "#952636", "#c23b4d", "#d86070", "#e68c98", "#f2bbc2", "#fbeaec"]
+      },
+      "night-canvas": {
+        "role": "neutral",
+        "displayName": "Night Canvas",
+        "canonical": "#000000",
+        "tonalRamp": ["#000000", "#171717", "#303030", "#4a4a4a", "#6b6b6b", "#929292", "#b8b8b8", "#e5e5e5"]
+      },
+      "night-surface": {
+        "role": "neutral",
+        "displayName": "Night Workbench Surface",
+        "canonical": "#212121",
+        "tonalRamp": ["#0b0b0b", "#212121", "#383838", "#555555", "#777777", "#a3a3a3", "#d1d1d1", "#f4f4f4"]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite Surface",
+        "canonical": "#2f2f2f",
+        "tonalRamp": ["#0b0b0b", "#212121", "#2f2f2f", "#4a4a4a", "#6b6b6b", "#929292", "#b8b8b8", "#e5e5e5"]
+      },
+      "night-ink": {
+        "role": "primary",
+        "displayName": "Night Ink",
+        "canonical": "#f4f4f4",
+        "tonalRamp": ["#0d0d0d", "#212121", "#383838", "#555555", "#777777", "#a3a3a3", "#d1d1d1", "#f4f4f4"]
+      },
+      "night-muted": {
+        "role": "neutral",
+        "displayName": "Night Muted Text",
+        "canonical": "#b4b4b4",
+        "tonalRamp": ["#171717", "#303030", "#4a4a4a", "#6b6b6b", "#919191", "#b4b4b4", "#d8d8d8", "#f2f2f2"]
+      },
+      "night-border": {
+        "role": "neutral",
+        "displayName": "Night Hairline Border",
+        "canonical": "#303030",
+        "tonalRamp": ["#0b0b0b", "#212121", "#303030", "#4a4a4a", "#6b6b6b", "#929292", "#b8b8b8", "#e5e5e5"]
+      },
+      "night-signal-blue": {
+        "role": "primary",
+        "displayName": "Night Signal Blue",
+        "canonical": "#6ea8fe",
+        "tonalRamp": ["#0b2347", "#123d78", "#285fae", "#4b85e6", "#6ea8fe", "#94c0ff", "#bed8ff", "#ebf3ff"]
+      },
+      "night-success": {
+        "role": "secondary",
+        "displayName": "Night Success Green",
+        "canonical": "#6fcf97",
+        "tonalRamp": ["#08291a", "#0d472c", "#16673f", "#248a5a", "#49a878", "#6fcf97", "#b1e0c3", "#e7f7ed"]
+      },
+      "night-warning": {
+        "role": "secondary",
+        "displayName": "Night Production Amber",
+        "canonical": "#f0b36b",
+        "tonalRamp": ["#351b08", "#5a2e0d", "#814315", "#a85c24", "#c87943", "#f0b36b", "#f5d3aa", "#fcf0e1"]
+      },
+      "night-error": {
+        "role": "secondary",
+        "displayName": "Night Error Rose",
+        "canonical": "#ff7185",
+        "tonalRamp": ["#3f0d16", "#6b1825", "#952636", "#c23b4d", "#e35266", "#ff7185", "#ffb1bc", "#ffecef"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Welcome Display", "purpose": "Welcome and major empty-state headings only." },
+      "headline": { "displayName": "Workbench Headline", "purpose": "Numeric summaries and major workspace landmarks." },
+      "title": { "displayName": "Panel Title", "purpose": "Modal, editor, and strong section titles." },
+      "body": { "displayName": "Working Body", "purpose": "Prompts, instructions, generated text, and field content." },
+      "label": { "displayName": "Control Label", "purpose": "Controls, field labels, compact headings, and actions." }
+    },
+    "shadows": [
+      { "name": "low-rest-light", "value": "0 1px 2px rgba(13, 13, 13, 0.08)", "purpose": "Resting edge for actionable cards and small floating controls in light mode." },
+      { "name": "interactive-lift-light", "value": "0 4px 12px rgba(13, 13, 13, 0.1)", "purpose": "Hover, menus, and controls lifted above the light canvas." },
+      { "name": "overlay-lift-light", "value": "0 12px 32px rgba(13, 13, 13, 0.14)", "purpose": "Drawers and substantial overlays in light mode." },
+      { "name": "low-rest-dark", "value": "0 1px 2px rgba(0, 0, 0, 0.3)", "purpose": "Resting edge for actionable cards in dark mode." },
+      { "name": "interactive-lift-dark", "value": "0 4px 12px rgba(0, 0, 0, 0.38)", "purpose": "Hover and floating controls in dark mode." },
+      { "name": "overlay-lift-dark", "value": "0 12px 32px rgba(0, 0, 0, 0.48)", "purpose": "Drawers and substantial overlays in dark mode." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "160ms ease", "purpose": "Overlay visibility and immediate state feedback." },
+      { "name": "state-standard", "value": "200ms ease", "purpose": "Buttons, cards, fields, and routine control transitions." },
+      { "name": "spatial-fast", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Short spatial feedback such as drag prompts." },
+      { "name": "entry-standard", "value": "300ms ease", "purpose": "Message entry only; never orchestrated page choreography." }
+    ],
+    "breakpoints": [
+      { "name": "compact-modal", "value": "480px" },
+      { "name": "settings-mobile", "value": "520px" },
+      { "name": "assistant-mobile", "value": "640px" },
+      { "name": "workbench-mobile", "value": "760px" },
+      { "name": "shell-mobile", "value": "768px" },
+      { "name": "workbench-tablet", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single dominant action in a local task region.",
+      "html": "<button class=\"ds-btn-primary\">Generate</button>",
+      "css": ".ds-btn-primary { min-height: 32px; padding: 8px 16px; border: 1px solid var(--accent-solid, #0d0d0d); border-radius: 12px; background: var(--accent-solid, #0d0d0d); color: var(--text-on-accent, #ffffff); font: 500 13px/1.4 ui-sans-serif, system-ui, sans-serif; cursor: pointer; box-shadow: var(--shadow-sm, 0 1px 2px rgba(13,13,13,.08)); transition: background 200ms ease, box-shadow 200ms ease, transform 150ms ease; } .ds-btn-primary:hover { background: var(--accent-hover, #2f2f2f); box-shadow: var(--shadow-md, 0 4px 12px rgba(13,13,13,.1)); } .ds-btn-primary:focus-visible { outline: 2px solid var(--focus-ring, #0d0d0d); outline-offset: 2px; } .ds-btn-primary:active { background: var(--accent-active, #000000); transform: scale(.98); } .ds-btn-primary:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }"
+    },
+    {
+      "name": "Conversational Composer",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "The signature prompt surface combining text entry and the generate action.",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-composer-input\" rows=\"2\" placeholder=\"Describe an image or video...\"></textarea><button class=\"ds-composer-send\" aria-label=\"Generate\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 19V5m0 0-6 6m6-6 6 6\"/></svg></button></div>",
+      "css": ".ds-composer { display: flex; align-items: flex-end; gap: 12px; max-width: 900px; padding: 12px; border: 1px solid var(--border-color, #e5e5e5); border-radius: 30px; background: var(--bg-secondary, #f7f7f8); color: var(--text-primary, #0d0d0d); transition: border-color 200ms ease, box-shadow 200ms ease; } .ds-composer:hover { box-shadow: 0 1px 6px rgba(32,33,36,.12); } .ds-composer:focus-within { border-color: var(--focus-ring, #0d0d0d); box-shadow: 0 0 0 2px var(--accent-subtle, rgba(13,13,13,.07)); } .ds-composer-input { flex: 1; min-width: 0; max-height: 200px; padding: 8px 0; border: 0; outline: 0; resize: none; background: transparent; color: inherit; font: 400 15px/1.5 ui-sans-serif, system-ui, sans-serif; } .ds-composer-input::placeholder { color: var(--text-secondary, #5d5d5d); } .ds-composer-send { width: 40px; height: 40px; flex: 0 0 40px; padding: 10px; border: 0; border-radius: 50%; background: var(--accent-solid, #0d0d0d); color: var(--text-on-accent, #fff); cursor: pointer; transition: background 200ms ease, transform 150ms ease; } .ds-composer-send:hover { background: var(--accent-hover, #2f2f2f); } .ds-composer-send:focus-visible { outline: 2px solid var(--focus-ring, #0d0d0d); outline-offset: 2px; } .ds-composer-send:active { transform: scale(.95); } .ds-composer-send svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Session Navigation Item",
+      "kind": "nav",
+      "refersTo": "navigation-item",
+      "description": "A compact session row with title, metadata, and a quiet selected state.",
+      "html": "<button class=\"ds-session-item ds-session-item-active\"><span class=\"ds-session-icon\" aria-hidden=\"true\"></span><span class=\"ds-session-copy\"><strong>Character studies</strong><small>12 images</small></span></button>",
+      "css": ".ds-session-item { width: 100%; min-height: 52px; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary, #0d0d0d); text-align: left; cursor: pointer; transition: background 150ms ease; } .ds-session-item:hover, .ds-session-item:focus-visible { background: var(--session-hover-bg, #ececec); } .ds-session-item:focus-visible { outline: 2px solid var(--focus-ring, #0d0d0d); outline-offset: 2px; } .ds-session-item-active { background: var(--accent-subtle, rgba(13,13,13,.07)); } .ds-session-icon { width: 16px; height: 16px; flex: 0 0 16px; border: 1.5px solid var(--icon-color, #5d5d5d); border-radius: 4px; } .ds-session-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; } .ds-session-copy strong { overflow: hidden; color: inherit; font: 500 14px/1.35 ui-sans-serif, system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; } .ds-session-copy small { color: var(--text-secondary, #5d5d5d); font: 400 11px/1.35 ui-sans-serif, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Generated Media Tile",
+      "kind": "card",
+      "refersTo": "media-card",
+      "description": "An output-first media surface with focus-aware actions.",
+      "html": "<article class=\"ds-media-tile\"><div class=\"ds-media-canvas\"><span>Generated media</span><div class=\"ds-media-actions\"><button>Open</button><button>Export</button></div></div></article>",
+      "css": ".ds-media-tile { overflow: hidden; border: 1px solid var(--border-color, #e5e5e5); border-radius: 12px; background: var(--bg-secondary, #f7f7f8); box-shadow: var(--shadow-sm, 0 1px 2px rgba(13,13,13,.08)); transition: box-shadow 200ms ease; } .ds-media-tile:hover, .ds-media-tile:focus-within { box-shadow: var(--shadow-md, 0 4px 12px rgba(13,13,13,.1)); } .ds-media-canvas { position: relative; min-height: 220px; display: grid; place-items: center; overflow: hidden; background: var(--bg-tertiary, #ececec); color: var(--text-secondary, #5d5d5d); font: 500 13px/1.4 ui-sans-serif, system-ui, sans-serif; } .ds-media-actions { position: absolute; right: 0; bottom: 0; left: 0; min-height: 48px; display: flex; justify-content: flex-end; align-items: center; gap: 4px; padding: 10px 8px 8px; background: linear-gradient(to top, rgba(0,0,0,.78), transparent); opacity: 0; pointer-events: none; transition: opacity 160ms ease; } .ds-media-tile:hover .ds-media-actions, .ds-media-tile:focus-within .ds-media-actions { opacity: 1; pointer-events: auto; } .ds-media-actions button { min-height: 32px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; } .ds-media-actions button:hover, .ds-media-actions button:focus-visible { background: rgba(255,255,255,.16); outline: 2px solid #fff; outline-offset: 1px; }"
+    },
+    {
+      "name": "Standard Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "A clear labeled field for prompts, settings, and production parameters.",
+      "html": "<label class=\"ds-field\"><span>Negative prompt</span><input type=\"text\" placeholder=\"Optional\" /></label>",
+      "css": ".ds-field { display: grid; gap: 6px; color: var(--text-primary, #0d0d0d); font: 500 13px/1.4 ui-sans-serif, system-ui, sans-serif; } .ds-field input { height: 40px; padding: 8px 12px; border: 1px solid var(--border-color, #e5e5e5); border-radius: 8px; background: var(--bg-primary, #fff); color: var(--text-primary, #0d0d0d); font: 400 15px/1.5 ui-sans-serif, system-ui, sans-serif; transition: border-color 200ms ease, box-shadow 200ms ease; } .ds-field input::placeholder { color: var(--text-secondary, #5d5d5d); } .ds-field input:hover { border-color: var(--text-secondary, #5d5d5d); } .ds-field input:focus-visible { border-color: var(--focus-ring, #0d0d0d); outline: 2px solid var(--accent-subtle, rgba(13,13,13,.07)); outline-offset: 1px; } .ds-field input:disabled { background: var(--bg-tertiary, #ececec); color: var(--text-secondary, #5d5d5d); cursor: not-allowed; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "A compact semantic state label for generation and processing feedback.",
+      "html": "<span class=\"ds-status-chip\"><span class=\"ds-status-dot\" aria-hidden=\"true\"></span>Processing</span>",
+      "css": ".ds-status-chip { min-height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--control-accent, #2563eb) 32%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--control-accent, #2563eb) 10%, transparent); color: var(--control-accent, #2563eb); font: 500 12px/1.35 ui-sans-serif, system-ui, sans-serif; } .ds-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }"
+    },
+    {
+      "name": "Frame Selection Tile",
+      "kind": "custom",
+      "refersTo": "frame-tile",
+      "description": "A media-workbench tile that distinguishes selected and current-preview states.",
+      "html": "<button class=\"ds-frame-tile ds-frame-selected\"><span class=\"ds-frame-preview\">Frame 24</span><span class=\"ds-frame-badge\">Selected</span></button>",
+      "css": ".ds-frame-tile { position: relative; width: 144px; aspect-ratio: 1; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: 12px; background: repeating-conic-gradient(var(--bg-tertiary, #ececec) 0 25%, var(--bg-secondary, #f7f7f8) 0 50%) 50% / 16px 16px; color: var(--text-secondary, #5d5d5d); cursor: pointer; transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; } .ds-frame-tile:hover { transform: translateY(-1px); box-shadow: var(--shadow-md, 0 4px 12px rgba(13,13,13,.1)); } .ds-frame-tile:focus-visible { outline: 2px solid var(--focus-ring, #0d0d0d); outline-offset: 2px; } .ds-frame-selected { border-color: var(--control-accent, #2563eb); box-shadow: 0 0 0 2px color-mix(in srgb, var(--control-accent, #2563eb) 20%, transparent); } .ds-frame-preview { position: absolute; inset: 0; display: grid; place-items: center; font: 500 12px/1.35 ui-sans-serif, system-ui, sans-serif; } .ds-frame-badge { position: absolute; top: 6px; left: 6px; padding: 2px 6px; border-radius: 4px; background: var(--control-accent, #2563eb); color: #fff; font: 500 11px/1.35 ui-sans-serif, system-ui, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Creator's Workbench",
+    "overview": "ai-draw is a restrained, clear, professional workspace in which generated images and video remain the visual center of gravity. The shell should recede like a well-organized studio bench: familiar controls stay close at hand, advanced controls appear progressively, and each processing state remains legible without competing with the creative output. The system favors earned familiarity over novelty. Neutral surfaces, one system sans family, compact hierarchy, and selective signal blue create a capable and calm product language.",
+    "keyCharacteristics": [
+      "Restrained monochrome surfaces with signal blue reserved for control and state.",
+      "Familiar, reliable components with complete hover, focus, active, disabled, loading, and error states.",
+      "Progressive density: simple at first glance, precise when professional controls are needed.",
+      "Creative output receives the strongest scale, contrast, and available space.",
+      "Structural responsiveness at 768px and 1024px, with 44px touch targets where space permits."
+    ],
+    "rules": [
+      { "name": "The Signal, Not Decoration Rule", "body": "Blue is reserved for interaction state, preview state, and actionable emphasis; it must never become ambient decoration.", "section": "colors" },
+      { "name": "The Output Wins Rule", "body": "UI surfaces remain neutral so generated media always carries the broadest color range on screen.", "section": "colors" },
+      { "name": "The One Family Rule", "body": "Never introduce a display face for product chrome; consistency and scan speed take priority over typographic novelty.", "section": "typography" },
+      { "name": "The Compact Ladder Rule", "body": "Keep adjacent text roles close in scale and use weight intentionally; oversized headings and aggressive tracking are prohibited in task surfaces.", "section": "typography" },
+      { "name": "The Flat-at-Rest Rule", "body": "A surface must earn a shadow by floating, overlapping, or responding to interaction; ordinary grouping uses tone and border first.", "section": "elevation" },
+      { "name": "The One Level Rule", "body": "Never stack shadowed cards inside shadowed cards. Nested hierarchy must use spacing, dividers, or tonal surfaces.", "section": "elevation" },
+      { "name": "The Complete State Rule", "body": "Every interactive component must define default, hover, focus, active, disabled, loading, error, and selected states where applicable.", "section": "components" }
+    ],
+    "dos": [
+      "Do keep generated images and video central by using neutral Canvas and Workbench Surface backgrounds around them.",
+      "Do reserve Signal Blue for selection, preview, progress, and tool state; keep primary actions monochrome.",
+      "Do expose advanced generation and media-processing controls progressively instead of presenting a parameter wall.",
+      "Do make processing, cancellation, failure, undo, and export states visible and reversible where the workflow supports it.",
+      "Do preserve keyboard focus, WCAG AA contrast, reduced-motion behavior, and 44px coarse-pointer targets.",
+      "Do preserve the existing chat shell, session navigation, and integrated media-workbench interaction model."
+    ],
+    "donts": [
+      "Don't make ai-draw look like a toy-like one-click converter with oversized novelty actions or empty decorative promises.",
+      "Don't create cramped parameter dumps; group controls by task and reveal professional depth progressively.",
+      "Don't allow unclear export states; show format, progress, completion, failure, and the next available action.",
+      "Don't turn the product into a generic enterprise dashboard with heavy chrome, ornamental cards, or data-table-first hierarchy.",
+      "Don't make video-to-frame and asset tools feel like unrelated utilities bolted onto the app; they must share the same shell, tokens, and state vocabulary.",
+      "Don't use blue, shadows, gradients, or motion decoratively when they communicate no state or workflow change.",
+      "Don't remove a native focus outline unless an equally visible focus-visible or focus-within replacement is present."
+    ]
+  }
+}
