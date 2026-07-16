@@ -1,6 +1,6 @@
-# ai-draw 生产/SSH 部署 Compose 配置
-# 用于 DOCKER_HOST=ssh://nekocon-server 的远程 Docker Engine 部署。
-# 注意：这里不能使用本机路径 bind mount，否则远程 Docker 会收到 Windows 路径并启动失败。
+# ai-draw 部署 Compose 配置
+# 通过 DOCKER_HOST=ssh://nekocon-server 部署到 Docker Engine。
+# 在本机开发时，~/.ssh/config 中 nekocon-server 指向 127.0.0.1，即部署到本机 Docker Engine。
 
 services:
   # ============================================
@@ -15,7 +15,7 @@ services:
     ports:
       - "${SERVER_PORT:?SERVER_PORT is required}:${SERVER_PORT:?SERVER_PORT is required}"
     volumes:
-      # 前端构建产物共享给 Nginx；部署前会删除该卷以刷新静态资源
+      # 前端构建产物共享给 Caddy；部署前会删除该卷以刷新静态资源
       - frontend-dist:/app/frontend/dist
       # 用户上传文件和生成图片持久化存储
       - uploads-data:/app/uploads
@@ -65,24 +65,24 @@ services:
       - "${DB_PORT:?DB_PORT is required}:5432"
 
   # ============================================
-  # Nginx 反向代理
+  # Caddy 反向代理
   # ============================================
-  nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
-    container_name: ai-draw-nginx
+  caddy:
+    image: caddy:2.11.4-alpine
+    container_name: ai-draw-caddy
     restart: unless-stopped
     ports:
-      - "${FRONTEND_HTTP_PORT:?FRONTEND_HTTP_PORT is required}:80"
-      - "${FRONTEND_HTTPS_PORT:?FRONTEND_HTTPS_PORT is required}:443"
+      # 只绑回环：HTTPS/域名由外层 frp 在云端终止，打到本机回环 14601
+      - "127.0.0.1:${FRONTEND_HTTP_PORT:?FRONTEND_HTTP_PORT is required}:80"
     environment:
       - BACKEND_PORT=${SERVER_PORT:?SERVER_PORT is required}
     volumes:
+      # Caddyfile 配置
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # 从后端镜像初始化出来的前端构建产物
-      - frontend-dist:/usr/share/nginx/html:ro
-      # 共享上传文件给 Nginx 静态文件服务
-      - uploads-data:/usr/share/nginx/uploads:ro
+      - frontend-dist:/srv/frontend:ro
+      # 共享上传文件给 Caddy 静态文件服务
+      - uploads-data:/srv/uploads:ro
     networks:
       - ai-draw-network
     depends_on:

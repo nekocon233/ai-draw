@@ -3,11 +3,11 @@
 ## Project Conventions
 
 - Treat Docker as the source of truth for deployable builds.
-- `docker-compose.yml` is exclusively for deployment through the SSH Docker Engine at `ssh://nekocon-server`. Do not add or restore a local Docker Compose deployment path.
-- The remote deployment uses the complete current worktree, including uncommitted files. Inspect `git status` and `git diff`, preserve unrelated user changes, and never revert them.
-- `docker compose build` does not restart services or refresh the `frontend-dist` volume consumed by Nginx.
+- `docker-compose.yml` deploys through `DOCKER_HOST=ssh://nekocon-server`. On the development machine itself, the SSH alias `nekocon-server` is mapped to `127.0.0.1` in `~/.ssh/config`, so the same task deploys to the local Docker Engine. From another machine, that alias points at the real server. Do not add a second, parallel local Compose path.
+- Deployment uses the complete current worktree, including uncommitted files. Inspect `git status` and `git diff`, preserve unrelated user changes, and never revert them.
+- `docker compose build` does not restart services or refresh the `frontend-dist` volume consumed by Caddy.
 - After implementation changes and local verification, run the VS Code task `deploy: remote` before reporting completion. Documentation-only changes do not require rebuilding the application image.
-- The direct equivalent is `$env:DOCKER_HOST="ssh://nekocon-server"; docker compose down; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker volume rm --force ai-draw_frontend-dist; docker compose build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker compose up -d`.
+- The direct equivalent (Linux shell on the dev machine) is `DOCKER_HOST=ssh://nekocon-server docker compose down; docker volume rm --force ai-draw_frontend-dist; docker compose build; docker compose up -d`. On Windows PowerShell, set `$env:DOCKER_HOST="ssh://nekocon-server"` first.
 - Deployment removes only `frontend-dist`. Preserve `postgres_data`, `uploads-data`, and `huggingface-cache` unless the user explicitly requests destructive cleanup.
 - Manual production testing is normally performed at `https://aidraw.nekocon.cn/`.
 
@@ -153,7 +153,7 @@
 - `utils/image_reference.py` normalizes reference-image input and dimensions.
 - `utils/thread_runner.py` provides a singleton event-loop thread for async work that must not block the FastAPI loop.
 - `utils/file_storage.py` owns upload/generated media paths.
-- `uploads/` is shared with Nginx and exposed under `/uploads` without per-request authorization.
+- `uploads/` is shared with Caddy and exposed under `/uploads` without per-request authorization.
 - The `huggingface-cache` volume persists downloaded model weights across deployments.
 
 ## Verification
@@ -179,10 +179,10 @@
 ## Key Files
 
 - `.env.example`: complete environment variable manifest.
-- `.vscode/tasks.json`: remote deploy, status, logs, and restart tasks.
+- `.vscode/tasks.json`: deploy, status, logs, and restart tasks (all via `DOCKER_HOST=ssh://nekocon-server`).
 - `Dockerfile`: Node/Python multi-stage application image.
-- `docker-compose.yml`: remote FastAPI/PostgreSQL/Nginx composition and persistent volumes.
-- `nginx/nginx.conf.template`: HTTP routing, uploads, API, and WebSocket proxy behavior.
+- `docker-compose.yml`: FastAPI/PostgreSQL/Caddy composition and persistent volumes.
+- `caddy/Caddyfile`: HTTP routing, uploads, API, and WebSocket proxy behavior.
 - `configs/app_config.yaml`: workflow mappings, metadata, and defaults.
 - `configs/workflows/`: ComfyUI API JSON files.
 - `server/main.py`: app lifecycle and router mounting.
