@@ -541,6 +541,7 @@ export interface GuestSessionConfig {
   endFrameCount?: number | null;
   frameRate?: number | null;
   frameCount?: number | null;
+  workflowOptions?: Record<string, string | number>;
 }
 
 /**

@@ -1,18 +1,18 @@
 """
 聊天会话管理 API
 """
-import os
 from datetime import datetime
-from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
+from utils.file_storage import get_file_storage
+from utils.media_file_references import delete_unreferenced_media
 from utils.session_title import get_session_title_generator
 
 router = APIRouter(prefix="/chat")
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/chat")
 # ============ Pydantic 模型 ============
 
 class CreateSessionRequest(BaseModel):
-    session_id: str
+    session_id: str = Field(min_length=1, max_length=50)
     title: Optional[str] = "新对话"
 
 class UpdateSessionTitleRequest(BaseModel):
@@ -35,6 +35,8 @@ class UpdateMessageRequest(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
+    reference_image_end: Optional[str] = None
+    prompt_end: Optional[str] = None
 
 class SessionResponse(BaseModel):
     id: str
@@ -63,8 +65,67 @@ class SessionConfigRequest(BaseModel):
     end_frame_count: Optional[int] = None
     frame_rate: Optional[float] = None
     frame_count: Optional[int] = None
+    workflow_options: Optional[dict] = None
 
 # ============ 会话管理 API ============
+
+
+def _stored_media_paths(messages) -> list[str]:
+    paths = [image.file_path for message in messages for image in list(message.images)]
+    for message in messages:
+        paths.extend(filter(None, (
+            message.reference_image,
+            message.reference_image_2,
+            message.reference_image_3,
+            message.reference_image_end,
+        )))
+    return paths
+
+
+def _serialize_message(message: ChatMessage) -> dict:
+    payload = {
+        'id': message.message_id,
+        'type': message.type,
+        'content': message.content,
+        'timestamp': int(message.created_at.timestamp() * 1000),
+    }
+    if message.type == 'user' and message.workflow:
+        params = {
+            'workflow': message.workflow,
+            'count': message.count,
+            'loraPrompt': message.lora_prompt,
+        }
+        optional_params = {
+            'strength': message.strength,
+            'referenceImage': message.reference_image,
+            'referenceImage2': message.reference_image_2,
+            'referenceImage3': message.reference_image_3,
+            'referenceImageEnd': message.reference_image_end,
+            'promptEnd': message.prompt_end,
+            'frameRate': message.frame_rate,
+            'startFrameCount': message.start_frame_count,
+            'endFrameCount': message.end_frame_count,
+            'frameCount': message.frame_count,
+            'workflowOptions': message.workflow_options,
+        }
+        params.update({key: value for key, value in optional_params.items() if value is not None})
+        payload['params'] = params
+    elif message.type == 'assistant':
+        file_storage = get_file_storage()
+
+        def to_url(path: str) -> str:
+            if path.startswith(('data:', '/')):
+                return path
+            return file_storage.get_file_url(path)
+
+        payload['images'] = [
+            to_url(image.file_path)
+            for image in sorted(
+                message.images,
+                key=lambda item: (item.image_index is None, item.image_index or 0),
+            )
+        ]
+    return payload
 
 @router.get("/sessions", response_model=List[SessionResponse])
 def get_sessions(
@@ -159,8 +220,16 @@ def delete_session(
         )
     
     # 删除会话（级联删除所有消息和图片）
+    file_paths = _stored_media_paths(session.messages)
+    file_paths.extend(filter(None, (
+        session.config_reference_image,
+        session.config_reference_image_2,
+        session.config_reference_image_3,
+        session.config_reference_image_end,
+    )))
     db.delete(session)
     db.commit()
+    delete_unreferenced_media(db, file_paths)
     
     print(f"[Session] 用户 {current_user.username} 删除会话: {session_id}")
     return {"message": "会话删除成功"}
@@ -275,6 +344,18 @@ def update_session_config(
     
     # 更新配置字段（使用 model_dump 检查字段是否显式设置）
     update_data = request.model_dump(exclude_unset=True)
+    stale_reference_paths = []
+    reference_fields = {
+        'reference_image': 'config_reference_image',
+        'reference_image_2': 'config_reference_image_2',
+        'reference_image_3': 'config_reference_image_3',
+        'reference_image_end': 'config_reference_image_end',
+    }
+    for request_field, model_field in reference_fields.items():
+        if request_field in update_data:
+            old_value = getattr(session, model_field)
+            if old_value and old_value != update_data[request_field]:
+                stale_reference_paths.append(old_value)
     
     if 'workflow' in update_data:
         session.config_workflow = update_data['workflow']
@@ -308,9 +389,12 @@ def update_session_config(
         session.config_frame_rate = update_data['frame_rate']
     if 'frame_count' in update_data:
         session.config_frame_count = update_data['frame_count']
+    if 'workflow_options' in update_data:
+        session.config_workflow_options = update_data['workflow_options']
     
     session.updated_at = datetime.now()
     db.commit()
+    delete_unreferenced_media(db, stale_reference_paths)
     
     print(f"[Session] 用户 {current_user.username} 更新会话配置: {session_id}")
     return {"message": "会话配置更新成功"}
@@ -351,7 +435,29 @@ def get_session_config(
         "end_frame_count": session.config_end_frame_count,
         "frame_rate": session.config_frame_rate,
         "frame_count": session.config_frame_count,
+        "workflow_options": session.config_workflow_options,
     }
+
+
+@router.get("/sessions/{session_id}/rounds/{assistant_message_id}")
+def get_message_round(
+    session_id: str,
+    assistant_message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return one user message and its paired assistant response."""
+    if len(assistant_message_id) > 50 or not assistant_message_id.endswith('-reply'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="助手消息 ID 格式无效")
+    source_message_id = assistant_message_id.removesuffix('-reply')
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.message_id.in_((source_message_id, assistant_message_id)),
+    ).order_by(ChatMessage.created_at.asc()).all()
+    if not any(message.message_id == source_message_id and message.type == 'user' for message in messages):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="消息轮次不存在")
+    return {'messages': [_serialize_message(message) for message in messages]}
 
 
 @router.patch("/messages/{message_id}")
@@ -361,7 +467,7 @@ def update_message_content(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """更新用户消息内容，并清空对应 AI 回复的图片（用于编辑后重新生成）"""
+    """更新用户消息内容；旧结果在新生成成功前继续保留。"""
     # 查找用户消息
     user_msg = db.query(ChatMessage).filter(
         ChatMessage.message_id == message_id,
@@ -377,6 +483,12 @@ def update_message_content(
 
     # 更新可编辑字段
     update_data = request.model_dump(exclude_unset=True)
+    stale_reference_paths = []
+    for field in ('reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end'):
+        if field in update_data:
+            old_value = getattr(user_msg, field)
+            if old_value and old_value != update_data[field]:
+                stale_reference_paths.append(old_value)
     if 'content' in update_data:
         user_msg.content = update_data['content']
     if 'reference_image' in update_data:
@@ -385,31 +497,13 @@ def update_message_content(
         user_msg.reference_image_2 = update_data['reference_image_2']
     if 'reference_image_3' in update_data:
         user_msg.reference_image_3 = update_data['reference_image_3']
-
-    # 找到紧随其后的 AI 回复，清空其图片记录（为重新生成留空）
-    assistant_msg = db.query(ChatMessage).filter(
-        ChatMessage.session_id == user_msg.session_id,
-        ChatMessage.type == 'assistant',
-        ChatMessage.created_at > user_msg.created_at
-    ).order_by(ChatMessage.created_at.asc()).first()
-
-    if assistant_msg:
-        try:
-            from utils.config_loader import get_config
-            upload_dir = Path(get_config().paths.upload_dir)
-        except Exception:
-            upload_dir = None
-
-        for img in list(assistant_msg.images):
-            if img.file_path and not img.file_path.startswith('data:') and upload_dir:
-                try:
-                    (upload_dir / img.file_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
-            db.delete(img)
-        db.flush()
+    if 'reference_image_end' in update_data:
+        user_msg.reference_image_end = update_data['reference_image_end']
+    if 'prompt_end' in update_data:
+        user_msg.prompt_end = update_data['prompt_end']
 
     db.commit()
+    delete_unreferenced_media(db, stale_reference_paths)
     print(f"[Session] 用户 {current_user.username} 编辑消息内容: {message_id}")
     return {"updated": True}
 
@@ -448,37 +542,26 @@ def delete_message_round(
             detail="消息不存在"
         )
 
-    # 查找紧随其后的 AI 回复（同一会话内、created_at 大于用户消息、按时间升序取第一条）
+    # 助手消息 ID 与用户消息 ID 精确配对，避免误删下一轮的回复。
     assistant_msg = db.query(ChatMessage).filter(
         ChatMessage.session_id == session_id,
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.message_id == f'{message_id}-reply',
         ChatMessage.type == 'assistant',
-        ChatMessage.created_at > user_msg.created_at
-    ).order_by(ChatMessage.created_at.asc()).first()
+    ).first()
 
     # 收集需要删除的磁盘文件
     messages_to_delete = [user_msg]
     if assistant_msg:
         messages_to_delete.append(assistant_msg)
 
-    try:
-        from utils.config_loader import get_config
-        upload_dir = Path(get_config().paths.upload_dir)
-    except Exception:
-        upload_dir = None
-
-    for msg in messages_to_delete:
-        for img in msg.images:
-            if img.file_path and not img.file_path.startswith('data:') and upload_dir:
-                try:
-                    full_path = upload_dir / img.file_path
-                    full_path.unlink(missing_ok=True)
-                except Exception:
-                    pass  # 文件已不存在，忽略
+    file_paths = _stored_media_paths(messages_to_delete)
 
     # 删除消息（ORM cascade 会自动删除关联的 GeneratedImage）
     for msg in messages_to_delete:
         db.delete(msg)
     db.commit()
+    delete_unreferenced_media(db, file_paths)
 
     print(f"[Session] 用户 {current_user.username} 删除消息轮次: {message_id}")
     return {"deleted": True}

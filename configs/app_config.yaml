@@ -17,6 +17,7 @@ workflow_defaults:
     i2i: "qwen_image_edit_workflow_api.json"
     flf2v: "flf2v_workflow_api.json"
     i2v: "i2v_workflow_api.json"
+    minimax_h3: "minimax_h3_workflow_api.json"
     image_upscale: "image_upscale_workflow_api.json"
     image_upscale_invsr: "image_upscale_invsr_workflow_api.json"
   # 工作流元数据
@@ -101,10 +102,10 @@ workflow_defaults:
           type: "text"
           default: "一个女孩"
     gpt_image:
-      label: "图生图（GPT Image 2.0）"
-      description: "基于 OpenAI 兼容 API 的图生图编辑"
+      label: "图生图（GPT Image · Codex 订阅）"
+      description: "使用 Codex 订阅额度生成或编辑图片，支持多张参考图"
       category: "图生图"
-      method: "GPT Image 2.0"
+      method: "GPT Image（Codex 订阅）"
       requires_image: false
       supports_multi_image: true
       output_type: "image"
@@ -208,3 +209,27 @@ workflow_defaults:
           max: 60
           step: 1
           default: 16
+    minimax_h3:
+      label: "全模态视频（MiniMax H3）"
+      description: "支持文本及可选首尾关键帧，原生生成同步双声道音视频"
+      category: "图生视频"
+      method: "MiniMax H3"
+      requires_image: false
+      supports_optional_keyframes: true
+      output_type: "video"
+      prompt_template: "你是一个 MiniMax H3 音视频提示词专家。请把以下描述扩写成完整的中文音视频生成提示词：按时间顺序描述镜头、主体动作、场景变化和运镜，并明确对白、环境音、音效与配乐；如果涉及屏幕文字或品牌元素，准确写出文字内容。只输出可直接用于生成的提示词，不要解释：\n描述：{desc}"
+      parameters:
+        - name: "prompt"
+          label: "音视频描述"
+          type: "text"
+          default: "电影感镜头，人物自然运动，环境音与配乐同步"
+        - name: "h3_duration"
+          label: "时长（秒）"
+          type: "select"
+          options: ["4", "5", "6", "8", "10", "12", "15"]
+          default: "5"
+        - name: "h3_aspect_ratio"
+          label: "画幅（可选）"
+          type: "select"
+          options: ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
+          default: "auto"

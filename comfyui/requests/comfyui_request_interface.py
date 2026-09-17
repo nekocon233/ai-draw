@@ -48,8 +48,8 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """获取 ComfyUI 单个节点能力。"""
 
     @abstractmethod
-    async def interrupt(self) -> None:
-        """中断当前 ComfyUI 队列任务。"""
+    async def interrupt(self, task=None) -> None:
+        """中断指定协程提交的 ComfyUI 队列任务。"""
 
     @abstractmethod
     async def upscale_image(self, workflow, image_b64: str, model_name: str, scale: int, native_scale: int) -> ComfyUIRequestResult:
@@ -99,6 +99,19 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """
         图生视频（Image-to-Video）推理请求，由子类实现
         """
+
+    @abstractmethod
+    async def generate_minimax_h3(
+        self,
+        workflow,
+        prompt_text: str,
+        seed: int,
+        start_image_base64=None,
+        end_image_base64=None,
+        duration: float = 5,
+        aspect_ratio: str = "auto",
+    ) -> ComfyUIRequestResult:
+        """MiniMax H3 文本/可选首尾帧音视频生成请求。"""
 
     @abstractmethod
     async def get_state(self) -> ComfyUIRequestState:

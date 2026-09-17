@@ -87,7 +87,7 @@
 - Selectable workflow IDs are the metadata keys: `t2i`, `i2i`, `nano_banana_pro`, `gpt_image`, `flf2v`, `kling_flf2v`, and `i2v`.
 - `t2i`: ComfyUI Z-Image text-to-image.
 - `i2i`: ComfyUI Q-Image editing with up to three references and original-size support.
-- `nano_banana_pro`: Gemini image generation/editing with optional multi-image context.
+- `nano_banana_pro`: Gemini image generation/editing single-turn with optional multi-image context.
 - `gpt_image`: OpenAI-compatible image generation/editing with optional multi-image input.
 - `flf2v`: ComfyUI Wan first/last-frame video with loop and frame controls.
 - `kling_flf2v`: Kling first/last-frame video.
@@ -102,7 +102,6 @@
 - For an external API workflow, add environment-backed configuration, an API client, explicit `AIDrawService` dispatch, metadata, backend schemas, and frontend request types. Do not add a dummy ComfyUI JSON.
 - For an internal utility workflow, add only the `workflow_files` mapping and consuming backend logic unless it should be selectable by users.
 - Workflow discovery is dynamic, but behavior is not fully metadata-driven. Search for hardcoded IDs in `server/ai_draw_service.py`, `frontend/src/stores/appStore.ts`, `ChatInput.tsx`, and `SettingsModal.tsx`.
-- `send_history` exists in generation schemas but backend history behavior is currently controlled primarily by whether a chat `session_id` is sent. Verify behavior before changing Gemini history logic.
 
 ## Frontend Architecture
 
@@ -138,7 +137,7 @@
 - `comfyui/requests/local_comfyui_request.py`: active HTTP ComfyUI implementation.
 - Preserve existing UTF-8/GBK compatibility when touching temporary workflow files.
 - In remote Docker, `COMFYUI_HOST=comfyui` works only if that hostname is reachable from `ai-draw-network`; this Compose file does not create a ComfyUI service.
-- `utils/gemini_chat.py`: Gemini/Nano Banana image generation and conversation context.
+- `utils/gemini_chat.py`: Gemini/Nano Banana single-turn image generation.
 - `utils/openai_image.py`: OpenAI-compatible image generation/editing.
 - `utils/kling_video.py`: Kling generation, polling, and download.
 - `utils/pixel_lab.py`: latent PixelLab integration, currently absent from selectable metadata.

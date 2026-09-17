@@ -11,9 +11,19 @@ import { useAppStore } from './stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import { AUTH_REQUIRED_EVENT, clearAccessToken, getAccessTokenExpiry, isLoggedIn } from './utils/helpers';
 import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
+import type { LastTaskInfo } from './types/api';
 import './App.css';
 
 const ResultGrid = lazy(() => import('./components/ResultGrid'));
+
+type ApiChatMessage = {
+  id: string;
+  type: 'user' | 'assistant';
+  content?: string;
+  images?: Array<string | { loading: true }>;
+  timestamp: number;
+  params?: import('./types/models').ChatMessage['params'];
+};
 
 function AppContent() {
   const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore(useShallow(state => ({
@@ -63,7 +73,11 @@ function AppContent() {
     const lockApplication = () => {
       setForceLoginOpen(true);
       wsManager.disconnect();
-      useAppStore.setState({ isGenerating: false, currentGeneratingMessageId: null });
+      useAppStore.setState({
+        isGenerating: false,
+        currentGeneratingMessageId: null,
+        currentGenerationTaskId: null,
+      });
     };
     const handleStorage = (event: StorageEvent) => {
       if (event.key === 'access_token' && !event.newValue) lockApplication();
@@ -78,42 +92,101 @@ function AppContent() {
 
   // 数据加载和 WebSocket 连接
   useEffect(() => {
-    // 加载用户配置和聊天历史（登录用户从后端加载，游客从 localStorage 加载）
+    let disposed = false;
+
     const loadData = async () => {
-      // 1. 先加载默认配置（从后端获取）
       await useAppStore.getState().loadDefaultConfig();
-      
-      // 2. 加载可用工作流列表
       await useAppStore.getState().loadAvailableWorkflows();
-      
-      // 3. 如果已登录，加载用户配置（会覆盖默认配置）
-      if (isLoggedIn()) {
-        await loadUserConfig();
-      }
-      
-      // 4. 加载会话列表（switchSession 会自动加载对应会话的历史）
+      if (isLoggedIn()) await loadUserConfig();
       await loadSessions();
     };
-    loadData();
 
-    // 连接 WebSocket
-    if (isLoggedIn()) wsManager.connect();
+    const refreshMessageRound = async (sessionId: string, assistantMessageId: string) => {
+      try {
+        const response = await apiService.getMessageRound(sessionId, assistantMessageId);
+        if (disposed || useAppStore.getState().currentSessionId !== sessionId) return [];
+        const round = (response.messages as ApiChatMessage[]).map(item => ({
+          id: item.id,
+          session_id: sessionId,
+          type: item.type,
+          content: item.content || '',
+          images: item.images || [],
+          timestamp: item.timestamp,
+          params: item.params,
+        }));
+        const roundById = new Map(round.map(item => [item.id, item]));
+        useAppStore.setState(current => ({
+          chatHistory: current.chatHistory.map(item => roundById.get(item.id) ?? item),
+        }));
+        const assistant = round.find(item => item.id === assistantMessageId);
+        return (assistant?.images ?? []).filter((image): image is string => typeof image === 'string');
+      } catch (error) {
+        console.error('刷新任务轮次失败:', error);
+        return [];
+      }
+    };
 
-    // 订阅 WebSocket 消息
     const unsubscribe = wsManager.subscribe((message) => {
-      // 处理初始状态（连接/重连时服务端推送）
       if (message.type === 'initial_state' && message.data) {
-        // 若服务端未在生成，但前端仍认为在生成（服务重启/断线场景），立即重置
-        if (!message.data.is_generating) {
+        const serverIsGenerating = message.data.is_generating === true;
+        const lastTask = (message.data.last_task as LastTaskInfo | null) ?? null;
+
+        if (serverIsGenerating && lastTask && lastTask.status === 'running' && lastTask.message_id) {
+          const state = useAppStore.getState();
+          if (
+            state.currentGeneratingMessageId !== lastTask.message_id
+            || state.currentGenerationTaskId !== (lastTask.task_id ?? null)
+          ) {
+            useAppStore.setState({
+              currentGeneratingMessageId: lastTask.message_id,
+              currentGenerationTaskId: lastTask.task_id ?? null,
+              isGenerating: true,
+            });
+            messageApi.info('检测到正在进行的生成任务，已恢复显示');
+          }
+          return;
+        }
+
+        if (
+          lastTask &&
+          lastTask.message_id &&
+          lastTask.session_id &&
+          (lastTask.status === 'completed' || lastTask.status === 'error')
+        ) {
+          const currentSessionId = useAppStore.getState().currentSessionId;
+          useAppStore.setState({
+            isGenerating: false,
+            currentGeneratingMessageId: null,
+            currentGenerationTaskId: null,
+          });
+          if (lastTask.session_id === currentSessionId) {
+            void refreshMessageRound(lastTask.session_id, lastTask.message_id).then(images => {
+              if (lastTask.status === 'completed' && images.length > 0) {
+                const isVideo = images.some(url => /\.(mp4|webm)$/i.test(url) || url.includes('/video/'));
+                messageApi.success(`生成已完成（连接恢复），共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
+              } else if (lastTask.status === 'error') {
+                messageApi.error('上次生成失败: ' + (lastTask.error || '未知错误'));
+              }
+            });
+          } else if (lastTask.status === 'error') {
+            messageApi.error('上次生成失败: ' + (lastTask.error || '未知错误'));
+          }
+          return;
+        }
+
+        if (!serverIsGenerating) {
           const { currentGeneratingMessageId, isGenerating, chatHistory } = useAppStore.getState();
           if (isGenerating || currentGeneratingMessageId) {
-            // 保留断线前已通过 media_generated 收到的媒体（如视频），而非无条件清空
             if (currentGeneratingMessageId) {
               const msg = chatHistory.find(m => m.id === currentGeneratingMessageId);
               const existingImages = (msg?.images?.filter(img => typeof img === 'string') ?? []) as string[];
-              useAppStore.getState().updateChatImages(currentGeneratingMessageId, existingImages);
+              useAppStore.getState().updateChatImages(currentGeneratingMessageId, existingImages, false);
             }
-            useAppStore.setState({ isGenerating: false, currentGeneratingMessageId: null });
+            useAppStore.setState({
+              isGenerating: false,
+              currentGeneratingMessageId: null,
+              currentGenerationTaskId: null,
+            });
             messageApi.warning('连接已恢复，生成任务状态已重置');
           }
         }
@@ -121,45 +194,51 @@ function AppContent() {
       }
 
       if (message.type === WS_MESSAGE_TYPES.STATE_CHANGE) {
-        // 监听生成状态变化（仅当前设备有生成任务时才更新）
+        const taskState = useAppStore.getState();
+        if (message.task_id && message.task_id !== taskState.currentGenerationTaskId) return;
+        if (!message.task_id && message.message_id && message.message_id !== taskState.currentGeneratingMessageId) return;
+
         if (message.field === STATE_FIELDS.IS_GENERATING) {
-          const { currentGeneratingMessageId, isGenerating: wasGenerating } = useAppStore.getState();
-          
-          // 只有当前设备正在生成时才更新状态
+          const {
+            currentGeneratingMessageId,
+            isGenerating: wasGenerating,
+          } = useAppStore.getState();
           if (currentGeneratingMessageId) {
             useAppStore.setState({ isGenerating: message.value });
-            
-            // 生成完成时（从 true 变为 false），保存助手消息到数据库
             if (wasGenerating && !message.value) {
-              const currentHistory = useAppStore.getState().chatHistory;
-              const msg = currentHistory.find(m => m.id === currentGeneratingMessageId);
-              const images = (msg?.images?.filter(img => typeof img === 'string') ?? []) as string[];
-              // 无论是否有图片，都必须调用 updateChatImages 清除 loading 占位符
-              useAppStore.getState().updateChatImages(currentGeneratingMessageId, images);
-              if (images.length > 0) {
-                const isVideo = images.some(u => /\.(mp4|webm)$/i.test(u) || u.includes('/video/'));
-                messageApi.success(`生成完成！共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
+              const sessionId = message.session_id;
+              useAppStore.setState({
+                currentGeneratingMessageId: null,
+                currentGenerationTaskId: null,
+              });
+              if (sessionId) {
+                void refreshMessageRound(sessionId, currentGeneratingMessageId).then(images => {
+                  if (images.length > 0) {
+                    const isVideo = images.some(url => /\.(mp4|webm)$/i.test(url) || url.includes('/video/'));
+                    messageApi.success(`生成完成！共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
+                  }
+                });
               }
-              // 清除当前生成任务ID
-              useAppStore.setState({ currentGeneratingMessageId: null });
             }
           }
         }
 
-        // 监听生成错误（WebSocket 推送错误信息）
         if (message.field === STATE_FIELDS.ERROR && message.value) {
           const { currentGeneratingMessageId } = useAppStore.getState();
           if (currentGeneratingMessageId) {
-            useAppStore.getState().updateChatImages(currentGeneratingMessageId, []);
-            useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
+            const sessionId = message.session_id;
+            useAppStore.setState({
+              currentGeneratingMessageId: null,
+              currentGenerationTaskId: null,
+              isGenerating: false,
+            });
+            if (sessionId) void refreshMessageRound(sessionId, currentGeneratingMessageId);
           }
           messageApi.error('生成失败: ' + message.value);
         }
-        
-        // 监听单张图片生成完成
+
         if (message.field === STATE_FIELDS.MEDIA_GENERATED && message.value) {
           const { image, index } = message.value;
-          // 只处理当前设备正在生成的消息
           const { currentGeneratingMessageId } = useAppStore.getState();
           if (currentGeneratingMessageId) {
             useAppStore.getState().appendChatMedia(currentGeneratingMessageId, image, index);
@@ -168,12 +247,16 @@ function AppContent() {
       }
     });
 
-    // 获取初始服务状态
+    void loadData().then(() => {
+      if (!disposed && isLoggedIn()) wsManager.connect();
+    });
+
     apiService.getServiceStatus()
       .then(status => setServiceStatus(status))
       .catch(err => setError(err.message));
 
     return () => {
+      disposed = true;
       unsubscribe();
       wsManager.disconnect();
     };

@@ -42,6 +42,25 @@ services:
     command: python run.py
 
   # ============================================
+  # Codex 订阅图片代理：验证账号可用后在 .env 启用 COMPOSE_PROFILES=codex-proxy
+  # API 仅在现有 Docker 网络内提供；OAuth 凭据由独立数据卷持久化。
+  # ============================================
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:v7.3.6
+    profiles: ["codex-proxy"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/cli-proxy-api/entrypoint.sh"]
+    environment:
+      - GPT_IMAGE_API_KEY=${GPT_IMAGE_API_KEY:-}
+    volumes:
+      - ./configs/cliproxy/entrypoint.sh:/etc/cli-proxy-api/entrypoint.sh:ro
+      - codex-proxy-auth:/root/.cli-proxy-api
+    expose:
+      - "8317"
+    networks:
+      - ai-draw-network
+
+  # ============================================
   # PostgreSQL 数据库
   # ============================================
   postgres:
@@ -106,4 +125,6 @@ volumes:
   huggingface-cache:
     driver: local
   frontend-dist:
+    driver: local
+  codex-proxy-auth:
     driver: local

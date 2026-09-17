@@ -1,7 +1,7 @@
 """
 数据库 ORM 模型
 """
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from server.database import Base
@@ -88,6 +88,7 @@ class ChatSession(Base):
     config_end_frame_count = Column(Integer, nullable=True)                 # flf2v 结束帧长度
     config_frame_rate = Column(Float, nullable=True)                        # flf2v 帧率
     config_frame_count = Column(Integer, nullable=True)                     # i2v 总帧数
+    config_workflow_options = Column(JSON, nullable=True)                   # 元数据驱动的工作流参数
     
     # 关系
     user = relationship("User", back_populates="sessions")
@@ -118,6 +119,7 @@ class ChatMessage(Base):
     start_frame_count = Column(Integer, nullable=True)  # flf2v 起始帧长度
     end_frame_count = Column(Integer, nullable=True)    # flf2v 结束帧长度
     frame_count = Column(Integer, nullable=True)        # i2v 总帧数
+    workflow_options = Column(JSON, nullable=True)      # 元数据驱动的工作流参数
     
     created_at = Column(DateTime, default=datetime.now, index=True)
     
@@ -129,6 +131,9 @@ class ChatMessage(Base):
 class GeneratedImage(Base):
     """生成的图片表"""
     __tablename__ = "generated_images"
+    __table_args__ = (
+        UniqueConstraint('message_id', 'image_index', name='uq_generated_images_message_index'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     message_id = Column(String(50), ForeignKey("chat_messages.message_id", ondelete="CASCADE"), nullable=False)

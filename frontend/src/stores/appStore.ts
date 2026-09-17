@@ -21,6 +21,7 @@ import { clearScrollPosition } from '../utils/scrollPosition';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession } from '../types/models';
 import type { WorkflowMetadata, WorkflowParameterValue } from '../types/api';
+import { getWorkflowOptions } from '../utils/workflowOptions';
 
 interface ChatMessage {
   id: string;
@@ -44,6 +45,7 @@ interface ChatMessage {
     startFrameCount?: number;  // flf2v 起始帧长度
     endFrameCount?: number;    // flf2v 结束帧长度
     frameCount?: number;       // i2v 总帧数
+    workflowOptions?: Record<string, WorkflowParameterValue>;
   }
 }
 
@@ -86,6 +88,7 @@ interface AppState {
   isGenerating: boolean;
   isGeneratingPrompt: boolean;
   currentGeneratingMessageId: string | null; // 当前正在生成的消息ID
+  currentGenerationTaskId: string | null;
   
   // 当前工作流
   currentWorkflow: string;
@@ -114,9 +117,6 @@ interface AppState {
   pixelLabDirection: string;      // 朝向
   // select 类型参数的运行时值（按参数名存，如 { duration, aspect_ratio, resolution }），跨工作流共享；切换工作流时按当前可选项校验、必要时重置；仅前端 localStorage 持久化
   selectOptions: Record<string, WorkflowParameterValue>;
-  
-  // Gemini 多轮对话开关（nano_banana_pro 专用）
-  nanoBananaSendHistory: boolean;
 
   // 各多方式分组（如图生图、图生视频）记住的上次所选方式：category -> workflow key
   rememberedMethod: Record<string, string>;
@@ -162,7 +162,6 @@ interface AppState {
   setEndFrameCount: (v: number | null) => void;
   setFrameRate: (v: number | null) => void;
   setFrameCount: (v: number | null) => void;
-  setNanoBananaSendHistory: (v: boolean) => void;
   setPixelLabAction: (v: string) => void;
   setPixelLabView: (v: string) => void;
   setPixelLabDirection: (v: string) => void;
@@ -171,14 +170,14 @@ interface AppState {
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
   setReferenceImageEnd: (image: string | null) => void;
-  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null; frameCount?: number | null }) => Promise<string>;
-  updateChatImages: (messageId: string, images: string[]) => void;
+  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null; frameCount?: number | null; workflowOptions?: Record<string, WorkflowParameterValue> }) => Promise<{ messageId: string; sessionId: string } | null>;
+  updateChatImages: (messageId: string, images: string[], persist?: boolean) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   deleteChatMessage: (messageId: string) => Promise<void>;
   editAndRegenerateMessage: (
     userMsgId: string,
     newContent: string,
-    newRefImages: { referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null },
+    newRefImages: { referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null },
     newPromptEnd?: string
   ) => Promise<void>;
   clearChatHistory: () => void;
@@ -319,6 +318,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isGenerating: false,
   isGeneratingPrompt: false,
   currentGeneratingMessageId: null,
+  currentGenerationTaskId: null,
   currentWorkflow: initialConfig.currentWorkflow,
   availableWorkflows: [], // 初始为空，从后端动态获取
   prompt: initialConfig.prompt,
@@ -339,7 +339,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   pixelLabView: 'sidescroller',
   pixelLabDirection: 'east',
   selectOptions: (() => { try { return JSON.parse(localStorage.getItem('selectOptions') || '{}'); } catch { return {}; } })(),
-  nanoBananaSendHistory: localStorage.getItem('nanoBananaSendHistory') === 'true',
   rememberedMethod: (() => { try { return JSON.parse(localStorage.getItem('rememberedMethod') || '{}'); } catch { return {}; } })(),
   referenceImage: initialConfig.referenceImage,
   referenceImage2: null,
@@ -496,10 +495,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
-  setNanoBananaSendHistory: (v) => {
-    set({ nanoBananaSendHistory: v });
-    localStorage.setItem('nanoBananaSendHistory', String(v));
-  },
   setPixelLabAction: (v) => {
     set({ pixelLabAction: v });
     get().saveSessionConfig();
@@ -517,7 +512,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ selectOptions: updated });
     localStorage.setItem('selectOptions', JSON.stringify(updated));
   },
-  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount }) => {
+  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount, workflowOptions }) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -539,10 +534,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             sessions: [newSession, ...state.sessions], // 新会话放在最前面
             currentSessionId: sessionId 
           });
+          get().saveSessionConfig(true);
         } catch (err) {
           console.error('创建会话失败:', err);
           set({ error: '创建会话失败，请重试' });
-          return '';
+          return null;
         }
       } else {
         // 游客模式：创建本地会话
@@ -567,9 +563,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!sessionId) {
       console.error('无法创建消息：会话ID为空');
       set({ error: '会话创建失败，请重试' });
-      return '';
+      return null;
     }
-    const messageId = `msg-${Date.now()}`;
+    const messageId = `msg-${crypto.randomUUID()}`;
     const userMessage: ChatMessage = {
       id: messageId,
       session_id: sessionId,
@@ -588,6 +584,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         startFrameCount: startFrameCount ?? undefined,
         endFrameCount: endFrameCount ?? undefined,
         frameCount: frameCount ?? undefined,
+        workflowOptions,
       }
     };
     const assistantMessage: ChatMessage = {
@@ -597,7 +594,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       content: '',
       images: [{ loading: true as const }],
       timestamp: Date.now(),
-      params: { workflow, strength, count, loraPrompt, isLoop, frameRate: frameRate ?? undefined, startFrameCount: startFrameCount ?? undefined, endFrameCount: endFrameCount ?? undefined } // 存储总数用于判断
+      params: { workflow, strength, count, loraPrompt, isLoop, frameRate: frameRate ?? undefined, startFrameCount: startFrameCount ?? undefined, endFrameCount: endFrameCount ?? undefined, workflowOptions } // 存储总数用于判断
     };
     set((state) => {
       const newHistory = [...state.chatHistory, userMessage, assistantMessage];
@@ -622,43 +619,64 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatHistory: newHistory,
         sessions: updatedSessions,
         currentGeneratingMessageId: `${messageId}-reply`, // 设置当前生成任务ID
+        currentGenerationTaskId: null,
         isGenerating: true,
       };
     });
     
-    // 登录用户：异步保存用户消息
+    // 登录用户：先落库用户消息，避免助手占位消息先写入导致轮次顺序反转。
     if (isLoggedIn()) {
-      apiService.saveChatMessage({
-        session_id: sessionId,
-        message_id: messageId,
-        type: 'user',
-        content: prompt,
-        workflow,
-        strength,
-        count,
-        lora_prompt: loraPrompt,
-        reference_image: referenceImage || undefined,
-        reference_image_2: referenceImage2 || undefined,
-        reference_image_3: referenceImage3 || undefined,
-        reference_image_end: referenceImageEnd || undefined,
-        prompt_end: promptEnd || undefined,
-        frame_rate: frameRate ?? undefined,
-        start_frame_count: startFrameCount ?? undefined,
-        end_frame_count: endFrameCount ?? undefined,
-        frame_count: frameCount ?? undefined,
-      }).then(async () => {
-        const response = await apiService.summarizeSessionTitle(sessionId);
+      try {
+        await apiService.saveChatMessage({
+          session_id: sessionId,
+          message_id: messageId,
+          type: 'user',
+          content: prompt,
+          workflow,
+          strength,
+          count,
+          lora_prompt: loraPrompt,
+          reference_image: referenceImage || undefined,
+          reference_image_2: referenceImage2 || undefined,
+          reference_image_3: referenceImage3 || undefined,
+          reference_image_end: referenceImageEnd || undefined,
+          prompt_end: promptEnd || undefined,
+          frame_rate: frameRate ?? undefined,
+          start_frame_count: startFrameCount ?? undefined,
+          end_frame_count: endFrameCount ?? undefined,
+          frame_count: frameCount ?? undefined,
+          workflow_options: workflowOptions,
+        });
+        void apiService.summarizeSessionTitle(sessionId).then(response => {
+          set(current => ({
+            sessions: current.sessions.map(session =>
+              session.id === sessionId ? { ...session, title: response.title } : session
+            ),
+          }));
+        }).catch(err => console.error('总结会话标题失败:', err));
+      } catch (err) {
+        console.error('保存用户消息失败:', err);
         set(current => ({
-          sessions: current.sessions.map(session =>
-            session.id === sessionId ? { ...session, title: response.title } : session
+          chatHistory: current.chatHistory.filter(
+            message => message.id !== messageId && message.id !== `${messageId}-reply`,
           ),
+          sessions: current.sessions.map(session =>
+            session.id === sessionId
+              ? { ...session, message_count: Math.max(0, session.message_count - 2) }
+              : session
+          ),
+          currentGeneratingMessageId: null,
+          currentGenerationTaskId: null,
+          isGenerating: false,
+          error: '保存消息失败，请重试',
         }));
-      }).catch(err => console.error('保存用户消息或总结标题失败:', err));
+        return null;
+      }
     }
     
-    return `${messageId}-reply`;
+    return { messageId: `${messageId}-reply`, sessionId };
   },
-  updateChatImages: (messageId, images) => {
+  updateChatImages: (messageId, images, persist = true) => {
     set((state) => {
       const newHistory = state.chatHistory.map((msg) =>
         msg.id === messageId
@@ -683,7 +701,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     
     // 登录用户：异步保存 AI 消息
-    if (isLoggedIn()) {
+    if (persist && isLoggedIn()) {
       const state = useAppStore.getState();
       const message = state.chatHistory.find(msg => msg.id === messageId);
       if (message && message.type === 'assistant') {
@@ -814,68 +832,46 @@ export const useAppStore = create<AppState>((set, get) => ({
     const nextMsg = state.chatHistory[msgIndex + 1];
     if (!nextMsg || nextMsg.type !== 'assistant') return;
     const assistantMsgId = nextMsg.id;
-
-    const count = userMsg.params?.count || 1;
-    const loadingImages = Array.from({ length: count }, () => ({ loading: true as const }));
-
-    // 更新 state：修改用户消息内容 + 重置 AI 回复为 loading 状态
-    set((s) => ({
-      chatHistory: s.chatHistory.map((msg) => {
-        if (msg.id === userMsgId) {
-          return {
-            ...msg,
-            content: newContent,
-            params: {
-              ...msg.params!,
-              referenceImage: newRefImages.referenceImage !== undefined
-                ? (newRefImages.referenceImage || undefined)
-                : msg.params?.referenceImage,
-              referenceImage2: newRefImages.referenceImage2 !== undefined
-                ? (newRefImages.referenceImage2 || undefined)
-                : msg.params?.referenceImage2,
-              referenceImage3: newRefImages.referenceImage3 !== undefined
-                ? (newRefImages.referenceImage3 || undefined)
-                : msg.params?.referenceImage3,
-              promptEnd: newPromptEnd !== undefined ? (newPromptEnd || undefined) : msg.params?.promptEnd,
-            },
-          };
-        }
-        if (msg.id === assistantMsgId) {
-          return { ...msg, images: loadingImages };
-        }
-        return msg;
-      }),
-      currentGeneratingMessageId: assistantMsgId,
-      isGenerating: true,
-    }));
-
-    // 登录用户：先等待数据库更新完成，再触发生成（避免与 generateMedia 的竞态条件）
-    if (isLoggedIn()) {
-      try {
-        await apiService.updateMessageContent(userMsgId, {
-          content: newContent,
-          reference_image: newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : undefined,
-          reference_image_2: newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : undefined,
-          reference_image_3: newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : undefined,
-        });
-      } catch (err) {
-        console.error('更新消息内容失败:', err);
-      }
-    } else {
-      // 游客模式：更新 localStorage
-      const updated = get();
-      saveGuestSessionHistory(sessionId, updated.chatHistory);
-    }
-
-    // 触发重新生成
     const params = userMsg.params!;
-    // nano_banana_pro 时读取当前 nanoBananaSendHistory 状态，与 ChatInput.tsx 保持一致
-    const isNanoBananaPro = params.workflow === 'nano_banana_pro';
-    const sendHistory = isNanoBananaPro ? get().nanoBananaSendHistory : false;
+    const count = params.workflow === 'minimax_h3' ? 1 : (params.count || 1);
     const finalImg1 = newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : params.referenceImage;
     const finalImg2 = newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : params.referenceImage2;
     const finalImg3 = newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : params.referenceImage3;
+    const finalImgEnd = newRefImages.referenceImageEnd !== undefined ? newRefImages.referenceImageEnd : params.referenceImageEnd;
     const finalPromptEnd = newPromptEnd !== undefined ? newPromptEnd : params.promptEnd;
+    const previousAssistantImages = nextMsg.images ?? [];
+    const hasExistingResult = previousAssistantImages.some(image => typeof image === 'string');
+    const pendingImages = hasExistingResult
+      ? previousAssistantImages
+      : Array.from({ length: count }, () => ({ loading: true as const }));
+    const generationTaskId = crypto.randomUUID();
+
+    set((current) => ({
+      chatHistory: current.chatHistory.map((message) => {
+        if (message.id === userMsgId) {
+          return {
+            ...message,
+            content: newContent,
+            params: {
+              ...message.params!,
+              referenceImage: finalImg1 || undefined,
+              referenceImage2: finalImg2 || undefined,
+              referenceImage3: finalImg3 || undefined,
+              referenceImageEnd: finalImgEnd || undefined,
+              promptEnd: finalPromptEnd || undefined,
+              count,
+            },
+          };
+        }
+        if (message.id === assistantMsgId) return { ...message, images: pendingImages };
+        return message;
+      }),
+      currentGeneratingMessageId: assistantMsgId,
+      currentGenerationTaskId: generationTaskId,
+      isGenerating: true,
+    }));
+
+    if (!isLoggedIn()) saveGuestSessionHistory(sessionId, get().chatHistory);
 
     try {
       await apiService.generateMedia({
@@ -887,28 +883,34 @@ export const useAppStore = create<AppState>((set, get) => ({
         reference_image: finalImg1 || undefined,
         reference_image_2: finalImg2 || undefined,
         reference_image_3: finalImg3 || undefined,
-        reference_image_end: params.referenceImageEnd || undefined,
+        reference_image_end: finalImgEnd || undefined,
         prompt_end: finalPromptEnd || undefined,
         is_loop: params.isLoop,
         frame_rate: params.frameRate ?? undefined,
         start_frame_count: params.startFrameCount ?? undefined,
         end_frame_count: params.endFrameCount ?? undefined,
         frame_count: params.frameCount ?? undefined,
+        workflow_options: params.workflowOptions,
         use_original_size: true,
-        // 仅 nano_banana_pro + sendHistory=true 时传 session_id，与 ChatInput.tsx 逻辑一致
-        send_history: isNanoBananaPro ? sendHistory : undefined,
-        session_id: isNanoBananaPro && sendHistory ? sessionId : undefined,
         // Kling 视频运行时选项（前端用 selectOptions 存储）
         kling_options: params.workflow === 'kling_flf2v' ? get().selectOptions : undefined,
+        // 任务关联：让后端落库 + 断线恢复能定位到助手消息
+        message_id: assistantMsgId,
+        session_id: sessionId,
+        task_id: generationTaskId,
       });
     } catch (err) {
       console.error('重新生成失败:', err);
-      // 生成失败时清除 loading 状态
-      set((s) => ({
-        chatHistory: s.chatHistory.map((msg) =>
-          msg.id === assistantMsgId ? { ...msg, images: [] } : msg
-        ),
+      set((current) => ({
+        chatHistory: current.chatHistory.map((message) => {
+          if (message.id === userMsgId) return userMsg;
+          if (message.id === assistantMsgId) return { ...message, images: previousAssistantImages };
+          return message;
+        }),
         currentGeneratingMessageId: null,
+        currentGenerationTaskId: null,
+        isGenerating: false,
+        error: '重新生成未启动，已保留原结果',
       }));
     }
   },
@@ -954,14 +956,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   stopGeneration: async () => {
     await apiService.stopGeneration();
     const messageId = get().currentGeneratingMessageId;
+    const taskMessage = messageId ? get().chatHistory.find(item => item.id === messageId) : undefined;
     if (messageId) {
-      get().updateChatImages(messageId, []);
+      const existingImages = (taskMessage?.images ?? []).filter(
+        (image): image is string => typeof image === 'string',
+      );
+      get().updateChatImages(messageId, existingImages, false);
     }
     set({
       loading: false,
       isGenerating: false,
       currentGeneratingMessageId: null,
+      currentGenerationTaskId: null,
     });
+    if (isLoggedIn() && taskMessage?.session_id && get().currentSessionId === taskMessage.session_id) {
+      try {
+        const response = await apiService.getMessageRound(taskMessage.session_id, messageId!);
+        if (get().currentSessionId !== taskMessage.session_id) return;
+        const messages = (response.messages as ApiChatMessage[]).map(message => ({
+          id: message.id,
+          session_id: taskMessage.session_id,
+          type: message.type,
+          content: message.content || '',
+          images: message.images || [],
+          timestamp: message.timestamp,
+          params: message.params || undefined,
+        }));
+        const messageById = new Map(messages.map(message => [message.id, message]));
+        set(current => ({
+          chatHistory: current.chatHistory.map(message => messageById.get(message.id) ?? message),
+        }));
+      } catch (error) {
+        console.error('停止后恢复会话历史失败:', error);
+      }
+    }
   },
   reset: () => set({
     prompt: '',
@@ -976,6 +1004,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     hasEarlierMessages: false,
     loading: false,
     error: null,
+    isGenerating: false,
+    currentGeneratingMessageId: null,
+    currentGenerationTaskId: null,
   }),
   
   // 加载用户配置
@@ -1357,16 +1388,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const switchSequence = ++sessionSwitchSequence;
     
-    // 如果有正在生成的任务，先停止
-    if (state.isGenerating) {
-      console.warn('切换会话时自动停止图片生成');
-      try {
-        await state.stopGeneration();
-      } catch (error) {
-        console.error('切换会话时停止生成失败:', error);
-      }
-    }
-
     state.saveSessionConfig(true);
     set({ currentSessionId: sessionId, hasEarlierMessages: false });
     
@@ -1493,13 +1514,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       reference_image: state.referenceImage,
       reference_image_2: state.referenceImage2,
       reference_image_3: state.referenceImage3,
-      prompt_end: state.promptEnd || undefined,
-      reference_image_end: state.referenceImageEnd || undefined,
+      prompt_end: state.promptEnd || null,
+      reference_image_end: state.referenceImageEnd,
       is_loop: state.isLoop,
       start_frame_count: state.startFrameCount ?? undefined,
       end_frame_count: state.endFrameCount ?? undefined,
       frame_rate: state.frameRate ?? undefined,
       frame_count: state.frameCount ?? undefined,
+      workflow_options: getWorkflowOptions(
+        state.availableWorkflows.find(workflow => workflow.key === state.currentWorkflow),
+        state.selectOptions,
+      ),
     };
     
     const persist = () => {
@@ -1527,13 +1552,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         referenceImage: config.reference_image,
         referenceImage2: config.reference_image_2 || undefined,
         referenceImage3: config.reference_image_3 || undefined,
-        promptEnd: config.prompt_end,
+        promptEnd: config.prompt_end || undefined,
         referenceImageEnd: config.reference_image_end,
         isLoop: config.is_loop,
         startFrameCount: config.start_frame_count,
         endFrameCount: config.end_frame_count,
         frameRate: config.frame_rate,
         frameCount: config.frame_count,
+        workflowOptions: config.workflow_options,
       });
     };
 
@@ -1569,6 +1595,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           endFrameCount: config.end_frame_count ?? null,
           frameRate: config.frame_rate ?? null,
           frameCount: config.frame_count ?? null,
+          selectOptions: { ...get().selectOptions, ...(config.workflow_options ?? {}) },
           workflowImageStash: {},
         });
       } catch (error) {
@@ -1617,6 +1644,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           endFrameCount: config.endFrameCount ?? null,
           frameRate: config.frameRate ?? null,
           frameCount: config.frameCount ?? null,
+          selectOptions: { ...get().selectOptions, ...(config.workflowOptions ?? {}) },
           workflowImageStash: {},
         });
       } else {

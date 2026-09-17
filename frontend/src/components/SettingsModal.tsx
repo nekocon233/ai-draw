@@ -3,6 +3,7 @@ import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch, Select } fro
 import { useAppStore, type GenerationSettingsDraft } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { WorkflowParameterValue } from '../types/api';
+import { getWorkflowOptions } from '../utils/workflowOptions';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -98,7 +99,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         endFrameCount: endFrameCount ?? Number(parameter('endFrameCount')?.default ?? 33),
         frameRate: frameRate ?? Number(parameter('frameRate')?.default ?? 16),
         frameCount: frameCount ?? Number(parameter('frameCount')?.default ?? 33),
-        selectOptions: { ...selectOptions },
+        selectOptions: {
+          ...selectOptions,
+          ...getWorkflowOptions(currentMeta, selectOptions),
+        },
       });
     }
   }, [open, form, currentWorkflow, availableWorkflows, strength, count, loraPrompt, width, height, useOriginalSize, startFrameCount, endFrameCount, frameRate, frameCount, selectOptions]);
@@ -201,9 +205,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         )}
 
         {selectParams.map(param => (
-          <Form.Item key={param.name} label={param.label} name={['selectOptions', param.name]}>
+          <Form.Item
+            key={param.name}
+            label={param.label}
+            name={['selectOptions', param.name]}
+            extra={param.name === 'h3_aspect_ratio' ? '自动时跟随关键帧比例；纯文本生成使用 16:9' : undefined}
+          >
             <Select
-              options={(param.options || []).map(v => ({ label: v, value: v }))}
+              options={(param.options || []).map(v => ({
+                label: param.name === 'h3_aspect_ratio' && v === 'auto' ? '自动（跟随关键帧）' : v,
+                value: v,
+              }))}
               style={{ width: '100%' }}
             />
           </Form.Item>

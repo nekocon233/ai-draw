@@ -52,6 +52,7 @@ Thumbs.db
 
 # Environment (injected by Compose, never copied into image context)
 .env*
+/.runtime/
 
 # Development files
 OPTIMIZATION_TODO.md

@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote, urlparse
 from utils.config_loader import get_config
 
 
@@ -153,7 +154,22 @@ class FileStorage:
         Returns:
             是否删除成功
         """
-        file_path = self.upload_dir / relative_path
+        if not relative_path or relative_path.startswith('data:'):
+            return False
+
+        parsed = urlparse(relative_path)
+        stored_path = unquote(parsed.path) if parsed.scheme in ('http', 'https') else relative_path
+        if stored_path.startswith('/uploads/'):
+            stored_path = stored_path.removeprefix('/uploads/')
+        elif stored_path.startswith('uploads/'):
+            stored_path = stored_path.removeprefix('uploads/')
+        elif Path(stored_path).is_absolute():
+            return False
+
+        upload_root = self.upload_dir.resolve()
+        file_path = (upload_root / stored_path).resolve()
+        if file_path != upload_root and upload_root not in file_path.parents:
+            return False
         try:
             if file_path.exists():
                 file_path.unlink()

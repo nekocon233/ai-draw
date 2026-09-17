@@ -51,6 +51,24 @@ def init_db():
                     "CREATE INDEX IF NOT EXISTS ix_chat_sessions_is_pinned "
                     "ON chat_sessions (is_pinned)"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN IF NOT EXISTS config_workflow_options JSON"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE chat_messages "
+                    "ADD COLUMN IF NOT EXISTS workflow_options JSON"
+                ))
+                conn.execute(text(
+                    "DELETE FROM generated_images older USING generated_images newer "
+                    "WHERE older.message_id = newer.message_id "
+                    "AND older.image_index = newer.image_index "
+                    "AND older.id > newer.id"
+                ))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_generated_images_message_index "
+                    "ON generated_images (message_id, image_index)"
+                ))
             print("[Database] 数据库表初始化完成")
             return
         except Exception as e:

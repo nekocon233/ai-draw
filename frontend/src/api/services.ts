@@ -14,6 +14,8 @@ import type {
   GenerateMediaResponse,
   UploadImageResponse,
   WorkflowsResponse,
+  LastTaskInfo,
+  WorkflowParameterValue,
 } from '../types/api';
 import type { ChatSession } from '../types/models';
 
@@ -186,7 +188,7 @@ export const apiService = {
     client.get('/chat/sessions'),
   
   createSession: (title?: string): Promise<{ session_id: string; title: string; is_pinned: boolean; created_at: number; updated_at: number }> =>
-    client.post('/chat/sessions', { session_id: `session-${Date.now()}`, title: title || '新对话' }),
+    client.post('/chat/sessions', { session_id: `session-${crypto.randomUUID()}`, title: title || '新对话' }),
   
   deleteSession: (sessionId: string): Promise<{ message: string }> =>
     client.delete(`/chat/sessions/${sessionId}`),
@@ -194,11 +196,16 @@ export const apiService = {
   deleteMessage: (sessionId: string, messageId: string): Promise<{ deleted: boolean }> =>
     client.delete(`/chat/sessions/${sessionId}/messages/${messageId}`),
 
+  getMessageRound: (sessionId: string, assistantMessageId: string): Promise<{ messages: unknown[] }> =>
+    client.get(`/chat/sessions/${sessionId}/rounds/${assistantMessageId}`),
+
   updateMessageContent: (messageId: string, data: {
     content?: string;
     reference_image?: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
+    reference_image_end?: string | null;
+    prompt_end?: string | null;
   }): Promise<{ updated: boolean }> =>
     client.patch(`/chat/messages/${messageId}`, data),
 
@@ -229,6 +236,7 @@ export const apiService = {
     end_frame_count?: number | null;
     frame_rate?: number | null;
     frame_count?: number | null;
+    workflow_options?: Record<string, WorkflowParameterValue> | null;
   }> =>
     client.get(`/chat/sessions/${sessionId}/config`),
   
@@ -249,6 +257,7 @@ export const apiService = {
     end_frame_count?: number;
     frame_rate?: number;
     frame_count?: number;
+    workflow_options?: Record<string, WorkflowParameterValue>;
   }): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}/config`, config),
   
@@ -275,6 +284,7 @@ export const apiService = {
     start_frame_count?: number;
     end_frame_count?: number;
     frame_count?: number;
+    workflow_options?: Record<string, WorkflowParameterValue>;
   }): Promise<{ message: string }> =>
     client.post('/chat/save', data),
   
@@ -325,6 +335,10 @@ export const apiService = {
 
   stopGeneration: (): Promise<{ success: boolean; message: string }> =>
     client.post('/media/stop'),
+
+  // 最近一次任务快照（断线补拉，30 分钟过期）
+  getLastTask: (): Promise<{ last_task: LastTaskInfo | null }> =>
+    client.get('/media/last-task'),
   
   // 媒体上传
   uploadImage: (file: File): Promise<UploadImageResponse> => {

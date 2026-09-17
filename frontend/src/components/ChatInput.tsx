@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Input, Button, message, Select, Image, Switch } from 'antd';
+import { Input, Button, message, Select, Image } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { 
   ArrowUpOutlined,
@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import { apiService } from '../api/services';
+import { getWorkflowOptions } from '../utils/workflowOptions';
 import './ChatInput.css';
 
 const SettingsModal = lazy(() => import('./SettingsModal'));
@@ -130,7 +131,6 @@ export default function ChatInput() {
     startFrameCount,
     endFrameCount,
     frameCount,
-    nanoBananaSendHistory,
     setPrompt,
     setPromptEnd,
     setCurrentWorkflow,
@@ -139,7 +139,6 @@ export default function ChatInput() {
     setReferenceImage3,
     setReferenceImageEnd,
     setIsLoop,
-    setNanoBananaSendHistory,
     setError,
     clearError,
   } = useAppStore(useShallow(state => ({
@@ -162,7 +161,6 @@ export default function ChatInput() {
     startFrameCount: state.startFrameCount,
     endFrameCount: state.endFrameCount,
     frameCount: state.frameCount,
-    nanoBananaSendHistory: state.nanoBananaSendHistory,
     setPrompt: state.setPrompt,
     setPromptEnd: state.setPromptEnd,
     setCurrentWorkflow: state.setCurrentWorkflow,
@@ -171,18 +169,20 @@ export default function ChatInput() {
     setReferenceImage3: state.setReferenceImage3,
     setReferenceImageEnd: state.setReferenceImageEnd,
     setIsLoop: state.setIsLoop,
-    setNanoBananaSendHistory: state.setNanoBananaSendHistory,
     setError: state.setError,
     clearError: state.clearError,
   })));
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
   const isFlf2v = workflowMeta?.requires_end_image === true;
+  const hasOptionalKeyframes = workflowMeta?.supports_optional_keyframes === true;
+  const isFrameVideo = isFlf2v || hasOptionalKeyframes;
+  const isLoopMode = isFlf2v && isLoop;
   const isI2V = currentWorkflow === 'i2v'; // Wan i2v：图生视频
-  const isRequiresImage = workflowMeta?.requires_image === true && !isFlf2v;
-  const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 多轮对话
+  const isRequiresImage = workflowMeta?.requires_image === true && !isFrameVideo;
+  const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 单轮图像生成
   const isKlingFlf2v = currentWorkflow === 'kling_flf2v'; // Kling 首尾帧图生视频
   const supportsMultiImage = workflowMeta?.supports_multi_image === true; // 多参考图工作流（图生图类目）
-  const isT2I = !isRequiresImage && !isFlf2v && !supportsMultiImage; // 文生图：不允许上传图片
+  const isT2I = !isRequiresImage && !isFrameVideo && !supportsMultiImage; // 不接受图片输入的工作流
 
   // 下拉分组：同 category 的工作流折叠为一项（如 图生图：i2i / nano_banana_pro）
   const groupedOptions = (() => {
@@ -202,7 +202,7 @@ export default function ChatInput() {
           ? 'image'
           : 'text';
       const description = kind === 'video'
-        ? '用参考帧生成动态视频'
+        ? '从文字或参考帧生成动态视频'
         : kind === 'image'
           ? '上传参考图进行编辑与重绘'
           : '从文字描述开始创作图像';
@@ -360,26 +360,32 @@ export default function ChatInput() {
     // 使用用户选择的工作流
     const hasStrength = workflowMeta?.parameters?.some(p => p.name === 'strength') ?? false;
     const effectiveStrength = hasStrength ? strength : undefined;
+    const effectiveCount = currentWorkflow === 'minimax_h3' ? 1 : count;
+    const workflowOptions = getWorkflowOptions(workflowMeta, useAppStore.getState().selectOptions);
     let messageId = '';
     try {
-      messageId = await useAppStore.getState().addChatMessage({
+      const addedMessage = await useAppStore.getState().addChatMessage({
         prompt,
         workflow: currentWorkflow,
         strength: effectiveStrength,
-        count,
+        count: effectiveCount,
         loraPrompt,
         promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
         referenceImage,
         referenceImage2: referenceImage2 || undefined,
         referenceImage3: referenceImage3 || undefined,
-        referenceImageEnd: isFlf2v ? referenceImageEnd : undefined,
+        referenceImageEnd: isFrameVideo ? referenceImageEnd : undefined,
         isLoop: isFlf2v ? isLoop : undefined,
         frameRate: isFlf2v ? frameRate : (isI2V ? frameRate : undefined),
         startFrameCount: isFlf2v ? startFrameCount : undefined,
         endFrameCount: isFlf2v ? endFrameCount : undefined,
         frameCount: isI2V ? frameCount : undefined,
+        workflowOptions,
       });
-      if (!messageId) return;
+      if (!addedMessage) return;
+      messageId = addedMessage.messageId;
+      const generationTaskId = crypto.randomUUID();
+      useAppStore.setState({ currentGenerationTaskId: generationTaskId });
 
       const state = useAppStore.getState();
 
@@ -387,8 +393,8 @@ export default function ChatInput() {
       await apiService.generateMedia({
         prompt,
         workflow: currentWorkflow,
-        strength,
-        count,
+        strength: effectiveStrength,
+        count: effectiveCount,
         lora_prompt: loraPrompt || undefined,
         reference_image: referenceImage || undefined,
         reference_image_2: referenceImage2 || undefined,
@@ -396,34 +402,33 @@ export default function ChatInput() {
         width: state.width || undefined,
         height: state.height || undefined,
         prompt_end: isFlf2v && isLoop ? (promptEnd || undefined) : undefined,
-        reference_image_end: isFlf2v ? (referenceImageEnd || undefined) : undefined,
+        reference_image_end: isFrameVideo ? (referenceImageEnd || undefined) : undefined,
         use_original_size: state.useOriginalSize,
         is_loop: isFlf2v ? isLoop : undefined,
         start_frame_count: isFlf2v ? (state.startFrameCount ?? undefined) : undefined,
         end_frame_count: isFlf2v ? (state.endFrameCount ?? undefined) : undefined,
         frame_rate: (isFlf2v || isI2V) ? (state.frameRate ?? undefined) : undefined,
         frame_count: isI2V ? (state.frameCount ?? undefined) : undefined,
-        // Gemini 多轮对话（nano_banana_pro 开关开时附加）
-        send_history: isNanoBananaPro ? nanoBananaSendHistory : undefined,
-        session_id: isNanoBananaPro && nanoBananaSendHistory ? (currentSessionId || undefined) : undefined,
         // PixelLab 动画参数
         action: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabAction : undefined,
         view: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabView : undefined,
         direction: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabDirection : undefined,
         // Kling 视频运行时选项（前端用 selectOptions 存储）
         kling_options: isKlingFlf2v ? state.selectOptions : undefined,
+        workflow_options: workflowOptions,
+        // 任务关联：让后端落库 + 断线恢复能定位到助手消息
+        message_id: messageId,
+        session_id: addedMessage.sessionId,
+        task_id: generationTaskId,
       });
-      // 携带历史发送时清空输入框和参考图（普通模式下提示词随会话保留）
-      if (isNanoBananaPro && nanoBananaSendHistory) {
-        setPrompt('');
-        setReferenceImage(null);
-        setReferenceImage2(null);
-        setReferenceImage3(null);
-      }
     } catch (err: unknown) {
       // HTTP 层面失败（任务未能提交到后台）
       if (messageId) useAppStore.getState().updateChatImages(messageId, []);
-      useAppStore.setState({ currentGeneratingMessageId: null, isGenerating: false });
+      useAppStore.setState({
+        currentGeneratingMessageId: null,
+        currentGenerationTaskId: null,
+        isGenerating: false,
+      });
       const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       message.error('提交失败: ' + errorMessage);
@@ -437,6 +442,77 @@ export default function ChatInput() {
   const handleApplyPrompt = (generatedPrompt: string) => {
     setPrompt(generatedPrompt);
     message.success('Prompt 已应用到输入框');
+  };
+
+  // 共享的图片上传逻辑（拖放/粘贴均复用）
+  const uploadImageFile = async (file: File) => {
+    const isImage = file.type.startsWith('image/');
+    if (!isImage) {
+      message.error('只能上传图片文件!');
+      return;
+    }
+
+    const isLt10M = file.size / 1024 / 1024 < 10;
+    if (!isLt10M) {
+      message.error('图片大小不能超过 10MB!');
+      return;
+    }
+
+    // flf2v 模式下：首帧已有图时自动填充尾帧
+    const currentState = useAppStore.getState();
+    const fillEnd = isFrameVideo && currentState.referenceImage && !currentState.referenceImageEnd;
+
+    // 普通 requires_image 模式：按序填充槽位
+    // Q-Image (i2i) / Nano Banana Pro：最多 3 张；参考图工作流：仅 1 张
+    const getNextSlot = () => {
+      if (!currentState.referenceImage) return setReferenceImage;
+      if (supportsMultiImage && !currentState.referenceImage2) return setReferenceImage2;
+      if (supportsMultiImage && !currentState.referenceImage3) return setReferenceImage3;
+      return setReferenceImage; // 全满时替换第 1 张
+    };
+
+    try {
+      const res = await apiService.uploadImage(file);
+      if (fillEnd) {
+        setReferenceImageEnd(res.image);
+        message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
+      } else if (isRequiresImage || supportsMultiImage) {
+        getNextSlot()(res.image);
+        message.success('\u4e0a\u4f20\u6210\u529f!');
+      } else {
+        setReferenceImage(res.image);
+        message.success('\u4e0a\u4f20\u6210\u529f!');
+      }
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err);
+      setError(errorMessage);
+      message.error('上传失败: ' + errorMessage);
+    }
+  };
+
+  // 粘贴处理（Ctrl/Cmd + V）：将剪切板中的图片作为参考图
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    // 文生图不允许上传图片
+    if (isT2I) return;
+
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    let imageFile: File | null = null;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) {
+          imageFile = f;
+          break;
+        }
+      }
+    }
+
+    if (!imageFile) return; // 没有图片则让浏览器执行默认粘贴（文本）
+
+    e.preventDefault();
+    await uploadImageFile(imageFile);
   };
 
   // 拖放处理
@@ -473,57 +549,10 @@ export default function ChatInput() {
     // 文生图不允许拖放图片
     if (isT2I) return;
 
-    // 辅助函数：上传文件
-    // flf2v 模式下：首帧已有图时自动填充尾帧
-    const uploadFile = async (file: File) => {
-      const isImage = file.type.startsWith('image/');
-      if (!isImage) {
-        message.error('只能上传图片文件!');
-        return;
-      }
-
-      const isLt10M = file.size / 1024 / 1024 < 10;
-      if (!isLt10M) {
-        message.error('图片大小不能超过 10MB!');
-        return;
-      }
-
-      // 判断要填充首帧还是尾帧
-      const currentState = useAppStore.getState();
-      const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
-
-      // 普通 requires_image 模式：按序填充槽位
-      // Q-Image (i2i) / Nano Banana Pro：最多 3 张；参考图工作流：仅 1 张
-      const getNextSlot = () => {
-        if (!currentState.referenceImage) return setReferenceImage;
-        if (supportsMultiImage && !currentState.referenceImage2) return setReferenceImage2;
-        if (supportsMultiImage && !currentState.referenceImage3) return setReferenceImage3;
-        return setReferenceImage; // 全满时替换第 1 张
-      };
-
-      try {
-        const res = await apiService.uploadImage(file);
-        if (fillEnd) {
-          setReferenceImageEnd(res.image);
-          message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
-        } else if (isRequiresImage || supportsMultiImage) {
-          getNextSlot()(res.image);
-          message.success('\u4e0a\u4f20\u6210\u529f!');
-        } else {
-          setReferenceImage(res.image);
-          message.success('\u4e0a\u4f20\u6210\u529f!');
-        }
-      } catch (err: unknown) {
-        const errorMessage = getErrorMessage(err);
-        setError(errorMessage);
-        message.error('上传失败: ' + errorMessage);
-      }
-    };
-
     // URL 直接设置的辅助函数（拖放 URL 时的 fallback）
     const setImageUrl = (url: string) => {
       const currentState = useAppStore.getState();
-      const fillEnd = isFlf2v && currentState.referenceImage && !currentState.referenceImageEnd;
+      const fillEnd = isFrameVideo && currentState.referenceImage && !currentState.referenceImageEnd;
       if (fillEnd) {
         setReferenceImageEnd(url);
         message.success('尾帧已设置!');
@@ -542,7 +571,7 @@ export default function ChatInput() {
     // 情况1：拖放的是文件
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      await uploadFile(files[0]);
+      await uploadImageFile(files[0]);
       return;
     }
 
@@ -576,7 +605,7 @@ export default function ChatInput() {
           const blob = await res.blob();
           const file = new File([blob], `dropped-image-${Date.now()}.png`, { type: blob.type || 'image/png' });
           message.destroy('dropImage');
-          await uploadFile(file);
+          await uploadImageFile(file);
           return;
         }
 
@@ -596,7 +625,7 @@ export default function ChatInput() {
         
         const file = new File([blob], `dropped-image-${Date.now()}.png`, { type: blob.type });
         message.destroy('dropImage');
-        await uploadFile(file);
+        await uploadImageFile(file);
       } catch (err: unknown) {
         message.destroy('dropImage');
         console.error('Drop image error:', err);
@@ -622,6 +651,7 @@ export default function ChatInput() {
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onPaste={handlePaste}
       >
         {/* 拖放遮罩层（文生图不显示） */}
         {isDragging && !isT2I && (
@@ -631,15 +661,15 @@ export default function ChatInput() {
           </div>
         )}
 
-        {/* flf2v 双帧输入布局 / 普通图文输入布局 */}
-        {isFlf2v ? (
+        {/* 首尾帧输入布局 / 普通图文输入布局 */}
+        {isFrameVideo ? (
           <div className="flf2v-input-area">
             {/* 双帧卡片区 */}
             <div className="flf2v-frames">
               <div className="flf2v-frame-row">
                 <FrameCard
                   image={referenceImage}
-                  label="首帧"
+                  label={hasOptionalKeyframes ? '首帧·可选' : '首帧'}
                   alt="开始帧"
                   onUpload={() => fileInputRef.current?.click()}
                   onRemove={() => setReferenceImage(null)}
@@ -664,7 +694,7 @@ export default function ChatInput() {
 
                 <FrameCard
                   image={referenceImageEnd}
-                  label="尾帧"
+                  label={hasOptionalKeyframes ? '尾帧·可选' : '尾帧'}
                   alt="结束帧"
                   onUpload={() => fileInputEndRef.current?.click()}
                   onRemove={() => setReferenceImageEnd(null)}
@@ -696,15 +726,15 @@ export default function ChatInput() {
             </div>
 
             {/* 右侧：文字描述 */}
-            <div className={`flf2v-prompts${isLoop ? ' flf2v-prompts--loop' : ''}`}>
+            <div className={`flf2v-prompts${isLoopMode ? ' flf2v-prompts--loop' : ''}`}>
               <div className="flf2v-prompt-item">
-                <span className="flf2v-prompt-label">首帧描述</span>
+                <span className="flf2v-prompt-label">{hasOptionalKeyframes ? '音视频描述' : '首帧描述'}</span>
                 <TextArea
                   ref={textAreaRef}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="描述开始帧画面内容..."
-                  aria-label="首帧描述"
+                  placeholder={hasOptionalKeyframes ? '描述镜头、动作、对白、音效与配乐...' : '描述开始帧画面内容...'}
+                  aria-label={hasOptionalKeyframes ? '音视频描述' : '首帧描述'}
                   className="chat-textarea"
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   onPressEnter={(e) => {
@@ -715,8 +745,8 @@ export default function ChatInput() {
                   }}
                 />
               </div>
-              {isLoop && <div className="flf2v-prompt-divider" />}
-              {isLoop && (
+              {isLoopMode && <div className="flf2v-prompt-divider" />}
+              {isLoopMode && (
                 <div className="flf2v-prompt-item">
                   <span className="flf2v-prompt-label">尾帧描述</span>
                   <TextArea
@@ -882,21 +912,6 @@ export default function ChatInput() {
             >
               <BulbOutlined />
             </button>
-
-            {/* Gemini 历史对话开关（仅 nano_banana_pro 工作流显示） */}
-            {isNanoBananaPro && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Switch
-                  size="small"
-                  checked={nanoBananaSendHistory}
-                  onChange={setNanoBananaSendHistory}
-                  aria-label="携带历史对话"
-                />
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                  携带历史
-                </span>
-              </div>
-            )}
 
             {/* 工作流选择器（图生图等同类工作流折叠为一项，具体方式在生成设置里选择） */}
             <Select

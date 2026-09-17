@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.auth import get_current_user
+from server.models import User
 from server.schemas import (
     GeneratePromptRequest, GeneratePromptResponse,
     PosePresetResponse,
@@ -24,11 +25,16 @@ router = APIRouter(prefix="/prompt", tags=["Prompt生成"], dependencies=[Depend
 @router.post("/generate", response_model=GeneratePromptResponse)
 async def generate_prompt(
     request: GeneratePromptRequest,
+    current_user: User = Depends(get_current_user),
     service: AIDrawService = Depends(get_ai_draw_service)
 ) -> GeneratePromptResponse:
     """根据中文描述生成英文 Prompt"""
     try:
-        prompt = await service.generate_prompt(request.description, request.workflow_id)
+        prompt = await service.generate_prompt(
+            request.description,
+            request.workflow_id,
+            user_id=current_user.id,
+        )
         return GeneratePromptResponse(prompt=prompt)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

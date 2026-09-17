@@ -1,7 +1,7 @@
 """
 API 请求和响应的数据模型
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 
@@ -70,15 +70,17 @@ class GenerateMediaRequest(BaseModel):
     end_frame_count: Optional[int] = None      # flf2v 结束帧视频帧长度
     frame_rate: Optional[float] = None         # flf2v 帧率
     frame_count: Optional[int] = None          # i2v 总帧数
-    # Gemini 多轮对话（nano_banana_pro 专用）
-    send_history: bool = False                 # 是否携带历史对话发送给 Gemini
-    session_id: Optional[str] = None          # 当前会话 ID（send_history=True 时必填）
     # PixelLab 动画参数（pixel_lab_animate 专用）
     action: str = "walk"                      # 动画动作
     view: str = "sidescroller"               # 视角
     direction: str = "east"                   # 朝向
     # Kling 首尾帧图生视频参数（kling_flf2v 专用）
     kling_options: Optional[dict] = None      # 运行时选项，如 { "duration": "5" }
+    workflow_options: Optional[dict] = None   # 元数据驱动的工作流选项，如时长、画幅
+    # 任务关联（用于服务端落库与断线恢复；前端可选）
+    message_id: Optional[str] = Field(default=None, max_length=50)  # 助手消息 ID（{user_msg_id}-reply）
+    session_id: Optional[str] = Field(default=None, max_length=50)  # 所属会话 ID
+    task_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class GenerateMediaResponse(BaseModel):

@@ -51,6 +51,7 @@ Desktop.ini
 .env
 .env.local
 .env.*.local
+/.runtime/
 
 # Logs
 comfyui_log.txt

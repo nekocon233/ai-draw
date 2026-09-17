@@ -6,14 +6,22 @@ import socket
 import subprocess
 import tempfile
 import threading
+import uuid
+from io import BytesIO
 
 import aiofiles
 import aiohttp
 from comfy_api_simplified import ComfyApiWrapper
+from PIL import Image, ImageOps
 
 from comfyui.requests.comfyui_request_interface import ComfyUIRequestInterface
 from comfyui.structures.comfyui_request_result import ComfyUIRequestResult
 from comfyui.structures.comfyui_request_state import ComfyUIRequestState
+from comfyui.structures.minimax_h3 import (
+    get_minimax_h3_frame_count,
+    get_minimax_h3_resolution,
+    remove_nodes_by_title,
+)
 from comfyui.structures.upscale_models import extract_upscale_model_options
 from utils.config_loader import get_comfyui_config
 
@@ -31,6 +39,7 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         self.python_executable = config.python_executable
         self.timeout = config.timeout
         self.api = ComfyApiWrapper(self.api_address)
+        self._task_prompt_ids = {}
 
         # 初始化服务器进程为None
         self.server_process = None
@@ -152,6 +161,13 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                     del inputs[k]
                     print(f"[LocalComfyUIRequest] 已清理对节点 {node_id}({title}) 的引用: inputs['{k}']")
 
+    @staticmethod
+    def _set_required_node_param(workflow, title: str, input_name: str, value) -> None:
+        try:
+            workflow.set_node_param(title, input_name, value)
+        except Exception as error:
+            raise ValueError(f"MiniMax H3 工作流缺少参数节点 {title}.{input_name}") from error
+
     async def get_upscale_models(self) -> list[str]:
         """读取 ComfyUI UpscaleModelLoader 当前可选模型。"""
         timeout = aiohttp.ClientTimeout(total=5)
@@ -172,19 +188,46 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 payload = await response.json()
         return payload.get(node_name, {}) if isinstance(payload, dict) else {}
 
-    async def interrupt(self) -> None:
+    async def _cancel_prompt(self, prompt_id: str, *, interrupt: bool) -> None:
+        """Delete this request from ComfyUI's queue and interrupt it if already running."""
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f"{self.api_address}interrupt") as response:
-                response.raise_for_status()
+            try:
+                async with session.post(
+                    f"{self.api_address}queue",
+                    json={"delete": [prompt_id]},
+                ) as response:
+                    response.raise_for_status()
+            except Exception as error:
+                print(f"[LocalComfyUIRequest] 删除排队任务失败 prompt_id={prompt_id}: {error}")
 
-    async def _upload_overwrite_image(self, input_filename: str, remote_filename: str) -> dict:
-        """上传到固定临时位置并覆盖旧输入，避免 ComfyUI input 目录持续增长。"""
+            if interrupt:
+                try:
+                    async with session.post(
+                        f"{self.api_address}interrupt",
+                        json={"prompt_id": prompt_id},
+                    ) as response:
+                        response.raise_for_status()
+                except Exception as error:
+                    print(f"[LocalComfyUIRequest] 中断任务失败 prompt_id={prompt_id}: {error}")
+
+    async def interrupt(self, task=None) -> None:
+        prompt_id = self._task_prompt_ids.get(task)
+        if prompt_id:
+            await self._cancel_prompt(prompt_id, interrupt=True)
+
+    async def _upload_overwrite_image(
+        self,
+        input_filename: str,
+        remote_filename: str,
+        upload_type: str = "input",
+    ) -> dict:
+        """上传图片并覆盖同名文件。"""
         async with aiofiles.open(input_filename, "rb") as file:
             content = await file.read()
         form = aiohttp.FormData()
         form.add_field("image", content, filename=remote_filename, content_type="image/png")
-        form.add_field("type", "input")
+        form.add_field("type", upload_type)
         form.add_field("subfolder", "ai_draw")
         form.add_field("overwrite", "true")
         timeout = aiohttp.ClientTimeout(total=60)
@@ -198,31 +241,54 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         提交工作流并轮询历史 API 等待完成，避免 WebSocket 超时导致挂死。
         返回 prompt_id，超时或失败时抛出异常。
         """
-        # queue_prompt 返回 {"prompt_id": "...", "number": ..., "node_errors": {}}
-        resp = await asyncio.to_thread(self.api.queue_prompt, workflow)
+        # Shield the short submission call so cancellation cannot orphan a prompt whose ID was lost.
+        queue_task = asyncio.create_task(asyncio.to_thread(self.api.queue_prompt, workflow))
+        try:
+            resp = await asyncio.shield(queue_task)
+        except asyncio.CancelledError as cancellation:
+            try:
+                resp = await queue_task
+                prompt_id = resp.get("prompt_id")
+                if prompt_id:
+                    await asyncio.shield(self._cancel_prompt(prompt_id, interrupt=True))
+            except Exception as error:
+                print(f"[LocalComfyUIRequest] 取消提交中的任务失败: {error}")
+            raise cancellation
+
         prompt_id = resp["prompt_id"]
+        owner_task = asyncio.current_task()
+        if owner_task is not None:
+            self._task_prompt_ids[owner_task] = prompt_id
         print(f"[LocalComfyUIRequest] 任务已提交 prompt_id={prompt_id}，开始轮询...")
 
-        elapsed = 0.0
-        while elapsed < timeout:
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-            try:
-                history = await asyncio.to_thread(self.api.get_history, prompt_id)
-                if prompt_id in history:
-                    status_str = history[prompt_id].get("status", {}).get("status_str", "")
-                    if status_str == "success":
-                        print(f"[LocalComfyUIRequest] 任务完成 (耗时 {elapsed:.0f}s)")
-                        return prompt_id
-                    if status_str in ("error", "failed"):
-                        msgs = history[prompt_id].get("status", {}).get("messages", [])
-                        raise RuntimeError(f"ComfyUI 执行失败: {msgs}")
-            except RuntimeError:
-                raise
-            except Exception as e:
-                print(f"[LocalComfyUIRequest] 轮询出错（继续重试）: {e}")
+        try:
+            elapsed = 0.0
+            while elapsed < timeout:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                try:
+                    history = await asyncio.to_thread(self.api.get_history, prompt_id)
+                    if prompt_id in history:
+                        status_str = history[prompt_id].get("status", {}).get("status_str", "")
+                        if status_str == "success":
+                            print(f"[LocalComfyUIRequest] 任务完成 (耗时 {elapsed:.0f}s)")
+                            return prompt_id
+                        if status_str in ("error", "failed"):
+                            msgs = history[prompt_id].get("status", {}).get("messages", [])
+                            raise RuntimeError(f"ComfyUI 执行失败: {msgs}")
+                except RuntimeError:
+                    raise
+                except Exception as e:
+                    print(f"[LocalComfyUIRequest] 轮询出错（继续重试）: {e}")
 
-        raise TimeoutError(f"ComfyUI 执行超时（{timeout}s）")
+            await self._cancel_prompt(prompt_id, interrupt=True)
+            raise TimeoutError(f"ComfyUI 执行超时（{timeout}s）")
+        except asyncio.CancelledError as cancellation:
+            await asyncio.shield(self._cancel_prompt(prompt_id, interrupt=True))
+            raise cancellation
+        finally:
+            if owner_task is not None and self._task_prompt_ids.get(owner_task) == prompt_id:
+                self._task_prompt_ids.pop(owner_task, None)
 
     async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed):
         """
@@ -685,6 +751,105 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 error="",
             )
         return ComfyUIRequestResult(success=False, data=None, error="I2V 未获得有效视频结果")
+
+    async def generate_minimax_h3(
+        self,
+        workflow,
+        prompt_text: str,
+        seed: int,
+        start_image_base64=None,
+        end_image_base64=None,
+        duration: float = 5,
+        aspect_ratio: str = "auto",
+    ):
+        """执行 H3 文生、单关键帧或首尾帧音视频工作流。"""
+        temp_paths = []
+        try:
+            source_sizes = []
+            if aspect_ratio == "auto":
+                for image_base64 in (start_image_base64, end_image_base64):
+                    if not image_base64:
+                        continue
+                    with Image.open(BytesIO(base64.b64decode(image_base64))) as image:
+                        source_sizes.append(ImageOps.exif_transpose(image).size)
+            width, height = get_minimax_h3_resolution(aspect_ratio, source_sizes)
+            frame_count = get_minimax_h3_frame_count(duration)
+
+            missing_titles = []
+            if not start_image_base64:
+                missing_titles.append("main_image_start")
+            if not end_image_base64:
+                missing_titles.append("main_image_end")
+            remove_nodes_by_title(workflow, missing_titles)
+
+            async def upload_keyframe(image_base64: str, title: str, filename: str) -> None:
+                temp_path = os.path.join(tempfile.gettempdir(), filename)
+                temp_paths.append(temp_path)
+                raw_image = await asyncio.to_thread(base64.b64decode, image_base64)
+                async with aiofiles.open(temp_path, "wb") as file:
+                    await file.write(raw_image)
+                metadata = await self._upload_overwrite_image(
+                    temp_path,
+                    filename,
+                    upload_type="temp",
+                )
+                image_path = (
+                    f"{metadata['subfolder']}/{metadata['name']}"
+                    if metadata.get("subfolder")
+                    else metadata["name"]
+                )
+                if metadata.get("type") and metadata["type"] != "input":
+                    image_path = f"{image_path} [{metadata['type']}]"
+                self._set_required_node_param(workflow, title, "image", image_path)
+
+            upload_token = uuid.uuid4().hex
+            if start_image_base64:
+                await upload_keyframe(
+                    start_image_base64,
+                    "main_image_start",
+                    f"minimax_h3_{upload_token}_start.png",
+                )
+            if end_image_base64:
+                await upload_keyframe(
+                    end_image_base64,
+                    "main_image_end",
+                    f"minimax_h3_{upload_token}_end.png",
+                )
+
+            self._set_required_node_param(workflow, "h3_conditioning", "prompt", prompt_text)
+            self._set_required_node_param(workflow, "h3_conditioning", "width", width)
+            self._set_required_node_param(workflow, "h3_conditioning", "height", height)
+            self._set_required_node_param(workflow, "h3_conditioning", "length", frame_count)
+            self._set_required_node_param(workflow, "seed", "noise_seed", seed)
+
+            prompt_id = await self._queue_and_poll(workflow, timeout=3600)
+            video_node_id = workflow.get_node_id("保存视频")
+            history = await asyncio.to_thread(self.api.get_history, prompt_id)
+            node_output = history[prompt_id]["outputs"].get(video_node_id, {})
+            results = node_output.get("videos") or node_output.get("gifs") or node_output.get("images") or []
+            if not results:
+                return ComfyUIRequestResult(success=False, data=None, error="MiniMax H3 未获得有效视频结果")
+
+            first_result = results[0]
+            video_bytes = await asyncio.to_thread(
+                self.api.get_image,
+                first_result["filename"],
+                first_result.get("subfolder", ""),
+                first_result.get("type", "output"),
+            )
+            return ComfyUIRequestResult(
+                success=True,
+                data=base64.b64encode(video_bytes).decode("utf-8"),
+                error="",
+            )
+        except Exception as error:
+            return ComfyUIRequestResult(success=False, data=None, error=str(error))
+        finally:
+            for temp_path in temp_paths:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
     async def get_state(self) -> ComfyUIRequestState:
         """异步检查本地ComfyUI服务状态"""

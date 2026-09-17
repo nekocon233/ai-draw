@@ -49,6 +49,7 @@ async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_s
             "description": metadata.get("description", ""),
             "requires_image": metadata.get("requires_image", False),
             "requires_end_image": metadata.get("requires_end_image", False),
+            "supports_optional_keyframes": metadata.get("supports_optional_keyframes", False),
             "supports_original_size": metadata.get("supports_original_size", False),
             "supports_loop": metadata.get("supports_loop", False),
             "output_type": metadata.get("output_type", "image"),

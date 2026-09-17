@@ -6,6 +6,7 @@ AI 绘画服务核心模块
 import asyncio
 import base64
 import os
+import time
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Optional, Any
 from PIL import Image
 from comfyui.comfyui_service import ComfyUIService
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
+from comfyui.structures.minimax_h3 import validate_minimax_h3_options
 from utils.ai_prompt import AIPrompt
 from utils.config_loader import get_config
 from utils.image_reference import normalize_image_reference
@@ -40,6 +42,22 @@ class AIDrawService:
         # 状态变化回调
         self.on_state_change = None
         self._generation_task: Optional[asyncio.Task] = None
+        self.is_task_reserved = False
+        self.is_generation_cancel_requested = False
+        self.is_persisting_generation = False
+
+        # 当前生成任务上下文（用于断线恢复 / 服务端持久化关联）
+        self.current_message_id: Optional[str] = None
+        self.current_session_id: Optional[str] = None
+        self.current_user_id: Optional[int] = None
+        self.current_task_id: Optional[str] = None
+        self.current_workflow: Optional[str] = None
+        self.current_count: int = 1
+
+        # 最近一次已记录任务的状态快照（仅内存，重启清空）
+        # 结构: {message_id, session_id, user_id, workflow, status, images, error, finished_at}
+        self.last_task: dict = {}
+        self.last_tasks: dict[int, dict] = {}
     
     async def start_service(self):
         """启动 ComfyUI 服务（如果配置了路径和 Python 解释器）"""
@@ -57,24 +75,24 @@ class AIDrawService:
                 if status:
                     print("[AIDrawService] 检测到外部 ComfyUI 服务正在运行")
                     self.is_service_available = True
-                    self._notify_state_change('is_service_available', True)
+                    self._notify_state_change('is_service_available', True, broadcast=True)
                 return
             
             # 配置完整时启动服务
             self.comfyui.start_connect()
             self.is_service_available = True
-            self._notify_state_change('is_service_available', True)
+            self._notify_state_change('is_service_available', True, broadcast=True)
         except Exception as e:
             print(f"[AIDrawService] 启动服务失败: {e}")
             self.is_service_available = False
-            self._notify_state_change('is_service_available', False)
+            self._notify_state_change('is_service_available', False, broadcast=True)
     
     def stop_service(self):
         """停止 ComfyUI 服务"""
         try:
             self.comfyui.close_connect()
             self.is_service_available = False
-            self._notify_state_change('is_service_available', False)
+            self._notify_state_change('is_service_available', False, broadcast=True)
         except Exception as e:
             print(f"[AIDrawService] 停止服务失败: {e}")
     
@@ -83,20 +101,25 @@ class AIDrawService:
         try:
             state = await self.comfyui.get_state()
             self.is_service_available = state.available
-            self._notify_state_change('is_service_available', state.available)
+            self._notify_state_change('is_service_available', state.available, broadcast=True)
             return state.available
         except Exception as e:
             print(f"[AIDrawService] 检查服务状态失败: {e}")
             self.is_service_available = False
-            self._notify_state_change('is_service_available', False)
+            self._notify_state_change('is_service_available', False, broadcast=True)
             return False
     
-    async def generate_prompt(self, description: str, workflow_id: Optional[str] = None) -> str:
+    async def generate_prompt(
+        self,
+        description: str,
+        workflow_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> str:
         """生成 Prompt"""
         try:
             self.is_generating_prompt = True
-            self._notify_state_change('is_generating_prompt', True)
-            self._notify_state_change('prompt_generation_progress', '正在生成 Prompt...')
+            self._notify_state_change('is_generating_prompt', True, user_id=user_id)
+            self._notify_state_change('prompt_generation_progress', '正在生成 Prompt...', user_id=user_id)
 
             # 获取工作流专属模板（无则回退到全局模板）
             workflow_template = None
@@ -107,16 +130,16 @@ class AIDrawService:
 
             prompt = await asyncio.to_thread(self.ai_prompt.generate, description, workflow_template)
             
-            self._notify_state_change('prompt_generation_progress', 'Prompt 生成完成')
+            self._notify_state_change('prompt_generation_progress', 'Prompt 生成完成', user_id=user_id)
             return prompt
             
         except Exception as e:
             error_msg = f"Prompt 生成失败: {str(e)}"
-            self._notify_state_change('prompt_generation_progress', error_msg)
+            self._notify_state_change('prompt_generation_progress', error_msg, user_id=user_id)
             raise
         finally:
             self.is_generating_prompt = False
-            self._notify_state_change('is_generating_prompt', False)
+            self._notify_state_change('is_generating_prompt', False, user_id=user_id)
 
     async def get_upscale_models(self) -> list[str]:
         """查询 ComfyUI 当前可用的图片放大模型。"""
@@ -195,18 +218,16 @@ class AIDrawService:
         end_frame_count: Optional[int] = None,
         frame_rate: Optional[float] = None,
         frame_count: Optional[int] = None,
-        send_history: bool = False,
-        session_id: Optional[str] = None,
         # PixelLab 动画参数
         action: str = "walk",
         view: str = "sidescroller",
         direction: str = "east",
         # Kling 首尾帧图生视频参数
         kling_options: Optional[dict] = None,
+        # 元数据驱动的工作流参数
+        workflow_options: Optional[dict] = None,
     ) -> list:
         """生成图像 - 使用用户选择的工作流"""
-        generation_task = asyncio.current_task()
-        self._generation_task = generation_task
         try:
             self.is_generating = True
             self._notify_state_change('is_generating', True)
@@ -252,8 +273,63 @@ class AIDrawService:
                     target_width, target_height = width, height
                     print(f"[AIDrawService] 目标输出尺寸: {target_width}x{target_height}")
             
+            # ── minimax_h3：文本/可选首尾帧生成原生带声音视频 ───────────────
+            if workflow_type == 'minimax_h3':
+                duration, aspect_ratio = validate_minimax_h3_options(workflow_options)
+                raw_video_b64 = None
+
+                def h3_finish_callback(data):
+                    nonlocal raw_video_b64
+                    raw_video_b64 = data
+
+                await self.comfyui.generate_minimax_h3(
+                    finish_callback=h3_finish_callback,
+                    prompt_text=prompt,
+                    start_image_base64=image_base64,
+                    end_image_base64=image_end_base64,
+                    duration=duration,
+                    aspect_ratio=aspect_ratio,
+                )
+                if not raw_video_b64:
+                    raise RuntimeError("MiniMax H3 未返回有效视频")
+
+                raw = raw_video_b64.split(',', 1)[1] if raw_video_b64.startswith('data:') else raw_video_b64
+                video_bytes = await asyncio.to_thread(base64.b64decode, raw)
+                relative_dir = Path("video") / str(self.current_user_id or "unassigned")
+                save_dir = Path(config.paths.upload_dir) / relative_dir
+                save_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"video_{uuid.uuid4().hex}.mp4"
+                filepath = save_dir / filename
+
+                def _write_h3_file():
+                    with open(filepath, "wb") as video_file:
+                        video_file.write(video_bytes)
+
+                write_task = asyncio.create_task(asyncio.to_thread(_write_h3_file))
+                try:
+                    await asyncio.shield(write_task)
+                except asyncio.CancelledError as cancellation:
+                    try:
+                        await write_task
+                    except Exception:
+                        pass
+                    finally:
+                        filepath.unlink(missing_ok=True)
+                    raise cancellation
+                result_video = f"/uploads/{(relative_dir / filename).as_posix()}"
+                self._notify_state_change('media_generated', {
+                    'image': result_video,
+                    'index': 0,
+                    'total': 1,
+                })
+                images = [result_video]
+                print(
+                    f"[AIDrawService] MiniMax H3 生成成功 "
+                    f"({duration}s, {aspect_ratio}, native stereo audio)"
+                )
+
             # ── flf2v：首尾帧生视频 ──────────────────────────────────────────
-            if workflow_type == 'flf2v':
+            elif workflow_type == 'flf2v':
                 if not image_base64:
                     raise ValueError("flf2v 工作流需要提供开始帧图片")
                 if not image_end_base64:
@@ -468,9 +544,8 @@ class AIDrawService:
                         })
                     
                     if workflow_type == 'nano_banana_pro':
-                        # 全部走 Gemini：有历史携带历史，无历史单轮；参考图直接传入
-                        await self.generate_nano_banana_gemini_chat(
-                            session_id=session_id or '',
+                        # Gemini 单轮图像生成（参考图直接传入）
+                        await self.generate_nano_banana_gemini(
                             current_prompt=prompt,
                             current_image_b64=image_base64,
                             current_image_b64_2=image_base64_2,
@@ -555,48 +630,29 @@ class AIDrawService:
             traceback.print_exc()
             self._notify_state_change('generation_progress', error_msg)
             raise
-        finally:
-            if self._generation_task is generation_task:
-                self._generation_task = None
-            self.is_generating = False
-            self._notify_state_change('is_generating', False)
-
     async def stop_generation(self) -> None:
         """中断 ComfyUI 并取消当前生成协程。"""
+        self.is_generation_cancel_requested = True
+        task = self._generation_task
         try:
-            await self.comfyui.interrupt()
+            await self.comfyui.interrupt(task)
         except Exception as error:
             print(f"[AIDrawService] ComfyUI 中断请求失败: {error}")
 
-        task = self._generation_task
-        if task and task is not asyncio.current_task() and not task.done():
+        if task is self._generation_task and task and task is not asyncio.current_task() and not task.done():
             task.cancel()
-        self.is_generating = False
-        self._notify_state_change('is_generating', False)
     
-    # ── Gemini 多轮对话辅助 ─────────────────────────────────────────────────
+    # ── Gemini 单轮图像生成 ─────────────────────────────────────────────────
 
-    def _load_image_b64(self, path: str) -> Optional[str]:
-        """从文件路径或 data URL 读取图片，返回 base64（不含前缀），失败返回 None"""
-        try:
-            if path:
-                return normalize_image_reference(path, get_config().paths.upload_dir)
-        except Exception as e:
-            print(f"[AIDrawService] 读取图片失败 ({str(path)[:60]}): {e}")
-        return None
-
-    async def generate_nano_banana_gemini_chat(
+    async def generate_nano_banana_gemini(
         self,
-        session_id: str,
         current_prompt: str,
         current_image_b64: Optional[str],
         current_image_b64_2: Optional[str],
         current_image_b64_3: Optional[str],
         finish_callback,
     ):
-        """使用 Gemini 多轮对话路径生成图像（nano_banana_pro + send_history）"""
-        from server.database import get_db_session
-        from server.models import ChatMessage, GeneratedImage
+        """使用 Gemini（Nano Banana）单轮生成图像（nano_banana_pro）"""
         from utils.gemini_chat import GeminiChat
 
         from utils.config_loader import get_nano_banana_config
@@ -604,86 +660,11 @@ class AIDrawService:
         if not nano_banana_cfg.api_key:
             raise ValueError("未配置 NANO_BANANA_API_KEY，无法调用 Gemini")
 
-        # ── 从数据库读取历史对话（只取完整轮次：user + assistant 配对） ──
-        history = []
-        with get_db_session() as db:
-            messages = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
-                .all()
-            )
-
-            i = 0
-            while i < len(messages):
-                msg = messages[i]
-                if msg.type != 'user':
-                    i += 1
-                    continue
-
-                # 跳过 flf2v 工作流的轮次（含其 assistant 回复）
-                if msg.workflow == 'flf2v':
-                    i += 1
-                    if i < len(messages) and messages[i].type == 'assistant':
-                        i += 1
-                    continue
-
-                # 必须有紧随的 assistant 消息，否则是当前正在进行的请求，跳过
-                if i + 1 >= len(messages) or messages[i + 1].type != 'assistant':
-                    i += 1
-                    continue
-
-                assistant_msg = messages[i + 1]
-
-                # 收集该轮用户上传的图片
-                user_images = []
-                for ref in [msg.reference_image, msg.reference_image_2, msg.reference_image_3]:
-                    b64 = self._load_image_b64(ref)
-                    if b64:
-                        user_images.append(b64)
-
-                # 收集该轮 AI 生成的图片
-                result_images = []
-                gen_imgs = (
-                    db.query(GeneratedImage)
-                    .filter(GeneratedImage.message_id == assistant_msg.message_id)
-                    .order_by(GeneratedImage.image_index.asc())
-                    .all()
-                )
-                for gen_img in gen_imgs:
-                    b64 = self._load_image_b64(gen_img.file_path)
-                    if b64:
-                        result_images.append(b64)
-
-                # 跳过图片已被清空的轮次（编辑后重新生成时该轮图片会被清空）
-                if not result_images:
-                    i += 2
-                    continue
-
-                history.append({
-                    "prompt": msg.content or "",
-                    "images": user_images,
-                    "result_images": result_images,
-                })
-                i += 2
-
-        print(f"[AIDrawService] Gemini 多轮对话，历史轮次: {len(history)}")
-
         # ── 构建当前图片列表 ───────────────────────────────────────────────
         current_images = [
             img for img in [current_image_b64, current_image_b64_2, current_image_b64_3]
             if img
         ]
-
-        # 无用户参考图时，将最近一轮的生成结果作为 context 注入，帮助模型保持一致性
-        last_result_image_b64: Optional[str] = None
-        if history:
-            for turn in reversed(history):
-                imgs = turn.get("result_images") or []
-                if imgs:
-                    last_result_image_b64 = imgs[-1]
-                    break
-        context_image = last_result_image_b64 if not current_images else None
 
         # ── 调用 Gemini（在线程池中执行，避免阻塞事件循环） ───────────────
         gemini = GeminiChat(
@@ -695,8 +676,6 @@ class AIDrawService:
             gemini.generate,
             current_prompt=current_prompt,
             current_images=current_images,
-            history=history,
-            context_image=context_image,
         )
 
         if not result_imgs:
@@ -860,13 +839,75 @@ class AIDrawService:
     def clear_previews(self):
         """清空预览图片"""
         self.preview_items = []
-        self._notify_state_change('preview_update', {'action': 'clear'})
-    
+        self._notify_state_change('preview_update', {'action': 'clear'}, broadcast=True)
+
+    # ── 任务上下文 / 断线恢复支持 ──────────────────────────────────────────
+
+    def set_task_context(
+        self,
+        user_id: Optional[int],
+        session_id: Optional[str],
+        message_id: Optional[str],
+        task_id: str,
+        workflow: Optional[str],
+        count: int,
+    ) -> None:
+        """在调度生成前记录当前任务关联信息（用于服务端落库与断线恢复）。"""
+        self.current_user_id = user_id
+        self.current_session_id = session_id
+        self.current_message_id = message_id
+        self.current_task_id = task_id
+        self.current_workflow = workflow
+        self.current_count = count or 1
+        self.is_generation_cancel_requested = False
+        self.is_persisting_generation = False
+        self.preview_items = []
+        if message_id:
+            # 任务进入 running 时即写一次快照，便于客户端在生成过程中重连也能恢复 UI
+            self._record_last_task(status='running', images=[], error=None)
+
+    def clear_task_context(self) -> None:
+        """生成结束时清理 current_*，但保留 last_task 供后续重连补拉。"""
+        self.current_user_id = None
+        self.current_session_id = None
+        self.current_message_id = None
+        self.current_task_id = None
+        self.current_workflow = None
+        self.current_count = 1
+        self.is_generation_cancel_requested = False
+        self.is_persisting_generation = False
+
+    def _record_last_task(
+        self,
+        status: str,
+        images: Optional[list] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """记录最近一次任务快照（不广播，避免向其他用户泄漏）。"""
+        snapshot = {
+            'message_id': self.current_message_id,
+            'task_id': self.current_task_id,
+            'session_id': self.current_session_id,
+            'user_id': self.current_user_id,
+            'workflow': self.current_workflow,
+            'status': status,
+            'images': list(images or []),
+            'error': error,
+            'finished_at': time.time() if status != 'running' else None,
+        }
+        self.last_task = snapshot
+        if self.current_user_id is not None:
+            self.last_tasks[self.current_user_id] = snapshot
+
+    def get_last_task(self, user_id: int) -> dict:
+        """Return the latest in-memory task snapshot for one user."""
+        return self.last_tasks.get(user_id, {})
+
     def switch_workflow(self, workflow_type: str):
         """切换工作流（纯 Gemini 工作流无需加载 ComfyUI 文件）"""
         if workflow_type in self.comfyui.workflow_configs:
             self.comfyui.switch_workflow(workflow_type)
-        self._notify_state_change('workflow_type', workflow_type)
+        self._notify_state_change('workflow_type', workflow_type, broadcast=True)
     
     def get_available_workflows(self) -> list[str]:
         """获取可用的工作流列表"""
@@ -877,11 +918,19 @@ class AIDrawService:
         """获取当前工作流类型"""
         return self.comfyui.get_current_workflow_type()
     
-    def _notify_state_change(self, field: str, value: Any):
+    def _notify_state_change(
+        self,
+        field: str,
+        value: Any,
+        *,
+        user_id: Optional[int] = None,
+        broadcast: bool = False,
+    ):
         """通知状态变化"""
         if self.on_state_change:
             try:
-                self.on_state_change(field, value)
+                target_user_id = None if broadcast else (user_id if user_id is not None else self.current_user_id)
+                self.on_state_change(field, value, target_user_id)
             except Exception as e:
                 print(f"[AIDrawService] 状态变化回调失败: {e}")
 

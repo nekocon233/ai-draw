@@ -14,6 +14,8 @@ const loadFrameEditors = () => import('./FrameExtractionModal');
 const FrameExtractionModal = lazy(loadFrameEditors);
 const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default: module.ImageEditorModal })));
 
+type EditReferenceSlot = 'img1' | 'img2' | 'img3' | 'imgEnd';
+
 export default function ResultGrid() {
   const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore(useShallow(state => ({
     chatHistory: state.chatHistory,
@@ -30,7 +32,7 @@ export default function ResultGrid() {
     appendChatMedia: state.appendChatMedia,
   })));
   const activeWorkflow = availableWorkflows.find(item => item.key === currentWorkflow);
-  const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_multi_image;
+  const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_optional_keyframes || activeWorkflow?.supports_multi_image;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -189,12 +191,13 @@ export default function ResultGrid() {
     img1?: string | null;
     img2?: string | null;
     img3?: string | null;
+    imgEnd?: string | null;
   }>({});
   const editFileInputRef = useRef<HTMLInputElement>(null);
-  const activeRefSlot = useRef<1 | 2 | 3>(1);
+  const activeRefSlot = useRef<EditReferenceSlot>('img1');
 
 
-  const startEdit = useCallback((message: { id: string; content: string; params?: { promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string } }) => {
+  const startEdit = useCallback((message: { id: string; content: string; params?: { promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string; referenceImageEnd?: string } }) => {
     setEditingMsgId(message.id);
     setEditContent(message.content);
     setEditPromptEnd(message.params?.promptEnd || '');
@@ -202,6 +205,7 @@ export default function ResultGrid() {
       img1: message.params?.referenceImage ?? null,
       img2: message.params?.referenceImage2 ?? null,
       img3: message.params?.referenceImage3 ?? null,
+      imgEnd: message.params?.referenceImageEnd ?? null,
     });
   }, []);
 
@@ -217,6 +221,7 @@ export default function ResultGrid() {
       referenceImage: refImages.img1,
       referenceImage2: refImages.img2,
       referenceImage3: refImages.img3,
+      referenceImageEnd: refImages.imgEnd,
     }, promptEnd);
   }, [editAndRegenerateMessage, editContent, editPromptEnd, editRefImages]);
 
@@ -227,13 +232,42 @@ export default function ResultGrid() {
     reader.onload = (ev) => {
       const base64 = ev.target?.result as string;
       const slot = activeRefSlot.current;
-      setEditRefImages(prev => ({ ...prev, [`img${slot}`]: base64 }));
+      setEditRefImages(prev => ({ ...prev, [slot]: base64 }));
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   }, []);
 
   const isVideo = (url: string) => url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url) || url.includes('/video/');
+
+  const getEditReferenceSlots = (params?: {
+    workflow: string;
+    referenceImage?: string;
+    referenceImage2?: string;
+    referenceImage3?: string;
+    referenceImageEnd?: string;
+  }): Array<{ key: EditReferenceSlot; label: string }> => {
+    if (!params) return [];
+    const workflow = availableWorkflows.find(item => item.key === params.workflow);
+    const supportsEnd = Boolean(workflow?.requires_end_image || workflow?.supports_optional_keyframes);
+    const supportsMulti = Boolean(workflow?.supports_multi_image);
+    const hasReference = Boolean(
+      params.referenceImage || params.referenceImage2 || params.referenceImage3 || params.referenceImageEnd,
+    );
+    if (!hasReference && !workflow?.requires_image && !supportsEnd && !supportsMulti) return [];
+
+    const slots: Array<{ key: EditReferenceSlot; label: string }> = [
+      { key: 'img1', label: supportsEnd ? '首帧' : '参考图 1' },
+    ];
+    if (supportsMulti || params.referenceImage2 || params.referenceImage3) {
+      slots.push(
+        { key: 'img2', label: '参考图 2' },
+        { key: 'img3', label: '参考图 3' },
+      );
+    }
+    if (supportsEnd || params.referenceImageEnd) slots.push({ key: 'imgEnd', label: '尾帧' });
+    return slots;
+  };
 
   // 跟踪会话切换：仅记录 pending，真正的滚动等新会话历史加载后处理
   useEffect(() => {
@@ -475,7 +509,7 @@ export default function ResultGrid() {
     const state = useAppStore.getState();
     const workflow = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
     if (!state.referenceImage) state.setReferenceImage(imageUrl);
-    else if (workflow?.requires_end_image && !state.referenceImageEnd) state.setReferenceImageEnd(imageUrl);
+    else if ((workflow?.requires_end_image || workflow?.supports_optional_keyframes) && !state.referenceImageEnd) state.setReferenceImageEnd(imageUrl);
     else if (workflow?.supports_multi_image && !state.referenceImage2) state.setReferenceImage2(imageUrl);
     else if (workflow?.supports_multi_image && !state.referenceImage3) state.setReferenceImage3(imageUrl);
     else state.setReferenceImage(imageUrl);
@@ -543,41 +577,40 @@ export default function ResultGrid() {
                     /* ======= 编辑模式 ======= */
                     <div className="chat-message-edit-mode">
                       {/* 参考图编辑区 */}
-                      {(editRefImages.img1 || editRefImages.img2 || editRefImages.img3 ||
-                        message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3) && (
+                      {getEditReferenceSlots(message.params).length > 0 && (
                         <div className="user-reference-images edit-ref-images">
-                          {(['img1', 'img2', 'img3'] as const).map((slot, i) => {
-                            const src = editRefImages[slot];
-                            const slotNum = (i + 1) as 1 | 2 | 3;
+                          {getEditReferenceSlots(message.params).map((slot) => {
+                            const src = editRefImages[slot.key];
                             return src ? (
-                              <div key={slot} className="edit-ref-image-tile">
-                                <img src={src} alt={`参考图 ${slotNum}`} className="edit-ref-thumb" />
+                              <div key={slot.key} className="edit-ref-image-tile">
+                                <img src={src} alt={slot.label} className="edit-ref-thumb" />
                                 <button
                                   type="button"
                                   className="edit-ref-remove"
-                                  onClick={() => setEditRefImages(prev => ({ ...prev, [slot]: null }))}
-                                  aria-label={`移除参考图 ${slotNum}`}
+                                  onClick={() => setEditRefImages(prev => ({ ...prev, [slot.key]: null }))}
+                                  aria-label={`移除${slot.label}`}
                                 >
                                   <CloseOutlined />
                                 </button>
                                 <button
                                   type="button"
                                   className="edit-ref-replace"
-                                  onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
-                                  aria-label={`更换参考图 ${slotNum}`}
+                                  onClick={() => { activeRefSlot.current = slot.key; editFileInputRef.current?.click(); }}
+                                  aria-label={`更换${slot.label}`}
                                 >
                                   <EditOutlined />
                                 </button>
                               </div>
                             ) : (
                               <button
-                                key={slot}
+                                key={slot.key}
                                 type="button"
                                 className="edit-ref-add"
-                                onClick={() => { activeRefSlot.current = slotNum; editFileInputRef.current?.click(); }}
-                                aria-label={`添加参考图 ${slotNum}`}
+                                onClick={() => { activeRefSlot.current = slot.key; editFileInputRef.current?.click(); }}
+                                aria-label={`添加${slot.label}`}
                               >
                                 <PlusOutlined />
+                                <span>{slot.label}</span>
                               </button>
                             );
                           })}

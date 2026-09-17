@@ -16,6 +16,11 @@ from server.auth import (
     authenticate_user
 )
 from utils.file_storage import get_file_storage
+from utils.media_file_references import (
+    canonical_upload_url,
+    delete_unreferenced_media,
+    user_owns_media_path,
+)
 
 router = APIRouter()
 
@@ -263,6 +268,10 @@ def get_chat_history(
                 params["startFrameCount"] = msg.start_frame_count
             if msg.end_frame_count is not None:
                 params["endFrameCount"] = msg.end_frame_count
+            if msg.frame_count is not None:
+                params["frameCount"] = msg.frame_count
+            if msg.workflow_options:
+                params["workflowOptions"] = msg.workflow_options
             msg_dict["params"] = params
         elif msg.type == "assistant":
             # 加载关联的图片
@@ -290,8 +299,18 @@ def clear_chat_history(
     db: Session = Depends(get_db)
 ):
     """清空聊天历史"""
+    messages = db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).all()
+    file_paths = [image.file_path for message in messages for image in message.images]
+    for message in messages:
+        file_paths.extend(filter(None, (
+            message.reference_image,
+            message.reference_image_2,
+            message.reference_image_3,
+            message.reference_image_end,
+        )))
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
     db.commit()
+    delete_unreferenced_media(db, file_paths)
     return {"success": True, "message": "聊天历史已清空"}
 
 # ============ 参考图 API ============
@@ -378,17 +397,47 @@ def save_chat_message(
     # 兼容两种字段名：id 或 message_id
     msg_id = message.get("message_id") or message.get("id")
     session_id = message.get("session_id")
+
+    if not isinstance(msg_id, str) or not msg_id or len(msg_id) > 50:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="消息ID无效")
     
     if not session_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="缺少会话ID"
         )
+
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    if message.get("type") == "assistant":
+        if not msg_id.endswith('-reply'):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="助手消息 ID 格式无效")
+        source_message = db.query(ChatMessage.id).filter(
+            ChatMessage.user_id == current_user.id,
+            ChatMessage.session_id == session_id,
+            ChatMessage.message_id == msg_id.removesuffix('-reply'),
+            ChatMessage.type == 'user',
+        ).first()
+        if not source_message:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="找不到对应的用户消息")
+        for image in message.get("images", []):
+            if isinstance(image, str):
+                canonical_path = canonical_upload_url(image)
+                if canonical_path and not user_owns_media_path(db, current_user.id, canonical_path):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="媒体文件不属于当前用户")
+                if not canonical_path and image.startswith(('/', 'uploads/')):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="媒体文件路径无效")
     
     try:
         # 检查消息是否已存在
         existing = db.query(ChatMessage).filter(
             ChatMessage.user_id == current_user.id,
+            ChatMessage.session_id == session_id,
             ChatMessage.message_id == msg_id
         ).first()
         
@@ -396,37 +445,43 @@ def save_chat_message(
             # 如果是 assistant 消息且有新图片，更新图片
             if message["type"] == "assistant" and "images" in message:
                 file_storage = get_file_storage()
-                for idx, img_data in enumerate(message["images"]):
-                    if isinstance(img_data, str):  # base64 图片数据或文件路径
-                        try:
-                            # 检查该图片是否已存在
-                            existing_img = db.query(GeneratedImage).filter(
-                                GeneratedImage.message_id == msg_id,
-                                GeneratedImage.image_index == idx
-                            ).first()
-                            
-                            if not existing_img:
-                                # 如果已是文件路径（视频等），直接存储，不走 base64 解码
-                                if img_data.startswith('/'):
-                                    file_path = img_data
-                                else:
-                                    file_path = file_storage.save_generated_image(
-                                        base64_data=img_data,
-                                        user_id=current_user.id,
-                                        message_id=msg_id,
-                                        index=idx
-                                    )
-                                gen_img = GeneratedImage(
-                                    message_id=msg_id,
-                                    file_path=file_path,
-                                    image_index=idx
-                                )
-                                db.add(gen_img)
-                        except Exception as e:
-                            print(f"保存图片失败: {e}")
-                            continue
-                
+                incoming_images = [img for img in message["images"] if isinstance(img, str) and img]
+                existing_images = {image.image_index: image for image in existing.images}
+                old_paths = []
+                new_paths = []
+                for idx, img_data in enumerate(incoming_images):
+                    try:
+                        canonical_path = canonical_upload_url(img_data)
+                        if canonical_path:
+                            file_path = canonical_path
+                        else:
+                            file_path = file_storage.save_generated_image(
+                                base64_data=img_data,
+                                user_id=current_user.id,
+                                message_id=msg_id,
+                                index=idx,
+                            )
+                        new_paths.append(file_path)
+                        existing_img = existing_images.pop(idx, None)
+                        if existing_img:
+                            if existing_img.file_path != file_path:
+                                old_paths.append(existing_img.file_path)
+                                existing_img.file_path = file_path
+                        else:
+                            db.add(GeneratedImage(
+                                message_id=msg_id,
+                                file_path=file_path,
+                                image_index=idx,
+                            ))
+                    except Exception as e:
+                        print(f"保存图片失败: {e}")
+                        continue
+
+                for stale_image in existing_images.values():
+                    old_paths.append(stale_image.file_path)
+                    db.delete(stale_image)
                 db.commit()
+                delete_unreferenced_media(db, set(old_paths) - set(new_paths))
             return {"success": True, "message": "消息已存在，已更新图片"}
         
         chat_msg = ChatMessage(
@@ -447,6 +502,8 @@ def save_chat_message(
             frame_rate=message.get("frame_rate"),
             start_frame_count=message.get("start_frame_count"),
             end_frame_count=message.get("end_frame_count"),
+            frame_count=message.get("frame_count"),
+            workflow_options=message.get("workflow_options"),
         )
         db.add(chat_msg)
         
@@ -457,8 +514,9 @@ def save_chat_message(
                 if isinstance(img_data, str):  # base64 图片数据或文件路径
                     try:
                         # 如果已是文件路径（视频等以 / 开头），直接存储，不走 base64 解码
-                        if img_data.startswith('/'):
-                            file_path = img_data
+                        canonical_path = canonical_upload_url(img_data)
+                        if canonical_path:
+                            file_path = canonical_path
                         else:
                             # 保存到文件系统
                             file_path = file_storage.save_generated_image(
@@ -475,13 +533,7 @@ def save_chat_message(
                         db.add(gen_img)
                     except Exception as e:
                         print(f"[保存图片] 保存失败: {e}")
-                        # 失败时依然保存 base64 作为备选
-                        gen_img = GeneratedImage(
-                            message_id=msg_id,
-                            image_index=idx,
-                            file_path=img_data
-                        )
-                        db.add(gen_img)
+                        raise ValueError(f"保存图片失败: {e}") from e
         
         db.commit()
         return {"success": True}

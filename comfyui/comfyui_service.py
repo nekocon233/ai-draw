@@ -225,9 +225,9 @@ class ComfyUIService:
         """返回远端 ComfyUI 节点定义。"""
         return await self.request.get_object_info(node_name)
 
-    async def interrupt(self) -> None:
-        """中断当前 ComfyUI 执行。"""
-        await self.request.interrupt()
+    async def interrupt(self, task=None) -> None:
+        """中断指定生成协程对应的 ComfyUI 执行。"""
+        await self.request.interrupt(task)
 
     async def upscale_image(self, image_base64: str, model_name: str, scale: int, native_scale: int) -> str:
         """使用独立工作流放大图片，不切换当前生成工作流。"""
@@ -346,6 +346,36 @@ class ComfyUIService:
         else:
             print(f"[ComfyUIService] I2V 视频生成失败: {result.error}")
             finish_callback(None)
+
+    async def generate_minimax_h3(
+        self,
+        finish_callback,
+        prompt_text: str,
+        start_image_base64=None,
+        end_image_base64=None,
+        seed=None,
+        duration: float = 5,
+        aspect_ratio: str = "auto",
+    ):
+        """使用 H3-Base-FL2VA 生成带原生双声道的视频。"""
+        if seed is None:
+            seed = random.randrange(0, 2**63)
+
+        # 可选关键帧会删除工作流节点，每次请求必须使用新副本。
+        fresh_workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        result = await self.request.generate_minimax_h3(
+            fresh_workflow,
+            prompt_text,
+            seed,
+            start_image_base64=start_image_base64,
+            end_image_base64=end_image_base64,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+        )
+        if not result.is_success or not result.data:
+            raise RuntimeError(result.error or "MiniMax H3 未返回有效视频")
+        print("[ComfyUIService] MiniMax H3 音视频生成成功")
+        finish_callback(result.data)
 
     async def get_state(self) -> ComfyUIRequestState:
         """

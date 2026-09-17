@@ -87,12 +87,15 @@ export interface ChatMessage {
     loraPrompt?: string;
     promptEnd?: string;
     referenceImage?: string;
+    referenceImage2?: string;
+    referenceImage3?: string;
     referenceImageEnd?: string;
     isLoop?: boolean;
     frameRate?: number;
     startFrameCount?: number;
     endFrameCount?: number;
     frameCount?: number;   // i2v 总帧数
+    workflowOptions?: Record<string, string | number>;
   };
 }
 

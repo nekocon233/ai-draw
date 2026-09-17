@@ -40,15 +40,30 @@ export interface GenerateMediaRequest {
   end_frame_count?: number;
   frame_rate?: number;
   frame_count?: number;  // i2v 总帧数
-  // Gemini 多轮对话（nano_banana_pro 专用）
-  send_history?: boolean;
-  session_id?: string;
   // PixelLab 动画参数
   action?: string;
   view?: string;
   direction?: string;
   // Kling 首尾帧图生视频参数（kling_flf2v 专用）
   kling_options?: Record<string, WorkflowParameterValue>;
+  workflow_options?: Record<string, WorkflowParameterValue>;
+  // 任务关联（用于服务端落库与断线恢复）
+  message_id?: string;       // 助手消息 ID（{user_msg_id}-reply）
+  session_id?: string;       // 所属会话 ID
+  task_id?: string;
+}
+
+// 最近一次生成任务快照（断线补拉用）
+export interface LastTaskInfo {
+  message_id: string | null;
+  session_id: string | null;
+  task_id?: string | null;
+  user_id?: number | null;
+  workflow?: string | null;
+  status: 'running' | 'completed' | 'error';
+  images: string[];
+  error: string | null;
+  finished_at: number | null;
 }
 
 export interface GenerateMediaResponse {
@@ -84,6 +99,7 @@ export interface WorkflowMetadata {
   description: string;
   requires_image: boolean;
   requires_end_image?: boolean;
+  supports_optional_keyframes?: boolean;
   supports_original_size?: boolean;
   supports_loop?: boolean;
   output_type?: string;   // 'image' | 'video'
@@ -126,5 +142,15 @@ export interface WSMessage {
   type: 'state_change' | 'progress' | 'error' | 'result' | 'initial_state';
   field?: string;
   value?: any;
-  data?: any;
+  message_id?: string | null;
+  session_id?: string | null;
+  task_id?: string | null;
+  data?: {
+    is_generating?: boolean;
+    is_generating_prompt?: boolean;
+    is_service_available?: boolean;
+    preview_items?: unknown[];
+    last_task?: LastTaskInfo | null;
+    [key: string]: unknown;
+  };
 }
