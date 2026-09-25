@@ -1,0 +1,83 @@
+# Fresh UI-managed run. The original 4000-step adapter remains separate.
+job: extension
+config:
+  name: AmeniwaQwen21Bilingual
+  process:
+    - type: diffusion_trainer
+      training_folder: /app/ai-toolkit/output
+      sqlite_db_path: /app/ai-toolkit/aitk_db.db
+      device: cuda:0
+      network:
+        type: lora
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 200
+        max_step_saves_to_keep: 20
+      datasets:
+        - folder_path: /app/ai-toolkit/datasets/ameniwa_qwen21/train
+          caption_ext: txt
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+      train:
+        batch_size: 1
+        gradient_accumulation: 1
+        steps: 4000
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: shift
+        optimizer: prodigyopt
+        lr: 1.0
+        lr_scheduler: constant
+        optimizer_params:
+          d_coef: 1.0
+          weight_decay: 0.01
+          use_bias_correction: true
+          safeguard_warmup: true
+        dtype: bf16
+        skip_first_sample: false
+        disable_sampling: false
+      model:
+        name_or_path: Comfy-Org/Qwen-Image-2.1
+        arch: qwen_image_2
+        quantize: true
+        qtype: convrot8
+        quantize_te: true
+        qtype_te: convrot8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_transformer_percent: 0.5
+        layer_offloading_text_encoder_percent: 1.0
+      sample:
+        sampler: flowmatch
+        sample_every: 400
+        width: 1024
+        height: 1024
+        prompts:
+          - 一个女孩
+          - 一个二次元女孩
+          - 1girl, solo, black_hair, twintails, school_uniform, white_background
+          - 一个穿黄色雨衣的女孩，站在公交站旁，手持一把蓝色雨伞。
+          - A girl wearing a blue jacket, holding a red cup, simple white background.
+        neg: ""
+        seed: 42
+        walk_seed: false
+        guidance_scale: 1
+        network_multiplier: 0.8
+        sample_steps: 40
+      logging:
+        log_every: 1
+        use_ui_logger: true
+        use_wandb: false
+meta:
+  name: "[name]"
+  version: "2.0"
+  base_model: Qwen/Qwen-Image-2.1
+  caption_format: original_english_then_chinese_paragraph

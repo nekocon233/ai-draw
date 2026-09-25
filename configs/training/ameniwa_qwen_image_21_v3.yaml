@@ -1,0 +1,121 @@
+# v3: style-free Chinese captions plus sketch-to-finished edit pairs, trained fresh from the base model.
+# Dataset: scripts/prepare_qwen_image_21_v3.py. Prompts never describe painting style; the LoRA must.
+job: extension
+config:
+  name: AmeniwaQwen21V3
+  process:
+    - type: diffusion_trainer
+      training_folder: /app/ai-toolkit/output
+      sqlite_db_path: /app/ai-toolkit/aitk_db.db
+      device: cuda:0
+      network:
+        type: lora
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 30
+      datasets:
+        - folder_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/t2i_long
+          caption_ext: txt
+          caption_dropout_rate: 0.1
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+        - folder_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/t2i_short
+          caption_ext: txt
+          caption_dropout_rate: 0.1
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+        # Edit pairs are stored at their 1024 bucket size: the cached prompt embedding holds the
+        # reference slots of that exact size, so these groups must not train at other resolutions.
+        - folder_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/edit_manga
+          control_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/edit_manga_control
+          caption_ext: txt
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [1024]
+        - folder_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/edit_coarse
+          control_path: /app/ai-toolkit/datasets/ameniwa_qwen21_v3/edit_coarse_control
+          caption_ext: txt
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [1024]
+      train:
+        batch_size: 1
+        gradient_accumulation: 1
+        steps: 5000
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: shift
+        optimizer: prodigyopt
+        lr: 1.0
+        lr_scheduler: constant
+        optimizer_params:
+          d_coef: 1.0
+          weight_decay: 0.01
+          use_bias_correction: true
+          safeguard_warmup: true
+        dtype: bf16
+        skip_first_sample: false
+        disable_sampling: false
+      model:
+        name_or_path: Comfy-Org/Qwen-Image-2.1
+        arch: qwen_image_2
+        quantize: true
+        qtype: convrot8
+        quantize_te: true
+        qtype_te: convrot8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_transformer_percent: 0.5
+        layer_offloading_text_encoder_percent: 1.0
+      sample:
+        sampler: flowmatch
+        sample_every: 500
+        width: 1024
+        height: 1024
+        samples:
+          - prompt: 一个女孩
+          - prompt: 一个穿黄色雨衣的女孩，站在公交站旁，手持一把蓝色雨伞。
+          # The user's real sketch with the preset only, exactly as the app sends it.
+          - prompt: <image1> 是线稿草稿。保持草稿中人物的姿势、动作、构图、镜头角度和画面比例不变。将草稿重新绘制成完成度高的成品：线条完整连贯，把草稿里重复、断开的笔画整理成单一、确定的线条；补全五官、手部等未画完的细节；为人物和画面中的物体完整上色，不漏色、不溢色；按统一的光源方向补充明暗，光影关系合理。不要保留草稿的铅笔线、辅助线和涂抹痕迹。
+            ctrl_img: /app/ai-toolkit/datasets/ameniwa_qwen21_v3_samples/user_sketch.png
+            width: 1120
+            height: 960
+          - prompt: <image1> 是线稿草稿。保持草稿中人物的姿势、动作、构图、镜头角度和画面比例不变。将草稿重新绘制成完成度高的成品：线条完整连贯，把草稿里重复、断开的笔画整理成单一、确定的线条；补全五官、手部等未画完的细节；为人物和画面中的物体完整上色，不漏色、不溢色；按统一的光源方向补充明暗，光影关系合理。不要保留草稿的铅笔线、辅助线和涂抹痕迹。人物穿红色连帽卫衣和黑色长裤，背景为浅灰色。
+            ctrl_img: /app/ai-toolkit/datasets/ameniwa_qwen21_v3_samples/user_sketch.png
+            width: 1120
+            height: 960
+          # Held-out images: the finished original is the reference answer.
+          - prompt: <image1> 是线稿草稿。保持草稿中人物的姿势、动作、构图、镜头角度和画面比例不变。将草稿重新绘制成完成度高的成品：线条完整连贯，把草稿里重复、断开的笔画整理成单一、确定的线条；补全五官、手部等未画完的细节；为人物和画面中的物体完整上色，不漏色、不溢色；按统一的光源方向补充明暗，光影关系合理。不要保留草稿的铅笔线、辅助线和涂抹痕迹。一名黑灰双马尾女性，穿白衬衫和浅色连帽外套，系蓝蝴蝶结，双手张掌举脸旁，白色背景。画面角落有作者签名。
+            ctrl_img: /app/ai-toolkit/datasets/ameniwa_qwen21_v3_samples/G1EGfU4aQAEOBrm.manga.png
+            width: 928
+            height: 1152
+          - prompt: <image1> 是线稿草稿。保持草稿中人物的姿势、动作、构图、镜头角度和画面比例不变。将草稿重新绘制成完成度高的成品：线条完整连贯，把草稿里重复、断开的笔画整理成单一、确定的线条；补全五官、手部等未画完的细节；为人物和画面中的物体完整上色，不漏色、不溢色；按统一的光源方向补充明暗，光影关系合理。不要保留草稿的铅笔线、辅助线和涂抹痕迹。
+            ctrl_img: /app/ai-toolkit/datasets/ameniwa_qwen21_v3_samples/GhK3BieaYAAQ-46.coarse.png
+            width: 768
+            height: 1376
+        neg: ""
+        seed: 42
+        walk_seed: false
+        guidance_scale: 1
+        network_multiplier: 0.8
+        sample_steps: 40
+      logging:
+        log_every: 1
+        use_ui_logger: true
+        use_wandb: false
+meta:
+  name: "[name]"
+  version: "3.0"
+  base_model: Qwen/Qwen-Image-2.1
+  caption_format: style_free_chinese_plus_sketch_edit_pairs

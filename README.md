@@ -4,13 +4,13 @@
 
 ![ai-draw 界面预览](frontend/public/example.png)
 
-ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发到 ComfyUI、Gemini/Nano Banana、OpenAI 兼容图像 API 和 Kling API。生成结果、聊天会话与用户配置持久化到 PostgreSQL，任务状态和结果通过 WebSocket 推送到前端。
+ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发到 ComfyUI 和 OpenAI 兼容图像 API。所有文字及看图分析通过 Codex 反代调用 `gpt-6-astra`。生成结果、聊天会话与用户配置持久化到 PostgreSQL，任务状态和结果通过 WebSocket 推送到前端。
 
 ## 主要功能
 
 - 文生图、单图/多参考图编辑和图生图。
-- Wan 首尾帧生视频、Wan 图生视频和 Kling 首尾帧生视频。
-- 按工作流生成提示词，支持参考图分析、首尾帧过渡分析和姿势预设。
+- MiniMax H3 首尾帧与动作参考音视频生成。
+- 按工作流扩写提示词，支持动作参考分析和加号菜单中的提示词预设（参考姿势、参考图成品化）。
 - 聊天式创作流程，支持会话置顶、标题总结、历史分页、编辑后重新生成和删除对话轮次。
 - 图片背景移除、2x/4x 放大和批量放大。
 - 视频抽帧、帧范围与帧率控制、逐帧编辑、背景处理和颜色替换。
@@ -23,15 +23,19 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 
 | ID | 后端 | 输入 | 输出 |
 |---|---|---|---|
-| `t2i` | ComfyUI / Z-Image | 文本 | 图片 |
-| `i2i` | ComfyUI / Q-Image | 1-3 张参考图 | 图片 |
-| `nano_banana_pro` | Gemini / Nano Banana | 文本，可选 1-3 张参考图 | 图片 |
+| `qwen_image_21_t2i` | ComfyUI / Qwen-Image-2.1 | 文本，可选专用 LoRA | RGBA PNG |
+| `qwen_image_21_i2i` | ComfyUI / Qwen-Image-2.1 | 文本、1-3 张参考图，可选专用 LoRA | RGBA PNG |
 | `gpt_image` | OpenAI 兼容 API | 文本，可选 1-3 张参考图 | 图片 |
-| `flf2v` | ComfyUI / Wan | 首帧和尾帧 | 视频 |
-| `kling_flf2v` | Kling API | 首帧和尾帧 | 视频 |
-| `i2v` | ComfyUI / Wan | 起始参考图 | 视频 |
+| `minimax_h3` | ComfyUI / MiniMax H3 | 文本，可选首尾关键帧 | 音视频 |
+| `minimax_h3_ref` | ComfyUI / MiniMax H3 Ref2VA | 角色图 + 1–8 张有序动作参考图 | 音视频 |
+
+动作参考视频的使用、模型安装和数据迁移见 [MiniMax H3 动作参考](docs/minimax_h3_reference.md)。
 
 `image_upscale` 和 `image_upscale_invsr` 是内部放大工作流，不会出现在生成工作流选择器中。
+
+Qwen-Image-2.1 的两条执行工作流共享一个生成方式，随参考图自动切换。官方模型、ComfyUI 依赖和 AI Toolkit LoRA 训练说明见 [Qwen-Image-2.1 接入说明](docs/qwen_image_21.md)。
+
+旧生成方式的历史结果继续保留；使用已停用方式的记录需选择可用方式创建新任务。资源清理与历史图片迁移记录见 [工作流清理说明](docs/workflow_retirement.md)。
 
 ## 技术栈
 
@@ -43,7 +47,7 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 - JWT、WebSocket
 - Pillow、OpenCV、ffmpeg
 - rembg、InSPyReNet、BiRefNet
-- ComfyUI、Google GenAI、OpenAI 兼容 API、Kling API
+- ComfyUI、OpenAI 兼容 API、Codex 订阅反代
 
 ### 前端
 
@@ -67,7 +71,7 @@ Browser
                                                    |
 FastAPI BackgroundTasks -> AIDrawService singleton |
   |-- ComfyUI HTTP workflows                       |
-  |-- Gemini / GPT Image / Kling APIs              |
+  |-- GPT Image / Astra 6 via Codex proxy          |
   |-- media processing helpers                     |
   `-- PostgreSQL <---------------------------------'
 ```
@@ -113,7 +117,7 @@ Copy-Item .env.example .env
 
 - `.env.example` 中声明的变量都必须存在，不能通过删除变量来禁用功能。
 - 未启用的外部服务可将对应 API Key 留空；URL 和模型名等必填字段仍需保留有效值。
-- `AI_PROMPT_REUSE_SESSION_TITLE=true` 时，提示词生成会复用会话标题服务的凭据和模型。
+- `AI_PROMPT_PROVIDER=codex`、`CODEX_LLM_MODEL=gpt-6-astra` 统一控制提示词、标题、看图分析和训练标注，连接复用 `GPT_IMAGE_BASE_URL` 与 `GPT_IMAGE_API_KEY`。
 - 注册需要 `INVITE_CODE`，请为 `JWT_SECRET_KEY`、数据库密码和邀请码设置安全值。
 - `COMFYUI_HOST=comfyui` 只在该主机名对后端容器可解析时有效；Compose 本身不会创建 ComfyUI 服务。
 - Redis 配置目前仅为预留字段，应用没有部署或使用 Redis。
@@ -204,7 +208,7 @@ npm --prefix frontend run dev
 | 路径组 | 用途 |
 |---|---|
 | `/api/media/*` | 生成、上传、抽帧、背景移除、放大和导出 |
-| `/api/prompt/*` | 提示词生成、姿势预设、图片和首尾帧分析 |
+| `/api/prompt/*` | 提示词生成、提示词预设、图片和首尾帧分析 |
 | `/api/config/user` | 用户配置读取、保存和删除 |
 | `/api/chat/*` | 会话、消息、历史和会话配置 |
 | `/api/reference-image` | 用户参考图管理 |

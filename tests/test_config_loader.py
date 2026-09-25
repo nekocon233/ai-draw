@@ -13,17 +13,16 @@ from utils.config_loader import (
     AuthConfig,
     ComfyUICloudConfig,
     ComfyUILocalConfig,
+    CodexLLMConfig,
     Config,
     DatabaseConfig,
     GptImageConfig,
     ImageUpscaleConfig,
-    KlingConfig,
-    NanoBananaConfig,
     PathsConfig,
     PixelLabConfig,
+    QwenImage21Config,
     RedisConfig,
     ServerConfig,
-    SessionTitleConfig,
     VideoFramesConfig,
 )
 
@@ -34,16 +33,15 @@ ENV_SETTINGS_CLASSES = (
     AuthConfig,
     ComfyUICloudConfig,
     ComfyUILocalConfig,
+    CodexLLMConfig,
     DatabaseConfig,
     GptImageConfig,
     ImageUpscaleConfig,
-    KlingConfig,
-    NanoBananaConfig,
     PathsConfig,
     PixelLabConfig,
+    QwenImage21Config,
     RedisConfig,
     ServerConfig,
-    SessionTitleConfig,
     VideoFramesConfig,
 )
 
@@ -72,30 +70,28 @@ class ConfigLoaderTests(unittest.TestCase):
             finally:
                 os.chdir(previous_cwd)
 
-        self.assertEqual(config.nano_banana.analysis_model, values["NANO_BANANA_ANALYSIS_MODEL"])
+        self.assertEqual(config.codex_llm.model, "gpt-6-astra")
+        aliases = {field.validation_alias for cls in ENV_SETTINGS_CLASSES for field in cls.model_fields.values()}
+        self.assertTrue(aliases.issubset(values.keys()))
 
     def test_missing_environment_field_fails_validation(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValidationError) as error:
-                SessionTitleConfig(
-                    _env_file=None,
-                    SESSION_TITLE_API_KEY="",
-                    SESSION_TITLE_BASE_URL="https://example.invalid/v1",
-                )
+                CodexLLMConfig(_env_file=None)
 
-        self.assertIn("SESSION_TITLE_MODEL", str(error.exception))
+        self.assertIn("CODEX_LLM_MODEL", str(error.exception))
 
     def test_service_url_cannot_be_blank(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValidationError) as error:
-                SessionTitleConfig(
+                GptImageConfig(
                     _env_file=None,
-                    SESSION_TITLE_API_KEY="",
-                    SESSION_TITLE_BASE_URL="",
-                    SESSION_TITLE_MODEL="test-model",
+                    GPT_IMAGE_API_KEY="",
+                    GPT_IMAGE_BASE_URL="",
+                    GPT_IMAGE_MODEL="test-model",
                 )
 
-        self.assertIn("SESSION_TITLE_BASE_URL", str(error.exception))
+        self.assertIn("GPT_IMAGE_BASE_URL", str(error.exception))
 
 
 if __name__ == "__main__":

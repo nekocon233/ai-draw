@@ -167,55 +167,19 @@ class ComfyUIService:
         """
         self._cleanup_temp_file()
 
-    async def generate_t2i(self, finish_callback, prompt_text, denoise_value, lora_prompt, seed=None):
-        """
-        文生图（Text-to-Image）
-        prompt_text: 文本提示
-        denoise_value: 去噪强度
-        lora_prompt: lora提示词
-        seed: 随机种子
-        finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
-        """
-        if seed is None:
-            # 限制为有符号 64 位整数范围，避免 ComfyUI 返回 400 错误
-            seed = random.randrange(0, 2**63)
-
-        # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_t2i(self.workflow, prompt_text, denoise_value, lora_prompt, seed)
-        if result.is_success:
-            print(f"[ComfyUIService] T2I生成成功")
-            finish_callback(result.data)
-        else:
-            print(f"[ComfyUIService] T2I生成失败: {result.error}")
-            finish_callback(None)
-
-    async def generate_i2i(self, finish_callback, image_base64, prompt_text, denoise_value, lora_prompt, seed=None, image_base64_2=None, image_base64_3=None):
-        """
-        图生图（Image-to-Image）
-        image_base64: 原始图片base64
-        image_base64_2: 第 2 张参考图 base64（可选）
-        image_base64_3: 第 3 张参考图 base64（可选）
-        prompt_text: 文本提示
-        denoise_value: 去噪强度
-        lora_prompt: lora提示词
-        seed: 随机种子
-        finish_callback: 推理完成后回调，参数为生成的base64图片（失败为None）
-        """
-        if seed is None:
-            # 限制为有符号 64 位整数范围，避免 ComfyUI 返回 400 错误
-            seed = random.randrange(0, 2**63)
-
-        # 每次生成使用新鲜的工作流副本，避免节点删除操作污染后续调用
-        fresh_workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
-
-        # 请求ComfyUI服务生成图像（异步）
-        result = await self.request.generate_i2i(fresh_workflow, image_base64, prompt_text, denoise_value, lora_prompt, seed, image_base64_2=image_base64_2, image_base64_3=image_base64_3)
-        if result.is_success:
-            print(f"[ComfyUIService] I2I生成成功")
-            finish_callback(result.data)
-        else:
-            print(f"[ComfyUIService] I2I生成失败: {result.error}")
-            finish_callback(None)
+    async def generate_qwen_image_21(
+        self, finish_callback, prompt_text, images, loras, width=1024, height=1024,
+        use_original_size=True, steps=40, reference_resolution=1024, seed=None,
+    ):
+        workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        result = await self.request.generate_qwen_image_21(
+            workflow, prompt_text, images, loras,
+            random.randrange(0, 2**63) if seed is None else seed,
+            width, height, use_original_size, steps, reference_resolution,
+        )
+        if not result.is_success:
+            raise RuntimeError(result.error or "Qwen-Image-2.1 生成失败")
+        finish_callback(result.data)
 
     async def get_upscale_models(self) -> list[str]:
         """返回远端 ComfyUI 已安装的放大模型。"""
@@ -269,84 +233,6 @@ class ComfyUIService:
             raise RuntimeError(result.error or "InvSR 未返回图片")
         return result.data
 
-    async def generate_flf2v(
-        self,
-        finish_callback,
-        start_image_base64: str,
-        end_image_base64: str,
-        prompt_start: str,
-        prompt_end: str,
-        seed=None,
-        is_loop: bool = False,
-        start_frame_count=None,
-        end_frame_count=None,
-        frame_rate=None,
-    ):
-        """
-        首尾帧生视频（First-Last-Frame to Video）
-        start_image_base64: 开始帧图片 base64
-        end_image_base64:   结束帧图片 base64
-        prompt_start:       开始帧描述
-        prompt_end:         结束帧描述
-        seed:               随机种子
-        finish_callback:    完成回调，参数为 base64 视频内容（失败为 None）
-        """
-        if seed is None:
-            seed = random.randrange(0, 2**63)
-
-        result = await self.request.generate_flf2v(
-            self.workflow,
-            start_image_base64,
-            end_image_base64,
-            prompt_start,
-            prompt_end,
-            seed,
-            is_loop=is_loop,
-            start_frame_count=start_frame_count,
-            end_frame_count=end_frame_count,
-            frame_rate=frame_rate,
-        )
-        if result.is_success:
-            print("[ComfyUIService] FLF2V 视频生成成功")
-            finish_callback(result.data)
-        else:
-            print(f"[ComfyUIService] FLF2V 视频生成失败: {result.error}")
-            finish_callback(None)  # 确保回调被调用，触发 image_generated 事件
-
-    async def generate_i2v(
-        self,
-        finish_callback,
-        image_base64: str,
-        prompt_text: str,
-        seed=None,
-        frame_count=None,
-        frame_rate=None,
-    ):
-        """
-        图生视频（Image-to-Video）
-        image_base64: 起始帧图片 base64
-        prompt_text:  视频描述
-        seed:         随机种子
-        finish_callback: 完成回调，参数为 base64 视频内容（失败为 None）
-        """
-        if seed is None:
-            seed = random.randrange(0, 2**63)
-
-        result = await self.request.generate_i2v(
-            self.workflow,
-            image_base64,
-            prompt_text,
-            seed,
-            frame_count=frame_count,
-            frame_rate=frame_rate,
-        )
-        if result.is_success:
-            print("[ComfyUIService] I2V 视频生成成功")
-            finish_callback(result.data)
-        else:
-            print(f"[ComfyUIService] I2V 视频生成失败: {result.error}")
-            finish_callback(None)
-
     async def generate_minimax_h3(
         self,
         finish_callback,
@@ -375,6 +261,16 @@ class ComfyUIService:
         if not result.is_success or not result.data:
             raise RuntimeError(result.error or "MiniMax H3 未返回有效视频")
         print("[ComfyUIService] MiniMax H3 音视频生成成功")
+        finish_callback(result.data)
+
+    async def generate_minimax_h3_ref(self, finish_callback, prompt_text, images, duration=5, aspect_ratio="auto", seed=None):
+        workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        result = await self.request.generate_minimax_h3_ref(
+            workflow, prompt_text, random.randrange(0, 2**63) if seed is None else seed,
+            images, duration=duration, aspect_ratio=aspect_ratio,
+        )
+        if not result.is_success or not result.data:
+            raise RuntimeError(result.error or "MiniMax H3 动作参考未返回有效视频")
         finish_callback(result.data)
 
     async def get_state(self) -> ComfyUIRequestState:

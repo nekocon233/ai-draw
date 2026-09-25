@@ -12,7 +12,7 @@ import uvicorn
 from utils.config_loader import get_config
 from utils.file_storage import get_file_storage
 from server.api import router as api_router
-from server.websocket import router as ws_router
+from server.websocket.routes import router as ws_router, setup_service_callbacks
 from server.ai_draw_service import get_ai_draw_service
 from server.database import init_db
 from server.middleware import register_exception_handlers
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
     
     print("[FastAPI] 正在初始化 AI Draw 服务...")
     service = get_ai_draw_service()
+    unsubscribe_events = setup_service_callbacks(service)
     
     # 启动 ComfyUI 服务（可选，也可以通过 API 手动启动）
     try:
@@ -39,15 +40,16 @@ async def lifespan(app: FastAPI):
         print(f"[FastAPI] 启动 ComfyUI 服务失败: {e}")
         print("[FastAPI] 可以稍后通过 API 手动启动")
     
-    yield
-    
-    # 关闭时清理
-    print("[FastAPI] 正在关闭服务...")
     try:
-        service.stop_service()
-        print("[FastAPI] 服务已关闭")
-    except Exception as e:
-        print(f"[FastAPI] 关闭服务时出错: {e}")
+        yield
+    finally:
+        unsubscribe_events()
+        print("[FastAPI] 正在关闭服务...")
+        try:
+            service.stop_service()
+            print("[FastAPI] 服务已关闭")
+        except Exception as e:
+            print(f"[FastAPI] 关闭服务时出错: {e}")
 
 
 # 加载配置

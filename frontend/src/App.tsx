@@ -6,36 +6,20 @@ import StatusBar from './components/StatusBar';
 import ChatSessionSidebar from './components/ChatSessionSidebar';
 import LoginModal from './components/LoginModal';
 import { wsManager } from './api/websocket';
-import { apiService } from './api/services';
 import { useAppStore } from './stores/appStore';
-import { useShallow } from 'zustand/react/shallow';
 import { AUTH_REQUIRED_EVENT, clearAccessToken, getAccessTokenExpiry, isLoggedIn } from './utils/helpers';
-import { WS_MESSAGE_TYPES, STATE_FIELDS } from './utils/constants';
-import type { LastTaskInfo } from './types/api';
+import { useGenerationConnection } from './features/generation/useGenerationConnection';
 import './App.css';
 
 const ResultGrid = lazy(() => import('./components/ResultGrid'));
 
-type ApiChatMessage = {
-  id: string;
-  type: 'user' | 'assistant';
-  content?: string;
-  images?: Array<string | { loading: true }>;
-  timestamp: number;
-  params?: import('./types/models').ChatMessage['params'];
-};
-
 function AppContent() {
-  const { setServiceStatus, setError, chatHistory, loadUserConfig, loadSessions } = useAppStore(useShallow(state => ({
-    setServiceStatus: state.setServiceStatus,
-    setError: state.setError,
-    chatHistory: state.chatHistory,
-    loadUserConfig: state.loadUserConfig,
-    loadSessions: state.loadSessions,
-  })));
+  const chatHistory = useAppStore(state => state.chatHistory);
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [messageApi, contextHolder] = message.useMessage();
   const [forceLoginOpen, setForceLoginOpen] = useState(!isLoggedIn());
+
+  useGenerationConnection(messageApi);
 
   // 主题检测
   useEffect(() => {
@@ -73,11 +57,7 @@ function AppContent() {
     const lockApplication = () => {
       setForceLoginOpen(true);
       wsManager.disconnect();
-      useAppStore.setState({
-        isGenerating: false,
-        currentGeneratingMessageId: null,
-        currentGenerationTaskId: null,
-      });
+      useAppStore.getState().finishGeneration();
     };
     const handleStorage = (event: StorageEvent) => {
       if (event.key === 'access_token' && !event.newValue) lockApplication();
@@ -89,178 +69,6 @@ function AppContent() {
       window.removeEventListener('storage', handleStorage);
     };
   }, []);
-
-  // 数据加载和 WebSocket 连接
-  useEffect(() => {
-    let disposed = false;
-
-    const loadData = async () => {
-      await useAppStore.getState().loadDefaultConfig();
-      await useAppStore.getState().loadAvailableWorkflows();
-      if (isLoggedIn()) await loadUserConfig();
-      await loadSessions();
-    };
-
-    const refreshMessageRound = async (sessionId: string, assistantMessageId: string) => {
-      try {
-        const response = await apiService.getMessageRound(sessionId, assistantMessageId);
-        if (disposed || useAppStore.getState().currentSessionId !== sessionId) return [];
-        const round = (response.messages as ApiChatMessage[]).map(item => ({
-          id: item.id,
-          session_id: sessionId,
-          type: item.type,
-          content: item.content || '',
-          images: item.images || [],
-          timestamp: item.timestamp,
-          params: item.params,
-        }));
-        const roundById = new Map(round.map(item => [item.id, item]));
-        useAppStore.setState(current => ({
-          chatHistory: current.chatHistory.map(item => roundById.get(item.id) ?? item),
-        }));
-        const assistant = round.find(item => item.id === assistantMessageId);
-        return (assistant?.images ?? []).filter((image): image is string => typeof image === 'string');
-      } catch (error) {
-        console.error('刷新任务轮次失败:', error);
-        return [];
-      }
-    };
-
-    const unsubscribe = wsManager.subscribe((message) => {
-      if (message.type === 'initial_state' && message.data) {
-        const serverIsGenerating = message.data.is_generating === true;
-        const lastTask = (message.data.last_task as LastTaskInfo | null) ?? null;
-
-        if (serverIsGenerating && lastTask && lastTask.status === 'running' && lastTask.message_id) {
-          const state = useAppStore.getState();
-          if (
-            state.currentGeneratingMessageId !== lastTask.message_id
-            || state.currentGenerationTaskId !== (lastTask.task_id ?? null)
-          ) {
-            useAppStore.setState({
-              currentGeneratingMessageId: lastTask.message_id,
-              currentGenerationTaskId: lastTask.task_id ?? null,
-              isGenerating: true,
-            });
-            messageApi.info('检测到正在进行的生成任务，已恢复显示');
-          }
-          return;
-        }
-
-        if (
-          lastTask &&
-          lastTask.message_id &&
-          lastTask.session_id &&
-          (lastTask.status === 'completed' || lastTask.status === 'error')
-        ) {
-          const currentSessionId = useAppStore.getState().currentSessionId;
-          useAppStore.setState({
-            isGenerating: false,
-            currentGeneratingMessageId: null,
-            currentGenerationTaskId: null,
-          });
-          if (lastTask.session_id === currentSessionId) {
-            void refreshMessageRound(lastTask.session_id, lastTask.message_id).then(images => {
-              if (lastTask.status === 'completed' && images.length > 0) {
-                const isVideo = images.some(url => /\.(mp4|webm)$/i.test(url) || url.includes('/video/'));
-                messageApi.success(`生成已完成（连接恢复），共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
-              } else if (lastTask.status === 'error') {
-                messageApi.error('上次生成失败: ' + (lastTask.error || '未知错误'));
-              }
-            });
-          } else if (lastTask.status === 'error') {
-            messageApi.error('上次生成失败: ' + (lastTask.error || '未知错误'));
-          }
-          return;
-        }
-
-        if (!serverIsGenerating) {
-          const { currentGeneratingMessageId, isGenerating, chatHistory } = useAppStore.getState();
-          if (isGenerating || currentGeneratingMessageId) {
-            if (currentGeneratingMessageId) {
-              const msg = chatHistory.find(m => m.id === currentGeneratingMessageId);
-              const existingImages = (msg?.images?.filter(img => typeof img === 'string') ?? []) as string[];
-              useAppStore.getState().updateChatImages(currentGeneratingMessageId, existingImages, false);
-            }
-            useAppStore.setState({
-              isGenerating: false,
-              currentGeneratingMessageId: null,
-              currentGenerationTaskId: null,
-            });
-            messageApi.warning('连接已恢复，生成任务状态已重置');
-          }
-        }
-        return;
-      }
-
-      if (message.type === WS_MESSAGE_TYPES.STATE_CHANGE) {
-        const taskState = useAppStore.getState();
-        if (message.task_id && message.task_id !== taskState.currentGenerationTaskId) return;
-        if (!message.task_id && message.message_id && message.message_id !== taskState.currentGeneratingMessageId) return;
-
-        if (message.field === STATE_FIELDS.IS_GENERATING) {
-          const {
-            currentGeneratingMessageId,
-            isGenerating: wasGenerating,
-          } = useAppStore.getState();
-          if (currentGeneratingMessageId) {
-            useAppStore.setState({ isGenerating: message.value });
-            if (wasGenerating && !message.value) {
-              const sessionId = message.session_id;
-              useAppStore.setState({
-                currentGeneratingMessageId: null,
-                currentGenerationTaskId: null,
-              });
-              if (sessionId) {
-                void refreshMessageRound(sessionId, currentGeneratingMessageId).then(images => {
-                  if (images.length > 0) {
-                    const isVideo = images.some(url => /\.(mp4|webm)$/i.test(url) || url.includes('/video/'));
-                    messageApi.success(`生成完成！共 ${images.length} 个${isVideo ? '视频' : '图片'}`);
-                  }
-                });
-              }
-            }
-          }
-        }
-
-        if (message.field === STATE_FIELDS.ERROR && message.value) {
-          const { currentGeneratingMessageId } = useAppStore.getState();
-          if (currentGeneratingMessageId) {
-            const sessionId = message.session_id;
-            useAppStore.setState({
-              currentGeneratingMessageId: null,
-              currentGenerationTaskId: null,
-              isGenerating: false,
-            });
-            if (sessionId) void refreshMessageRound(sessionId, currentGeneratingMessageId);
-          }
-          messageApi.error('生成失败: ' + message.value);
-        }
-
-        if (message.field === STATE_FIELDS.MEDIA_GENERATED && message.value) {
-          const { image, index } = message.value;
-          const { currentGeneratingMessageId } = useAppStore.getState();
-          if (currentGeneratingMessageId) {
-            useAppStore.getState().appendChatMedia(currentGeneratingMessageId, image, index);
-          }
-        }
-      }
-    });
-
-    void loadData().then(() => {
-      if (!disposed && isLoggedIn()) wsManager.connect();
-    });
-
-    apiService.getServiceStatus()
-      .then(status => setServiceStatus(status))
-      .catch(err => setError(err.message));
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-      wsManager.disconnect();
-    };
-  }, [setServiceStatus, setError, loadUserConfig, loadSessions, messageApi]);
 
   const controlSelectedColor = isDark ? '#6ea8fe' : '#2563eb';
   const controlSelectedHoverColor = isDark ? '#8bb9ff' : '#1d4ed8';
@@ -290,6 +98,13 @@ function AppContent() {
           borderRadius: 12,
         },
         components: {
+          // Image previews always use a dark overlay, regardless of the app theme.
+          Image: {
+            colorTextLightSolid: '#ffffff',
+            previewOperationColor: 'rgba(255, 255, 255, 0.85)',
+            previewOperationHoverColor: '#ffffff',
+            previewOperationColorDisabled: 'rgba(255, 255, 255, 0.35)',
+          },
           Switch: {
             colorPrimary: controlSelectedColor,
             colorPrimaryHover: controlSelectedHoverColor,

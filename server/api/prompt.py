@@ -1,23 +1,116 @@
-"""
-AI Prompt 生成相关 API
-"""
+"""Authenticated prompt generation and image analysis endpoints."""
 import asyncio
-import base64
 from fastapi import APIRouter, HTTPException, Depends
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.auth import get_current_user
 from server.models import User
+from server.database import get_db
+from sqlalchemy.orm import Session
 from server.schemas import (
     GeneratePromptRequest, GeneratePromptResponse,
-    PosePresetResponse,
+    PromptPreset, PromptPresetImage, PromptPresetsResponse,
     AnalyzeImageForPromptRequest, AnalyzeImageForPromptResponse,
-    AnalyzeFramesForPromptRequest, AnalyzeFramesForPromptResponse,
+    AnalyzeMotionPromptRequest, MotionPromptSnapshot,
 )
-from utils.config_loader import get_nano_banana_config
+from utils.llm import InvalidImageError
+from utils.prompt_analysis import describe_image
+from utils.motion_prompt import motion_prompt_input_hash
+from utils.image_reference import normalize_image_reference
+from utils.config_loader import get_config
 
-# 姿势迁移提示词前缀（前后端统一来源）
-POSE_PRESET_PROMPT = "参照第二张图中人物的动作和姿态，将第一张图角色做出完全相同的动作，严格保持第一张图的画面尺寸、长宽比例、画风、镜头距离与视角、角色外形及背景，不得改变取景范围和画面裁切方式"
+# Generation appends the user's description directly, so every preset ends its last sentence.
+PROMPT_PRESETS = (
+    PromptPreset(
+        id="pose",
+        title="参考姿势",
+        description="让参考图 1 中的角色跟随参考图 2 的动作",
+        prompt="参照第二张图中人物的动作和姿态，将第一张图角色做出完全相同的动作，严格保持第一张图的画面尺寸、长宽比例、画风、镜头距离与视角、角色外形及背景，不得改变取景范围和画面裁切方式。",
+        hint="可补充表情、手势等细节要求",
+        images=[
+            PromptPresetImage(label="参考图 1", role="角色、画风与背景"),
+            PromptPresetImage(label="参考图 2", role="动作与身体姿态"),
+        ],
+    ),
+    # Only finishing requirements: the selected LoRA decides the painting style.
+    PromptPreset(
+        # Preserve the ID used by saved selections and training data preparation.
+        id="sketch_finish",
+        title="参考图成品化",
+        description="只借用姿势与构图，主动重建缺失细节，将粗稿重新绘制为完整成品，画风由所选 LoRA 决定",
+        prompt=(
+            "@图片1 仅用于参考人物的姿势、动作、构图、镜头角度和画面比例。"
+            "保持整体姿态、人物在画面中的位置与占比、镜头角度、取景范围和画面长宽比不变。"
+            "依据这些结构信息和补充描述，重新绘制完整、精修的最终成品，输出完成度不受参考图完成度限制。"
+            "人物外观、服装等以补充描述为准，不照搬参考图的角色外观、服装或背景；"
+            "参考图中缺失、模糊或简化的细节需要主动推断和补全，不能作为最终效果保留。"
+            "若参考图是草稿，先理解简略线条表达的身体结构与动作意图，再重新构建清晰、合理的轮廓和细节；"
+            "在不改变整体姿态与构图的前提下，修正局部解剖、透视和遮挡关系，不要逐笔照描或只在草稿上填色。"
+            "完整绘制画面中可见的五官、眼睛、头发、手脚和服装结构；"
+            "即使草稿没有画出这些细节，也要按补充描述合理完成，服装边缘、接缝和必要褶皱清楚，肢体连接与前后遮挡明确。"
+            "全图应达到一致的成品完成度：轮廓干净连贯，上色完整且边界准确，明暗充分、光源方向统一，补齐必要的接触阴影；"
+            "不要留下空白漏色、溢色、未完成的局部、抖线、重复线、断线、铅笔线、辅助线或涂抹痕迹。"
+            "背景使用单一、均匀的纯色，不添加场景、图案、纹理或颜色过渡。"
+            "不要保留或生成 HUD、UI、软件界面、工具栏、按钮、菜单、界面文字、坐标轴、辅助网格、选中框或骨骼控制器。"
+        ),
+        hint="补充人物外观、服装、背景颜色等具体要求",
+        images=[PromptPresetImage(label="参考图 1", role="姿势、动作、构图、镜头角度与画面比例；也可使用草稿")],
+    ),
+    PromptPreset(
+        id="video_motion",
+        title="自然动作",
+        description="以输入画面为基础，保持主体一致，按描述生成连贯自然的动作",
+        output_type="video",
+        workflow_ids=["minimax_h3"],
+        prompt=(
+            "以本段起始画面中的主体和场景为依据，保持主体外观、服装、场景布局和画面比例一致。"
+            "按照补充描述生成连贯自然的动作，动作起始、发展和结束衔接顺畅，重心、关节运动和惯性合理。"
+            "动作幅度与速度符合描述，未指定运镜时保持镜头平稳，不无故切换场景；"
+            "避免突然跳变、肢体扭曲、主体外观漂移、闪烁和画面撕裂。"
+        ),
+        hint="描述主体要做的动作、幅度和速度",
+        images=[PromptPresetImage(label="开始帧", role="主体外观、服装与场景", slot=1)],
+    ),
+    PromptPreset(
+        id="video_fixed_camera",
+        title="固定镜头动作",
+        description="固定人物、背景和镜头，主体按动作参考图运动；文字仅补充额外细节",
+        output_type="video",
+        requires_motion_reference=True,
+        workflow_ids=["minimax_h3_ref"],
+        prompt=(
+            "以原始画面中的主体和场景为基准，保持主体身份、外观、服装、画风、背景布局与光照不变，"
+            "镜头位置、角度、距离、景别、取景、裁切和画面比例始终固定。"
+            "主体必须按照动作参考图中的动作与姿态运动，多张动作图按提供顺序依次完成，并自然衔接中间过程。"
+            "基本动作、肢体姿态和动作顺序由动作参考图决定，不需要用户重复描述动作。"
+            "用户手动补充的文字只描述节奏、停顿、音效等额外内容，不得替换、删减、颠倒图中动作或添加不一致的新动作；"
+            "文字与动作图冲突时，以动作参考图为准，没有补充文字时也要完成参考图给出的动作。"
+            "只借用动作图的姿势，不引入其人物外观、材质、背景或拍摄视角。"
+            "背景保持稳定，不推拉、摇移、缩放、抖动或切换镜头，不为展示动作改变取景；"
+            "保持肢体结构稳定，避免主体外观漂移、肢体扭曲和画面闪烁。"
+        ),
+        hint="仅补充节奏、停顿、音效等额外内容；动作按参考图生成，可留空",
+        images=[PromptPresetImage(label="原始画面", role="主体外观、场景与固定镜头；动作由独立的动作参考图提供", slot=1)],
+    ),
+    PromptPreset(
+        id="video_transition",
+        title="首尾帧过渡",
+        description="连接本段起始帧与结束帧，补齐两端之间的连续动作",
+        output_type="video",
+        workflow_ids=["minimax_h3"],
+        prompt=(
+            "以本段起始帧和结束帧为两端约束，按补充描述从起始状态连续、自然地过渡到目标状态。"
+            "合理补齐两端之间的运动过程、重心变化和遮挡关系，保持主体身份及未要求变化的外观与场景细节一致。"
+            "开头与结尾分别衔接对应输入画面，镜头变化应平稳连续；"
+            "不要用突然切镜、叠影或闪白代替动作过渡，避免肢体扭曲和画面闪烁。"
+        ),
+        hint="可补充首尾帧之间的动作节奏、衔接和声音要求，也可留空",
+        images=[
+            PromptPresetImage(label="开始帧", role="本段起始状态", slot=1),
+            PromptPresetImage(label="结束帧", role="本段目标状态", slot="end"),
+        ],
+    ),
+)
 
 router = APIRouter(prefix="/prompt", tags=["Prompt生成"], dependencies=[Depends(get_current_user)])
 
@@ -26,156 +119,58 @@ router = APIRouter(prefix="/prompt", tags=["Prompt生成"], dependencies=[Depend
 async def generate_prompt(
     request: GeneratePromptRequest,
     current_user: User = Depends(get_current_user),
-    service: AIDrawService = Depends(get_ai_draw_service)
+    service: AIDrawService = Depends(get_ai_draw_service),
 ) -> GeneratePromptResponse:
-    """根据中文描述生成英文 Prompt"""
     try:
         prompt = await service.generate_prompt(
-            request.description,
-            request.workflow_id,
-            user_id=current_user.id,
+            request.description, request.workflow_id, user_id=current_user.id, preset_prompt=request.preset_prompt,
         )
         return GeneratePromptResponse(prompt=prompt)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-@router.get("/pose-preset", response_model=PosePresetResponse)
-async def get_pose_preset() -> PosePresetResponse:
-    """返回姿势迁移预设提示词（前后端统一来源）"""
-    return PosePresetResponse(prompt=POSE_PRESET_PROMPT)
+@router.get("/presets", response_model=PromptPresetsResponse)
+async def get_prompt_presets() -> PromptPresetsResponse:
+    return PromptPresetsResponse(presets=list(PROMPT_PRESETS))
 
 
 @router.post("/analyze-image", response_model=AnalyzeImageForPromptResponse)
 async def analyze_image_for_prompt(request: AnalyzeImageForPromptRequest) -> AnalyzeImageForPromptResponse:
-    """使用 Gemini 分析单张图片的风格、元素、动作、镜头等，生成适合文生图（Z-Image）的中文提示词"""
-    nb_cfg = get_nano_banana_config()
-    if not nb_cfg.api_key:
-        raise HTTPException(status_code=500, detail="未配置 NANO_BANANA_API_KEY，无法使用 AI 以图生词功能")
     if not request.image:
         raise HTTPException(status_code=400, detail="请提供图片")
     if not request.description or not request.description.strip():
         raise HTTPException(status_code=400, detail="请指定要描述的内容")
-
-    def strip_prefix(img: str) -> str:
-        return img.split(',', 1)[1] if ',' in img else img
-
-    def _call() -> str:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            http_options=types.HttpOptions(base_url=nb_cfg.base_url),
-            api_key=nb_cfg.api_key,
-        )
-
-        system_instruction = (
-            "你是一个专业的 AI 图像生成提示词工程师，擅长为文生图模型（Z-Image，基于 Lumina2 架构）编写中文自然语言提示词。"
-            "Z-Image 原生支持中文，请直接用中文描述。\n"
-            "要求：只输出提示词本身，不要任何解释、标题、序号或额外内容。"
-        )
-
-        raw_b64 = strip_prefix(request.image)
-        prefix = request.image.split(';')[0] if request.image.startswith('data:') else ''
-        mime = prefix.replace('data:', '') if prefix else 'image/png'
-
-        user_parts = [
-            types.Part(inline_data=types.Blob(mime_type=mime, data=base64.b64decode(raw_b64))),
-            types.Part(text=f"请分析这张图片，只生成以下要求的提示词：{request.description.strip()}"),
-        ]
-        contents = [
-            types.Content(role="user", parts=[types.Part(text=system_instruction)]),
-            types.Content(role="model", parts=[types.Part(text="好的，我会分析图片并按照格式生成中文自然语言提示词。")]),
-            types.Content(role="user", parts=user_parts),
-        ]
-        response = client.models.generate_content(model=nb_cfg.analysis_model, contents=contents)
-        texts = [p.text for p in response.candidates[0].content.parts if hasattr(p, 'text') and p.text]
-        return ''.join(texts).strip()
-
     try:
-        prompt = await asyncio.to_thread(_call)
+        prompt = await asyncio.to_thread(describe_image, request.image, request.description)
         return AnalyzeImageForPromptResponse(prompt=prompt)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini 调用失败: {str(e)}")
+    except InvalidImageError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"LLM 图片分析失败：{error}") from error
 
 
-@router.post("/analyze-frames", response_model=AnalyzeFramesForPromptResponse)
-async def analyze_frames_for_prompt(request: AnalyzeFramesForPromptRequest) -> AnalyzeFramesForPromptResponse:
-    """使用 Gemini 分析首尾帧过渡方向，分别生成「首帧→尾帧」和「尾帧→首帧」的 flf2v 过渡提示词"""
-    nb_cfg = get_nano_banana_config()
-    if not nb_cfg.api_key:
-        raise HTTPException(status_code=500, detail="未配置 NANO_BANANA_API_KEY，无法使用 AI 以图生词功能")
-    if not request.image_start and not request.image_end:
-        raise HTTPException(status_code=400, detail="请至少提供一张图片（首帧或尾帧）")
-
-    def strip_prefix(img: str) -> str:
-        return img.split(',', 1)[1] if ',' in img else img
-
-    def _call_transition(from_url: str, to_url: str | None, from_label: str, to_label: str) -> str:
-        """生成从 from_label 过渡到 to_label 的 flf2v 提示词。
-        若 to_url 为 None，仅根据起始帧推断过渡方式。"""
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            http_options=types.HttpOptions(base_url=nb_cfg.base_url),
-            api_key=nb_cfg.api_key,
-        )
-
-        def make_part(data_url: str) -> types.Part:
-            raw_b64 = strip_prefix(data_url)
-            prefix = data_url.split(';')[0] if data_url.startswith('data:') else ''
-            mime = prefix.replace('data:', '') if prefix else 'image/png'
-            return types.Part(inline_data=types.Blob(mime_type=mime, data=base64.b64decode(raw_b64)))
-
-        is_dual = to_url is not None
-        loop_note = "（视频将循环播放，首尾帧需能无缝衔接）" if request.is_loop else ""
-        extra = f"\n补充要求：{request.description.strip()}" if request.description and request.description.strip() else ""
-
-        if is_dual:
-            system_instruction = (
-                f"你是一个专业的 AI 视频生成提示词工程师，擅长为首尾帧视频模型（Wan2.2 flf2v）编写中文自然语言提示词{loop_note}。"
-                f"你将收到两张图片：第一张是{from_label}，第二张是{to_label}。"
-                f"请生成一段从{from_label}画面进入、展开并过渡到{to_label}画面的提示词，"
-                "描述过渡过程中的主体动作、运镜方式、场景变化和氛围风格。\n"
-                "要求：只输出提示词本身，不要任何解释、标题、序号或额外内容。"
-            )
-            user_parts = [
-                make_part(from_url),
-                make_part(to_url),  # type: ignore[arg-type]
-                types.Part(text=f"第一张是{from_label}，第二张是{to_label}。请生成从{from_label}过渡到{to_label}的视频提示词。{extra}"),
-            ]
-        else:
-            system_instruction = (
-                f"你是一个专业的 AI 视频生成提示词工程师，擅长为首尾帧视频模型（Wan2.2 flf2v）编写中文自然语言提示词。"
-                f"这张图片是视频的{from_label}，请根据内容推断可能的过渡动作、运镜和场景变化，生成适合视频展开的中文提示词。\n"
-                "要求：只输出提示词本身，不要任何解释、标题、序号或额外内容。"
-            )
-            user_parts = [
-                make_part(from_url),
-                types.Part(text=f"请根据这张{from_label}图片，生成视频展开的提示词。{extra}"),
-            ]
-
-        contents = [
-            types.Content(role="user", parts=[types.Part(text=system_instruction)]),
-            types.Content(role="model", parts=[types.Part(text="好的，我会分析图片并生成指定方向的视频过渡提示词。")]),
-            types.Content(role="user", parts=user_parts),
-        ]
-        response = client.models.generate_content(model=nb_cfg.analysis_model, contents=contents)
-        texts = [p.text for p in response.candidates[0].content.parts if hasattr(p, 'text') and p.text]
-        return ''.join(texts).strip()
-
+@router.post("/analyze-motion", response_model=MotionPromptSnapshot)
+async def analyze_motion_for_prompt(
+    request: AnalyzeMotionPromptRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    service: AIDrawService = Depends(get_ai_draw_service),
+) -> MotionPromptSnapshot:
+    from server.api.generation import _validate_reference_ownership
+    references = [request.reference_image, *request.motion_reference_images]
+    for index, image in enumerate(references):
+        _validate_reference_ownership(image, current_user.id, db, '原始画面' if index == 0 else f'动作参考 {index}')
     try:
-        start_url = request.image_start
-        end_url = request.image_end
-
-        # 并行生成两个方向的显渡提示词
-        task_start = asyncio.to_thread(_call_transition, start_url, end_url, "首帧", "尾帧") \
-            if start_url else asyncio.sleep(0, result='')
-        task_end = asyncio.to_thread(_call_transition, end_url, start_url, "尾帧", "首帧") \
-            if end_url else asyncio.sleep(0, result='')
-
-        prompt_start, prompt_end = await asyncio.gather(task_start, task_end)
-        return AnalyzeFramesForPromptResponse(prompt_start=prompt_start, prompt_end=prompt_end)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini 调用失败: {str(e)}")
+        images = await asyncio.to_thread(lambda: [
+            normalize_image_reference(image, get_config().paths.upload_dir, '原始画面' if index == 0 else f'动作参考 {index}')
+            for index, image in enumerate(references)
+        ])
+    except (ValueError, InvalidImageError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    signature = motion_prompt_input_hash(request.reference_image, request.motion_reference_images, request.description)
+    try:
+        snapshot = await service.analyze_motion_prompt(images[0], images[1:], request.description, signature, current_user.id)
+        return MotionPromptSnapshot(**snapshot)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"动作参考图分析失败：{error}") from error

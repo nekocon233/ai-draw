@@ -1,0 +1,146 @@
+.prompt-preset-tag {
+  max-width: 100%;
+  min-height: 28px;
+  padding-right: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.prompt-preset-tag.has-issue {
+  border-color: color-mix(in srgb, var(--warning-text) 45%, var(--border-color));
+}
+
+.prompt-preset-tag-main {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 5px 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.prompt-preset-tag-main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-preset-tag-main > .anticon {
+  color: var(--text-secondary);
+}
+
+.prompt-preset-tag-issue {
+  min-width: 0;
+  padding-right: 4px;
+  overflow: hidden;
+  color: var(--warning-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-preset-tag-remove {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.prompt-preset-tag-main:hover,
+.prompt-preset-tag-remove:hover {
+  background: var(--bg-tertiary);
+}
+
+.prompt-preset-tag-remove:hover {
+  color: var(--text-primary);
+}
+
+.prompt-preset-tag-main:focus-visible,
+.prompt-preset-tag-remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.prompt-preset-details {
+  max-width: min(340px, calc(100vw - 48px));
+  max-height: min(400px, calc(100dvh - 96px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.prompt-preset-details > * {
+  flex-shrink: 0;
+}
+
+.prompt-preset-details p {
+  margin: 0;
+}
+
+.prompt-preset-details-text {
+  max-height: 180px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.prompt-preset-details-images {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.prompt-preset-details-images > div {
+  display: flex;
+  gap: 6px;
+}
+
+.prompt-preset-details-images dt {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.prompt-preset-details-images dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .prompt-preset-tag-main {
+    min-height: 34px;
+  }
+
+  .prompt-preset-tag-remove {
+    width: 32px;
+    height: 32px;
+  }
+}

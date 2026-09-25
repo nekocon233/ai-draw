@@ -18,9 +18,9 @@ export interface User {
  */
 export interface UserConfig {
   current_workflow: string;
-  prompt: string;
-  lora_prompt: string;
-  strength: number;
+  prompt: string | null;
+  lora_prompt: string | null;
+  strength: number | null;
   count: number;
   images_per_row: number;
   current_session_id?: string;  // 当前选中的会话ID
@@ -40,6 +40,11 @@ export interface SessionConfig {
   count: number;
   imagesPerRow: number;
   referenceImage: string | null;
+  referenceImage2?: string | null;
+  referenceImage3?: string | null;
+  width?: number | null;
+  height?: number | null;
+  useOriginalSize?: boolean;
 }
 
 /**
@@ -70,6 +75,15 @@ export interface DBChatSession {
 
 // ============ 聊天消息相关 ============
 
+export interface ApiChatMessage {
+  id: string;
+  type: 'user' | 'assistant';
+  content?: string;
+  images?: ChatMessage['images'];
+  timestamp: number;
+  params?: ChatMessage['params'];
+}
+
 /**
  * 聊天消息（前端格式）
  */
@@ -85,6 +99,9 @@ export interface ChatMessage {
     strength?: number;
     count?: number;
     loraPrompt?: string;
+    width?: number;
+    height?: number;
+    useOriginalSize?: boolean;
     promptEnd?: string;
     referenceImage?: string;
     referenceImage2?: string;
@@ -94,8 +111,11 @@ export interface ChatMessage {
     frameRate?: number;
     startFrameCount?: number;
     endFrameCount?: number;
-    frameCount?: number;   // i2v 总帧数
+    frameCount?: number;   // 历史视频总帧数（只读）
     workflowOptions?: Record<string, string | number>;
+    motionReferenceImages?: string[];
+    motionPrompt?: import('./api').MotionPromptSnapshot | null;
+    promptPreset?: import('./api').PromptPreset;  // 所选预设快照，content 只含用户描述
   };
 }
 
@@ -177,11 +197,7 @@ export interface ServiceStatus {
 /**
  * WebSocket 状态变化消息
  */
-export interface WSStateChangeMessage {
-  type: 'state_change';
-  field: 'is_generating' | 'media_generated' | 'preview_update' | 'generation_progress';
-  value: any;
-}
+export type WSStateChangeMessage = import('./api').WSMessage & { type: 'state_change' };
 
 /**
  * WebSocket 错误消息
@@ -191,7 +207,7 @@ export interface WSErrorMessage {
   message: string;
 }
 
-export type WSMessage = WSStateChangeMessage | WSErrorMessage;
+export type { WSMessage } from './api';
 
 // ============ API 响应相关 ============
 
@@ -223,10 +239,7 @@ export interface AuthResponse {
 /**
  * 媒体生成响应
  */
-export interface GenerateMediaResponse {
-  count: number;
-  images: string[];
-}
+export type { GenerateMediaResponse } from './api';
 
 /**
  * Prompt 生成响应

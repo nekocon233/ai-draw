@@ -2,7 +2,7 @@
 API 请求和响应的数据模型
 """
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 
 # ============ Prompt 相关 ============
@@ -11,6 +11,8 @@ class GeneratePromptRequest(BaseModel):
     """生成 Prompt 请求"""
     description: str
     workflow_id: Optional[str] = None
+    # 所选预设原文，仅作扩写的只读上下文；生成时仍由后端拼接在描述前面
+    preset_prompt: str = Field(default="", max_length=8000)
 
 
 class GeneratePromptResponse(BaseModel):
@@ -18,65 +20,77 @@ class GeneratePromptResponse(BaseModel):
     prompt: str
 
 
-class PosePresetResponse(BaseModel):
-    """姿势预设提示词响应"""
+class PromptPresetImage(BaseModel):
+    """预设中一张参考图的作用"""
+    label: str
+    role: str
+    slot: Optional[Literal[1, 2, 3, "end"]] = None
+
+
+class PromptPreset(BaseModel):
+    """服务端维护的提示词预设"""
+    id: str
+    title: str
+    description: str
     prompt: str
+    output_type: Literal["image", "video"] = "image"
+    requires_motion_reference: bool = False
+    workflow_ids: Optional[List[str]] = None  # None keeps historical snapshots compatible.
+    hint: str = ""  # 选中后作为输入框占位提示
+    images: List[PromptPresetImage] = Field(default_factory=list)
+
+
+class PromptPresetsResponse(BaseModel):
+    """提示词预设列表响应"""
+    presets: List[PromptPreset]
 
 
 class AnalyzeImageForPromptRequest(BaseModel):
-    """Gemini 以图生词请求（分析单张图片风格/元素/动作/镜头，生成文生图提示词）"""
+    """LLM 以图生词请求（分析图片风格、元素、动作和镜头）"""
     image: str        # data URL 格式（含 data:image/... 前缀）
     description: str  # 指定要描述的内容（必填）
 
 
 class AnalyzeImageForPromptResponse(BaseModel):
-    """Gemini 以图生词响应"""
+    """LLM 以图生词响应"""
     prompt: str
-
-
-class AnalyzeFramesForPromptRequest(BaseModel):
-    """Gemini 首尾帧分析请求（flf2v：分析首尾帧，生成过渡视频提示词）"""
-    image_start: Optional[str] = None  # 首帧 data URL
-    image_end: Optional[str] = None    # 尾帧 data URL
-    description: Optional[str] = None  # 补充要求（可选）
-    is_loop: bool = False               # 是否循环（首尾帧往返过渡）
-
-
-class AnalyzeFramesForPromptResponse(BaseModel):
-    """Gemini 首尾帧分析响应"""
-    prompt_start: str  # 首帧描述提示词
-    prompt_end: str    # 尾帧描述提示词
 
 
 # ============ 媒体生成相关 ============
 
+class MotionPromptSnapshot(BaseModel):
+    version: Literal[1] = 1
+    input_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    prompt: str = Field(min_length=1, max_length=12000)
+
+
+class AnalyzeMotionPromptRequest(BaseModel):
+    reference_image: str = Field(min_length=1)
+    motion_reference_images: List[str] = Field(min_length=1, max_length=8)
+    description: str = Field(default="", max_length=16000)
+
 class GenerateMediaRequest(BaseModel):
     """生成图像请求"""
     prompt: str
-    workflow: str = "t2i"  # 工作流类型：t2i, i2i, reference, reference_zimage, flf2v
+    workflow: str = "qwen_image_21_t2i"  # 工作流标识来自 WorkflowCatalog
     strength: Optional[float] = None
     lora_prompt: str = ""
     count: int = 1
     reference_image: Optional[str] = None
-    reference_image_2: Optional[str] = None  # i2i 第 2 张参考图
-    reference_image_3: Optional[str] = None  # i2i 第 3 张参考图
+    reference_image_2: Optional[str] = None  # 第 2 张参考图
+    reference_image_3: Optional[str] = None  # 第 3 张参考图
+    motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_prompt: Optional[MotionPromptSnapshot] = None
     width: Optional[int] = None  # 图像宽度（部分工作流支持）
     height: Optional[int] = None  # 图像高度（部分工作流支持）
-    prompt_end: Optional[str] = None          # flf2v 结束帧提示词
-    reference_image_end: Optional[str] = None  # flf2v 结束帧图片
+    reference_image_end: Optional[str] = None  # 视频尾帧图片
     use_original_size: bool = True             # 是否使用原图尺寸（默认开启）
-    is_loop: bool = False                      # flf2v 是否循环生成（首尾往返）
-    start_frame_count: Optional[int] = None    # flf2v 起始帧视频帧长度
-    end_frame_count: Optional[int] = None      # flf2v 结束帧视频帧长度
-    frame_rate: Optional[float] = None         # flf2v 帧率
-    frame_count: Optional[int] = None          # i2v 总帧数
     # PixelLab 动画参数（pixel_lab_animate 专用）
     action: str = "walk"                      # 动画动作
     view: str = "sidescroller"               # 视角
     direction: str = "east"                   # 朝向
-    # Kling 首尾帧图生视频参数（kling_flf2v 专用）
-    kling_options: Optional[dict] = None      # 运行时选项，如 { "duration": "5" }
     workflow_options: Optional[dict] = None   # 元数据驱动的工作流选项，如时长、画幅
+    prompt_preset: Optional[PromptPreset] = None  # 所选预设快照，生成时拼在 prompt 前面
     # 任务关联（用于服务端落库与断线恢复；前端可选）
     message_id: Optional[str] = Field(default=None, max_length=50)  # 助手消息 ID（{user_msg_id}-reply）
     session_id: Optional[str] = Field(default=None, max_length=50)  # 所属会话 ID
@@ -87,6 +101,7 @@ class GenerateMediaResponse(BaseModel):
     """生成媒体响应"""
     count: int
     images: List[str]
+    task_id: str
 
 
 # ============ 服务状态相关 ============

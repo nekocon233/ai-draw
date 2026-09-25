@@ -41,9 +41,9 @@ class TokenResponse(BaseModel):
 
 class UserConfigResponse(BaseModel):
     current_workflow: str
-    prompt: str
-    lora_prompt: str
-    strength: float
+    prompt: Optional[str] = None
+    lora_prompt: Optional[str] = None
+    strength: Optional[float] = None
     count: int
     images_per_row: int
     current_session_id: Optional[str] = None
@@ -91,14 +91,15 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     # 创建默认配置（从 workflow_metadata 读取）
     from utils.config_loader import get_config
     cfg = get_config()
+    workflow = cfg.workflow_defaults.current_workflow_type
     
     config = UserConfig(
         user_id=user.id,
-        current_workflow="t2i",
-        prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'prompt'),
-        lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-        strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-        count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+        current_workflow=workflow,
+        prompt=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'prompt'),
+        lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'lora_prompt'),
+        strength=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'strength'),
+        count=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'count'),
         images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(config)
@@ -145,14 +146,15 @@ def get_user_config(
         # 创建默认配置（从 workflow_metadata 读取）
         from utils.config_loader import get_config
         cfg = get_config()
+        workflow = cfg.workflow_defaults.current_workflow_type
         
         config = UserConfig(
             user_id=current_user.id,
-            current_workflow="t2i",
+            current_workflow=workflow,
             prompt=None,
-            lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-            strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-            count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+            lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'lora_prompt'),
+            strength=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'strength'),
+            count=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'count'),
             images_per_row=cfg.workflow_defaults.col_count
         )
         db.add(config)
@@ -202,12 +204,13 @@ def reset_user_config(
         # 从 workflow_metadata 读取默认值
         from utils.config_loader import get_config
         cfg = get_config()
+        workflow = cfg.workflow_defaults.current_workflow_type
         
-        config.current_workflow = "t2i"
+        config.current_workflow = workflow
         config.prompt = None
-        config.lora_prompt = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt')
-        config.strength = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength')
-        config.count = cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count')
+        config.lora_prompt = cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'lora_prompt')
+        config.strength = cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'strength')
+        config.count = cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'count')
         config.images_per_row = cfg.workflow_defaults.col_count
         config.updated_at = datetime.now()
         db.commit()
@@ -272,6 +275,15 @@ def get_chat_history(
                 params["frameCount"] = msg.frame_count
             if msg.workflow_options:
                 params["workflowOptions"] = msg.workflow_options
+            if msg.motion_reference_images is not None:
+                params["motionReferenceImages"] = msg.motion_reference_images
+            if msg.motion_prompt is not None:
+                params["motionPrompt"] = msg.motion_prompt
+            if msg.prompt_preset:
+                params["promptPreset"] = msg.prompt_preset
+            for key, value in (("width", msg.width), ("height", msg.height), ("useOriginalSize", msg.use_original_size)):
+                if value is not None:
+                    params[key] = value
             msg_dict["params"] = params
         elif msg.type == "assistant":
             # 加载关联的图片
@@ -302,6 +314,7 @@ def clear_chat_history(
     messages = db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).all()
     file_paths = [image.file_path for message in messages for image in message.images]
     for message in messages:
+        file_paths.extend(message.motion_reference_images or [])
         file_paths.extend(filter(None, (
             message.reference_image,
             message.reference_image_2,
@@ -484,6 +497,20 @@ def save_chat_message(
                 delete_unreferenced_media(db, set(old_paths) - set(new_paths))
             return {"success": True, "message": "消息已存在，已更新图片"}
         
+        motion_images = message.get("motion_reference_images")
+        from server.schemas import MotionPromptSnapshot
+        from utils.motion_prompt import matching_motion_prompt
+        try:
+            snapshot = MotionPromptSnapshot.model_validate(message['motion_prompt']).model_dump() if message.get('motion_prompt') else None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="动作提示词快照无效") from error
+        snapshot = matching_motion_prompt(snapshot, message.get('reference_image'), motion_images, message.get('content'), message.get('prompt_preset'))
+        if motion_images is not None:
+            from server.api.generation import _validate_reference_ownership
+            if not isinstance(motion_images, list) or len(motion_images) > 8 or any(not isinstance(image, str) or not image.strip() for image in motion_images):
+                raise HTTPException(status_code=422, detail="动作参考图必须是最多 8 张图片的有序列表")
+            for image in motion_images:
+                _validate_reference_ownership(image, current_user.id, db, '动作参考图')
         chat_msg = ChatMessage(
             session_id=session_id,
             user_id=current_user.id,
@@ -498,12 +525,18 @@ def save_chat_message(
             reference_image_2=message.get("reference_image_2"),
             reference_image_3=message.get("reference_image_3"),
             reference_image_end=message.get("reference_image_end"),
+            motion_reference_images=motion_images,
+            motion_prompt=snapshot,
             prompt_end=message.get("prompt_end"),
             frame_rate=message.get("frame_rate"),
             start_frame_count=message.get("start_frame_count"),
             end_frame_count=message.get("end_frame_count"),
             frame_count=message.get("frame_count"),
             workflow_options=message.get("workflow_options"),
+            prompt_preset=message.get("prompt_preset"),
+            width=message.get("width"),
+            height=message.get("height"),
+            use_original_size=message.get("use_original_size"),
         )
         db.add(chat_msg)
         
@@ -537,6 +570,9 @@ def save_chat_message(
         
         db.commit()
         return {"success": True}
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         print(f"[保存消息] 错误: {e}")

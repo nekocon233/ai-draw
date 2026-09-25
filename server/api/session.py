@@ -11,6 +11,8 @@ from typing import List, Optional
 from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
+from server.schemas import PromptPreset, MotionPromptSnapshot
+from utils.motion_prompt import matching_motion_prompt
 from utils.file_storage import get_file_storage
 from utils.media_file_references import delete_unreferenced_media
 from utils.session_title import get_session_title_generator
@@ -36,7 +38,8 @@ class UpdateMessageRequest(BaseModel):
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
     reference_image_end: Optional[str] = None
-    prompt_end: Optional[str] = None
+    motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_prompt: Optional[MotionPromptSnapshot] = None
 
 class SessionResponse(BaseModel):
     id: str
@@ -58,14 +61,15 @@ class SessionConfigRequest(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
-    prompt_end: Optional[str] = None
     reference_image_end: Optional[str] = None
-    is_loop: Optional[bool] = None
-    start_frame_count: Optional[int] = None
-    end_frame_count: Optional[int] = None
-    frame_rate: Optional[float] = None
-    frame_count: Optional[int] = None
     workflow_options: Optional[dict] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    use_original_size: Optional[bool] = None
+    prompt_preset: Optional[PromptPreset] = None
+    prompt_preset_choices: Optional[dict[str, Optional[PromptPreset]]] = Field(default=None, max_length=32)
+    motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_prompt: Optional[MotionPromptSnapshot] = None
 
 # ============ 会话管理 API ============
 
@@ -73,6 +77,7 @@ class SessionConfigRequest(BaseModel):
 def _stored_media_paths(messages) -> list[str]:
     paths = [image.file_path for message in messages for image in list(message.images)]
     for message in messages:
+        paths.extend(message.motion_reference_images or [])
         paths.extend(filter(None, (
             message.reference_image,
             message.reference_image_2,
@@ -80,6 +85,13 @@ def _stored_media_paths(messages) -> list[str]:
             message.reference_image_end,
         )))
     return paths
+
+
+def _summary_text(message: ChatMessage) -> str:
+    """A selected preset is part of the request, even when the description is empty."""
+    preset_title = (message.prompt_preset or {}).get('title') if message.type == 'user' else None
+    parts = (f"预设「{preset_title}」" if preset_title else '', (message.content or '').strip())
+    return ' '.join(part for part in parts if part)
 
 
 def _serialize_message(message: ChatMessage) -> dict:
@@ -97,6 +109,9 @@ def _serialize_message(message: ChatMessage) -> dict:
         }
         optional_params = {
             'strength': message.strength,
+            'width': message.width,
+            'height': message.height,
+            'useOriginalSize': message.use_original_size,
             'referenceImage': message.reference_image,
             'referenceImage2': message.reference_image_2,
             'referenceImage3': message.reference_image_3,
@@ -107,6 +122,9 @@ def _serialize_message(message: ChatMessage) -> dict:
             'endFrameCount': message.end_frame_count,
             'frameCount': message.frame_count,
             'workflowOptions': message.workflow_options,
+            'promptPreset': message.prompt_preset,
+            'motionReferenceImages': message.motion_reference_images,
+            'motionPrompt': message.motion_prompt,
         }
         params.update({key: value for key, value in optional_params.items() if value is not None})
         payload['params'] = params
@@ -175,16 +193,17 @@ def create_session(
     # 创建会话（从 workflow_metadata 读取默认配置）
     from utils.config_loader import get_config
     cfg = get_config()
+    workflow = cfg.workflow_defaults.current_workflow_type
     
     session = ChatSession(
         session_id=request.session_id,
         user_id=current_user.id,
         title=request.title or "新对话",
-        config_workflow="t2i",
+        config_workflow=workflow,
         config_prompt=None,
-        config_lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'lora_prompt'),
-        config_strength=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'strength'),
-        config_count=cfg.workflow_defaults.get_workflow_parameter_default('t2i', 'count'),
+        config_lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'lora_prompt'),
+        config_strength=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'strength'),
+        config_count=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'count'),
         config_images_per_row=cfg.workflow_defaults.col_count
     )
     db.add(session)
@@ -221,6 +240,7 @@ def delete_session(
     
     # 删除会话（级联删除所有消息和图片）
     file_paths = _stored_media_paths(session.messages)
+    file_paths.extend(session.config_motion_reference_images or [])
     file_paths.extend(filter(None, (
         session.config_reference_image,
         session.config_reference_image_2,
@@ -307,9 +327,9 @@ def summarize_session_title(
         ChatMessage.content.isnot(None)
     ).order_by(ChatMessage.created_at.asc()).all()
     content = "\n".join(
-        f"{'用户' if message.type == 'user' else '助手'}：{message.content.strip()}"
+        f"{'用户' if message.type == 'user' else '助手'}：{text}"
         for message in messages
-        if message.content and message.content.strip()
+        if (text := _summary_text(message))
     )
     if not content:
         raise HTTPException(
@@ -345,6 +365,13 @@ def update_session_config(
     # 更新配置字段（使用 model_dump 检查字段是否显式设置）
     update_data = request.model_dump(exclude_unset=True)
     stale_reference_paths = []
+    if 'motion_reference_images' in update_data:
+        from server.api.generation import _validate_reference_ownership
+        images = update_data['motion_reference_images'] or []
+        for image in images:
+            _validate_reference_ownership(image, current_user.id, db, '动作参考图')
+        stale_reference_paths.extend(set(session.config_motion_reference_images or []) - set(images))
+        session.config_motion_reference_images = images
     reference_fields = {
         'reference_image': 'config_reference_image',
         'reference_image_2': 'config_reference_image_2',
@@ -375,22 +402,31 @@ def update_session_config(
         session.config_reference_image_2 = update_data['reference_image_2']
     if 'reference_image_3' in update_data:
         session.config_reference_image_3 = update_data['reference_image_3']
-    if 'prompt_end' in update_data:
-        session.config_prompt_end = update_data['prompt_end']
     if 'reference_image_end' in update_data:
         session.config_reference_image_end = update_data['reference_image_end']
-    if 'is_loop' in update_data:
-        session.config_is_loop = update_data['is_loop']
-    if 'start_frame_count' in update_data:
-        session.config_start_frame_count = update_data['start_frame_count']
-    if 'end_frame_count' in update_data:
-        session.config_end_frame_count = update_data['end_frame_count']
-    if 'frame_rate' in update_data:
-        session.config_frame_rate = update_data['frame_rate']
-    if 'frame_count' in update_data:
-        session.config_frame_count = update_data['frame_count']
     if 'workflow_options' in update_data:
         session.config_workflow_options = update_data['workflow_options']
+    if 'prompt_preset' in update_data:
+        session.config_prompt_preset = update_data['prompt_preset']
+    if 'prompt_preset_choices' in update_data:
+        session.config_prompt_preset_choices = update_data['prompt_preset_choices']
+    if 'prompt_preset' in update_data and session.config_workflow and (
+        session.config_prompt_preset is not None or 'prompt_preset_choices' not in update_data
+        or session.config_workflow in (session.config_prompt_preset_choices or {})
+    ):
+        session.config_prompt_preset_choices = {
+            **(session.config_prompt_preset_choices or {}),
+            session.config_workflow: session.config_prompt_preset,
+        }
+    if 'motion_prompt' in update_data:
+        session.config_motion_prompt = update_data['motion_prompt']
+    session.config_motion_prompt = matching_motion_prompt(
+        session.config_motion_prompt, session.config_reference_image, session.config_motion_reference_images,
+        session.config_prompt, session.config_prompt_preset,
+    )
+    for field in ('width', 'height', 'use_original_size'):
+        if field in update_data:
+            setattr(session, 'config_' + field, update_data[field])
     
     session.updated_at = datetime.now()
     db.commit()
@@ -436,6 +472,13 @@ def get_session_config(
         "frame_rate": session.config_frame_rate,
         "frame_count": session.config_frame_count,
         "workflow_options": session.config_workflow_options,
+        "width": session.config_width,
+        "height": session.config_height,
+        "use_original_size": session.config_use_original_size,
+        "prompt_preset": session.config_prompt_preset,
+        "prompt_preset_choices": session.config_prompt_preset_choices,
+        "motion_reference_images": session.config_motion_reference_images,
+        "motion_prompt": session.config_motion_prompt,
     }
 
 
@@ -484,6 +527,13 @@ def update_message_content(
     # 更新可编辑字段
     update_data = request.model_dump(exclude_unset=True)
     stale_reference_paths = []
+    if 'motion_reference_images' in update_data:
+        from server.api.generation import _validate_reference_ownership
+        images = update_data['motion_reference_images'] or []
+        for image in images:
+            _validate_reference_ownership(image, current_user.id, db, '动作参考图')
+        stale_reference_paths.extend(set(user_msg.motion_reference_images or []) - set(images))
+        user_msg.motion_reference_images = images
     for field in ('reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end'):
         if field in update_data:
             old_value = getattr(user_msg, field)
@@ -499,8 +549,12 @@ def update_message_content(
         user_msg.reference_image_3 = update_data['reference_image_3']
     if 'reference_image_end' in update_data:
         user_msg.reference_image_end = update_data['reference_image_end']
-    if 'prompt_end' in update_data:
-        user_msg.prompt_end = update_data['prompt_end']
+    if 'motion_prompt' in update_data:
+        user_msg.motion_prompt = update_data['motion_prompt']
+    user_msg.motion_prompt = matching_motion_prompt(
+        user_msg.motion_prompt, user_msg.reference_image, user_msg.motion_reference_images,
+        user_msg.content, user_msg.prompt_preset,
+    )
 
     db.commit()
     delete_unreferenced_media(db, stale_reference_paths)

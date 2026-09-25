@@ -14,37 +14,39 @@
 ## Project Overview
 
 - ai-draw is a browser-based AI image/video generation and asset-processing workspace.
-- The backend dispatches generation to ComfyUI, Gemini/Nano Banana, OpenAI-compatible image APIs, and Kling.
+- The backend dispatches generation to ComfyUI and OpenAI-compatible image APIs; all text/vision LLM calls use the Codex proxy.
 - The frontend is a React chat-style application with generation history, editing, media processing, and export tools.
 - Authentication is mandatory in the current UI. JWT-authenticated user, session, message, configuration, and media metadata are persisted in PostgreSQL.
 - Long-running generation executes inside the FastAPI process and reports state/results through WebSocket messages.
 
 ## Runtime Model
 
-- `AIDrawService` is a process-global singleton with one `is_generating` state and one current generation task. Generation state is not isolated per user or per chat session.
+- `AIDrawService` is the process-global composition root. `server/generation/TaskManager` owns one generation slot with immutable user/session/message/task identity and explicit lifecycle phases. Generation events and snapshots are isolated by user; execution remains single-task.
 - `POST /api/media/generate` schedules work through FastAPI `BackgroundTasks` and returns immediately. There is no durable queue, Redis worker, or retry worker.
-- Restarting the backend loses active generation tasks. `/api/media/stop` operates on the shared singleton task.
-- Service callbacks currently broadcast WebSocket state to every authenticated connection. Do not put user-sensitive payloads into broadcasts without adding server-side user/task routing.
+- Restarting the backend loses active generation tasks. `/api/media/stop` checks task ownership and accepts an optional `task_id`; stopping during result persistence returns 409.
+- `StateEvent` captures task identity before delivery. Private events require a user recipient; only explicitly allowed public service fields may broadcast. Prompt activity is tracked per user.
 
 ## Tech Stack
 
 - Deploy build: Node 22 frontend stage and Python 3.10 backend/runtime stages.
 - Backend: FastAPI, Uvicorn, SQLAlchemy 2.0, PostgreSQL 15, Pydantic v2, pydantic-settings, JWT via `python-jose`, WebSocket.
-- AI integrations: ComfyUI, Google GenAI, OpenAI-compatible APIs, Kling, and a latent PixelLab implementation that is not exposed by current workflow metadata.
+- AI integrations: ComfyUI, OpenAI-compatible APIs, the Codex proxy, and a latent PixelLab implementation that is not exposed by current workflow metadata.
 - Media processing: Pillow, OpenCV headless, ffmpeg, rembg, transparent-background/InSPyReNet, BiRefNet, PyTorch.
 - Frontend: React 19, TypeScript 5.9, Zustand 5, Ant Design 6, Axios, Vite 7.
 
 ## Backend Architecture
 
 - `server/main.py`: FastAPI app, lifespan, CORS, exception handlers, `/api` router mounting, `/ws`, `/uploads`, and `/health`.
-- `server/api/media.py`: authenticated image/video generation, reference upload, stop, video-frame processing/export, background removal, and image upscaling under `/api/media`.
-- `server/api/prompt.py`: authenticated prompt generation, pose preset, image analysis, and first/last-frame analysis under `/api/prompt`.
+- `server/api/generation.py`: authenticated generation, last-task and stop endpoints mounted under `/api/media`; ownership validation stays at the HTTP boundary.
+- `server/api/media.py`: reference upload, video-frame processing/export, background removal and image upscaling; composes the generation router.
+- `server/api/prompt.py`: authenticated prompt generation, server-maintained prompt presets (`GET /api/prompt/presets`), image analysis, and ordered motion-reference analysis under `/api/prompt`. Presets describe the task only; painting style belongs to the selected LoRA. Every preset ends with "。": the selected preset is shown above the input, sent as `prompt_preset`, and `GenerationParameters.for_provider()` prepends it to the user's description only for validation and provider calls.
 - `server/api/service.py`: public status/workflow metadata plus authenticated service controls under `/api/service`.
 - `server/api/user.py`: `/api/auth`, `/api/config/user`, history persistence, and reference-image routes.
 - `server/api/session.py`: `/api/chat/sessions`, session configuration, pinning, title summarization, message editing, and round deletion.
 - `server/api/__init__.py`: registers all REST routers under the `/api` prefix supplied by `server/main.py`.
 - `server/schemas.py`: shared request/response models, including generation payloads.
-- `server/ai_draw_service.py`: generation dispatch, ComfyUI/API orchestration, shared task state, and state-change callbacks.
+- `server/ai_draw_service.py`: application composition, service controls, prompt generation and ComfyUI utility facade.
+- `server/generation/`: task lifecycle, coordinator, provider registry/adapters, workflow catalog, artifact storage, result persistence and explicit event contracts. See `docs/architecture.md`.
 - Use `get_ai_draw_service()` with FastAPI `Depends` rather than constructing another service instance.
 
 ## API And Authentication
@@ -65,18 +67,23 @@
 - `ChatMessage`: user/assistant messages and generation parameters.
 - `GeneratedImage`: generated image or video records despite the historical model name.
 - `ReferenceImage`: uploaded user reference media.
-- Session configuration contains multi-reference fields, start/end-frame prompts and images, loop state, frame counts, and frame rate where supported.
+- Session configuration contains multi-reference images, optional start/end keyframes and workflow options. Legacy end-frame prompts, loop state, frame counts and frame rate remain as historical database fields only; current generation does not accept or restore them.
+- Sessions and messages also persist width, height and original-size preference. Startup adds their nullable columns with idempotent DDL; missing historical sizes use workflow defaults in the frontend.
+- The selected prompt preset is a JSON snapshot in `chat_sessions.config_prompt_preset` and `chat_messages.prompt_preset` (idempotent DDL); message `content` holds only the user's description.
+- `chat_sessions.config_prompt_preset_choices` is a nullable JSON map of workflow IDs to preset snapshots; a missing key means uninitialized, and `null` means an explicit opt-out. Startup adds the column with idempotent DDL. Preserve this map through mode switches and session restore so defaults never undo a user's cancellation.
 - Startup calls `Base.metadata.create_all()` and applies explicit idempotent DDL for deployed schema additions such as `is_pinned`.
 - Alembic is installed but the repository has no `alembic.ini`, migration environment, or versions directory. `create_all()` does not alter existing columns. Any real deployed schema change requires an explicit migration strategy.
+- Startup also runs the idempotent migration in `server/legacy_media.py`: media from the retired style-reference table is appended to its owned assistant round, preserving existing results, before that legacy table is dropped. Historical workflow IDs remain in messages; unavailable workflows cannot be regenerated directly.
 
 ## Configuration
 
 - `.env` is the source of truth for application/server settings, ports, database/auth settings, model configuration, external APIs, and paths.
 - `.env.example` is the complete variable manifest. Keep it synchronized with every Pydantic Settings alias in `utils/config_loader.py`.
 - Every declared environment field must exist. Optional integrations are disabled by leaving their API key empty, not by omitting variables; required model and URL fields must remain non-empty.
-- `AI_PROMPT_REUSE_SESSION_TITLE=true` makes prompt generation reuse the session-title API key, base URL, and model.
+- `AI_PROMPT_PROVIDER=codex` is the only supported LLM provider. All text/vision calls use the existing GPT Image proxy connection with `CODEX_LLM_MODEL=gpt-6-astra`. Image generation keeps its own model selection.
+- Legacy prompt/title connection settings have been removed; `scripts/migrate_chatgpt_env.py` migrates existing `.env` files without displaying credentials.
 - `configs/app_config.yaml` should contain only workflow file mappings, metadata, parameter definitions, and workflow defaults.
-- Important config groups include app/server, ComfyUI, AI prompt, session title, Nano Banana, GPT Image, Kling, video frames/background removal, image upscale, auth, database, Redis, and paths.
+- Important config groups include app/server, ComfyUI, Qwen-Image-2.1, AI prompt, Codex LLM, GPT Image, video frames/background removal, image upscale, auth, database, Redis, and paths.
 - Redis settings are reserved configuration only. Redis is not deployed, imported, or used by application runtime.
 - Only the local/HTTP ComfyUI request implementation exists. `COMFYUI_CLOUD_*` and `COMFYUI_ENABLED` are currently placeholders rather than effective backend switches.
 - Do not commit `.env` or hardcode credentials, host-specific secrets, API keys, or model credentials.
@@ -84,37 +91,42 @@
 ## Workflows
 
 - Workflow metadata lives at `configs/app_config.yaml` under `workflow_defaults.workflow_metadata`.
-- Selectable workflow IDs are the metadata keys: `t2i`, `i2i`, `nano_banana_pro`, `gpt_image`, `flf2v`, `kling_flf2v`, and `i2v`.
-- `t2i`: ComfyUI Z-Image text-to-image.
-- `i2i`: ComfyUI Q-Image editing with up to three references and original-size support.
-- `nano_banana_pro`: Gemini image generation/editing single-turn with optional multi-image context.
+- Selectable workflow IDs are the metadata keys: `qwen_image_21_t2i`, `qwen_image_21_i2i`, `gpt_image`, `minimax_h3`, and `minimax_h3_ref`. The default is `qwen_image_21_t2i`.
+- Z-Image (`t2i`) is retired from the application. Preserve its model/LoRA files, training data and outputs, and historical messages/media. Old sessions fall back to an available workflow without carrying over retired LoRAs; old messages cannot be regenerated directly.
+- `qwen_image_21_t2i` / `qwen_image_21_i2i`: unified Qwen-Image-2.1 entry, separate native ComfyUI API graphs, up to three references in this app, optional compatible model-only LoRAs and RGBA PNG output. Model filenames use `QWEN_IMAGE_21_*` settings. See `docs/qwen_image_21.md`; training uses AI Toolkit `arch: qwen_image_2`.
 - `gpt_image`: OpenAI-compatible image generation/editing with optional multi-image input.
-- `flf2v`: ComfyUI Wan first/last-frame video with loop and frame controls.
-- `kling_flf2v`: Kling first/last-frame video.
-- `i2v`: ComfyUI Wan image-to-video with frame count and frame rate controls.
+- Wan (`flf2v` / `i2v`) is retired. Its application graphs, provider/request code, loop/frame controls, dedicated prompt analysis, installed weights and saved ComfyUI workflows are removed. Preserve historical messages/media and legacy database fields; old sessions use the common workflow fallback and old messages cannot be regenerated directly. Keep shared ComfyUI nodes and upstream code intact.
+- `minimax_h3`: displayed as `MiniMax H3 · 首尾帧`; ComfyUI MiniMax H3 text/optional-keyframe video with native audio.
+- `minimax_h3_ref`: H3 Ref2VA uses one character image and 1–8 ordered pose images directly as references. `motion_reference_images` is persisted in message/session JSON columns with idempotent startup DDL. Preserve image order and ownership in upload, history, regeneration and media cleanup. See `docs/minimax_h3_reference.md`.
+- Ref2VA automatically analyzes the source scene and ordered poses through the existing Codex vision client before sampling. It preserves identity, background, lighting, camera, crop and source aspect ratio. `motion_prompt` stores the input-bound, editable analysis snapshot separately from the user's description. The generic provider enrichment stage runs inside the owned generation task; failed/cancelled analysis must never start video generation. Preview uses authenticated `/api/prompt/analyze-motion` with the same ownership checks.
+- The current `video_fixed_camera` prompt preset declares `requires_motion_reference`: both UI and backend require a motion-capable workflow and ordered pose images. Reference images determine the actions, poses and order; user text only adds compatible timing, pauses or sound details. The motion-analysis policy identifier is included in backend/frontend input hashes to invalidate older analysis. Preserve saved preset snapshots; reselecting loads the latest preset.
+- Current video presets declare `workflow_ids`: `video_motion` / `video_transition` only target `minimax_h3`, and `video_fixed_camera` only targets `minimax_h3_ref`. The preset menu hides incompatible entries. Metadata `default_prompt_preset_id` selects `video_transition` for the frame mode and `video_fixed_camera` for the reference mode on first use; the input remains supplementary text. Old snapshots without scope keep their original capability validation for regeneration.
+- Image workflows default to `sketch_finish` (参考图成品化), with an empty initial description and one required reference for that preset. Qwen's text/edit executions share manual preset choices and opt-outs across reference upload/removal; both workflow keys remain in the persisted map. GPT Image keeps its own choice. Preserve existing descriptions, snapshots and explicit cancellations.
 - `workflow_files` also contains internal `image_upscale` and `image_upscale_invsr` workflows. They are utility workflows, not selectable generation modes.
-- Current JSON files are `t2i_workflow_api.json`, `qwen_image_edit_workflow_api.json`, `flf2v_workflow_api.json`, `i2v_workflow_api.json`, `image_upscale_workflow_api.json`, and `image_upscale_invsr_workflow_api.json`.
+- Current JSON files are `qwen_image_21_t2i_workflow_api.json`, `qwen_image_21_i2i_workflow_api.json`, `minimax_h3_workflow_api.json`, `minimax_h3_ref_workflow_api.json`, `image_upscale_workflow_api.json`, and `image_upscale_invsr_workflow_api.json`.
 - Common metadata fields include `label`, `description`, `category`, `method`, input capability flags, `output_type`, `prompt_template`, and `parameters`.
 
 ## Adding A Workflow
 
 - For a ComfyUI generation workflow, add the exported API JSON, register `workflow_files`, add `workflow_metadata`, and verify whether generic service dispatch supports its inputs and outputs.
-- For an external API workflow, add environment-backed configuration, an API client, explicit `AIDrawService` dispatch, metadata, backend schemas, and frontend request types. Do not add a dummy ComfyUI JSON.
+- For an external API workflow, add environment-backed configuration, a provider adapter/registry entry and metadata with `provider`, plus request fields/types if needed. Do not add a dummy ComfyUI JSON or platform branches to the coordinator.
 - For an internal utility workflow, add only the `workflow_files` mapping and consuming backend logic unless it should be selectable by users.
-- Workflow discovery is dynamic, but behavior is not fully metadata-driven. Search for hardcoded IDs in `server/ai_draw_service.py`, `frontend/src/stores/appStore.ts`, `ChatInput.tsx`, and `SettingsModal.tsx`.
+- Workflow discovery, provider resolution, validation and max_count share `WorkflowCatalog`; every selectable workflow must declare a registered `provider`. Audit specialized UI input behavior in `ChatInput.tsx` and `SettingsModal.tsx` when adding capabilities.
 
 ## Frontend Architecture
 
 - `frontend/src/main.tsx`: React entry point and `ErrorBoundary` installation.
-- `frontend/src/App.tsx`: authenticated application shell and WebSocket result handling.
+- `frontend/src/App.tsx`: authenticated application shell and theme/layout.
+- `frontend/src/features/generation/`: generation store slice, event handling and connection hook. Use the slice actions for task transitions and result refreshes; preserve revision guards against stale responses.
 - `frontend/src/stores/appStore.ts`: primary Zustand state and most current store types.
 - `frontend/src/api/client.ts`: Axios setup, JWT injection, and mixed error-envelope handling.
 - `frontend/src/api/services.ts`: REST methods for auth, sessions, generation, media utilities, and persistence.
 - `frontend/src/api/websocket.ts`: authenticated WebSocket connection, browser connection ID, and reconnect handling.
 - `frontend/src/types/api.ts` and `frontend/src/types/models.ts`: API and persisted model types.
-- `frontend/src/types/store.ts` is older; verify active imports before extending it.
+- `frontend/src/types/store.ts` re-exports the active store type. Chat message types live in `types/models.ts`; transport types live in `types/api.ts`.
 - `frontend/src/components/FrameExtractionModal.tsx`: frame extraction, workset selection, edits, background processing, upscaling, and export flow.
 - `frontend/src/components/ResultGrid.tsx`: generated media display and entry points to media tools.
+- `frontend/src/components/PromptExpansionModal.tsx`: 扩写助手, text expansion only in every workflow; keeps result editing, copying, applying and image-mention validation. Preset selection and the preset tag's change action use the input's plus menu. Motion analysis stays in the existing plus action and generation pipeline. An applicable selected preset is sent only as read-only `preset_prompt` context (a system message with image mentions as plain text); expansion rewrites only the user's description and never restates the preset, which generation still prepends once. The `minimax_h3_ref` template likewise leaves fixed-scene rules and reference actions to the server.
 - `frontend/src/components/BackgroundOptionsFields.tsx`: shared background-removal controls.
 - `frontend/src/utils/frameColorReplacement.ts` and `imageUpscale.ts`: client-side frame/color and upscale helpers.
 - Preserve the existing Ant Design and product-specific interaction patterns unless the task explicitly requests a redesign.
@@ -122,10 +134,10 @@
 
 ## WebSocket Behavior
 
-- `server/websocket/__init__.py` contains the global `ConnectionManager`.
+- `server/websocket/manager.py` owns user-scoped connection delivery; `routes.py` owns authenticated routes and the application event subscription.
 - Connections require `/ws?token=<JWT>`; unauthenticated connections close with code `1008`.
 - After connecting, the frontend sends an `init` message with a browser connection ID from local storage. This is not a database chat-session ID.
-- Service callbacks call `manager.broadcast()` without a session ID, so state currently reaches every authenticated connection.
+- The lifespan installs an event subscriber that sends immutable `StateEvent` payloads through `manager.publish()`. Private task messages only reach the owning user's authenticated connections.
 - State messages use `{"type":"state_change","field":"is_generating","value":true}`.
 - Generation errors use `{"type":"state_change","field":"error","value":"..."}`, not a top-level WebSocket `error` message.
 - Useful log markers include `[WebSocket] 客户端已连接` and `[WebSocket] 会话ID已设置`.
@@ -137,9 +149,8 @@
 - `comfyui/requests/local_comfyui_request.py`: active HTTP ComfyUI implementation.
 - Preserve existing UTF-8/GBK compatibility when touching temporary workflow files.
 - In remote Docker, `COMFYUI_HOST=comfyui` works only if that hostname is reachable from `ai-draw-network`; this Compose file does not create a ComfyUI service.
-- `utils/gemini_chat.py`: Gemini/Nano Banana single-turn image generation.
 - `utils/openai_image.py`: OpenAI-compatible image generation/editing.
-- `utils/kling_video.py`: Kling generation, polling, and download.
+- `utils/llm.py`: shared Codex text/vision client for prompts, titles, analysis and training captions.
 - `utils/pixel_lab.py`: latent PixelLab integration, currently absent from selectable metadata.
 - `utils/ai_prompt.py`: OpenAI-compatible prompt expansion.
 - `utils/session_title.py`: automatic chat title generation.
@@ -169,7 +180,7 @@
 ## Common Change Guides
 
 - API endpoint: edit the relevant `server/api/` module, add shared schemas to `server/schemas.py`, apply auth dependencies, update frontend services/types, and register only genuinely new routers in `server/api/__init__.py`.
-- Generation behavior: edit `server/ai_draw_service.py`, preserve `is_generating`, preview/result, error, and cancellation state notifications, and account for the global singleton task model.
+- Generation behavior: edit the relevant module under `server/generation/`; preserve ownership, lifecycle, preview/result, error, cancellation and persistence semantics. Do not reintroduce task fields or background business logic into HTTP/WebSocket routes.
 - Database model: edit `server/models.py`, define how existing deployed databases migrate, and do not assume `create_all()` changes existing tables.
 - Workflow UI: update metadata first, then audit hardcoded workflow-specific branches and persisted session configuration.
 - WebSocket: inspect browser Network/WS frames and backend connection logs; verify authentication and cross-client behavior.
@@ -185,12 +196,13 @@
 - `configs/app_config.yaml`: workflow mappings, metadata, and defaults.
 - `configs/workflows/`: ComfyUI API JSON files.
 - `server/main.py`: app lifecycle and router mounting.
-- `server/ai_draw_service.py`: core generation orchestration.
+- `server/ai_draw_service.py`: application composition and utility facade.
+- `server/generation/`: generation orchestration and adapters.
 - `server/api/`: REST routers.
 - `server/models.py`: ORM models.
 - `server/database.py`: engine, sessions, startup table creation, and idempotent DDL.
 - `server/auth.py`: JWT authentication.
-- `server/websocket/__init__.py`: WebSocket connections and broadcasts.
+- `server/websocket/routes.py` and `manager.py`: WebSocket authentication and scoped event delivery.
 - `utils/config_loader.py`: environment-backed configuration.
 - `frontend/package.json`: frontend scripts and dependency versions.
 - `frontend/vite.config.ts`: dev server and proxy ports.

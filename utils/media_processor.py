@@ -3,7 +3,9 @@ import io
 import os
 import subprocess
 import tempfile
-from PIL import Image
+from typing import Literal
+
+from PIL import Image, ImageOps
 
 
 class ImageUpscaleValidationError(ValueError):
@@ -66,37 +68,38 @@ def resize_video_bytes(video_bytes: bytes, width: int, height: int) -> bytes:
                 pass
 
 
-def resize_image_base64(image_b64: str, width: int, height: int) -> str:
+def resize_image_base64(
+    image_b64: str, width: int, height: int, *, mode: Literal["cover", "contain"] = "cover",
+) -> str:
     """
-    将 base64 图像缩放裁剪到指定尺寸（cover 模式）：
-    - 原图横向（宽 > 高）：缩放使高度 = target_height，居中裁剪宽度
-    - 原图纵向（高 > 宽）：缩放使宽度 = target_width，居中裁剪高度
-    - 不拉伸、不填充，输出恰好为 (width, height)
+    将 base64 图像等比缩放到指定画布尺寸。
+    cover 填满画布并居中裁切；contain 完整保留画面，以白色或透明边缘补齐。
 
     Args:
         image_b64: 原始图像的 base64 字符串（无 data URL 前缀）
         width:     目标宽度（像素）
         height:    目标高度（像素）
+        mode:      cover（默认）或 contain
 
     Returns:
         缩放后的 PNG base64 字符串
     """
-    img = Image.open(io.BytesIO(base64.b64decode(image_b64))).convert('RGB')
-    orig_w, orig_h = img.size
+    if mode not in ("cover", "contain"):
+        raise ValueError(f"Unsupported image resize mode: {mode}")
+    with Image.open(io.BytesIO(base64.b64decode(image_b64))) as source:
+        has_alpha = "A" in source.getbands() or "transparency" in source.info
+        img = source.convert("RGBA" if mode == "contain" and has_alpha else "RGB")
 
-    # cover 缩放：
-    # - 原图宽 > 高（横图）：缩放使高度 = target_height，然后居中裁剪宽度
-    # - 原图宽 < 高（竖图）：缩放使宽度 = target_width，然后居中裁剪高度
-    # 即 scale = max(target_w/orig_w, target_h/orig_h)，确保整个目标区域被填满
-    scale = max(width / orig_w, height / orig_h)
-    new_w = int(orig_w * scale)
-    new_h = int(orig_h * scale)
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-
-    # 居中裁剪到目标尺寸
-    crop_x = (new_w - width) // 2
-    crop_y = (new_h - height) // 2
-    img = img.crop((crop_x, crop_y, crop_x + width, crop_y + height))
+    if mode == "contain":
+        background = (0, 0, 0, 0) if img.mode == "RGBA" else (255, 255, 255)
+        img = ImageOps.pad(img, (width, height), method=Image.Resampling.LANCZOS, color=background)
+    else:
+        orig_w, orig_h = img.size
+        scale = max(width / orig_w, height / orig_h)
+        new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        crop_x, crop_y = (new_w - width) // 2, (new_h - height) // 2
+        img = img.crop((crop_x, crop_y, crop_x + width, crop_y + height))
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')

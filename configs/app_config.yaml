@@ -7,105 +7,70 @@
 # 工作流配置
 workflow_defaults:
   # 默认工作流类型
-  current_workflow_type: "t2i"
+  current_workflow_type: "qwen_image_21_t2i"
   # 列数
   col_count: 4
   
   # 工作流文件名映射
   workflow_files:
-    t2i: "t2i_workflow_api.json"
-    i2i: "qwen_image_edit_workflow_api.json"
-    flf2v: "flf2v_workflow_api.json"
-    i2v: "i2v_workflow_api.json"
+    qwen_image_21_t2i: "qwen_image_21_t2i_workflow_api.json"
+    qwen_image_21_i2i: "qwen_image_21_i2i_workflow_api.json"
     minimax_h3: "minimax_h3_workflow_api.json"
+    minimax_h3_ref: "minimax_h3_ref_workflow_api.json"
     image_upscale: "image_upscale_workflow_api.json"
     image_upscale_invsr: "image_upscale_invsr_workflow_api.json"
   # 工作流元数据
   workflow_metadata:
-    t2i:
-      label: "文生图（Z-Image）"
-      description: "纯文本生成图像"
-      category: "文生图"
-      method: "Z-Image"
-      requires_image: false
-      prompt_template: "你是一个 AI 图像生成提示词专家，当前使用 Z-Image（Lumina2 架构）模型，该模型擅长理解中文自然语言描述。请将以下描述扩写为详细的中文图像提示词，描述主体、外貌、服装、场景、光线、风格等细节，语言流畅自然，不要使用英文标签格式：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "一个女孩"
-        - name: "count"
-          label: "生成数量"
-          type: "number"
-          min: 1
-          max: 8
-          step: 1
-          default: 1
-        - name: "lora_prompt"
-          label: "LoRA 提示词"
-          type: "text"
-          default: "<lora:AmeniwaZ:0.8>"
-    i2i:
-      label: "图生图（Q-Image）"
-      description: "基于参考图重绘"
-      category: "图生图"
-      method: "Q-Image"
-      requires_image: true
-      supports_multi_image: true
-      supports_original_size: true
-      prompt_template: "你是一个 AI 图像编辑提示词专家，当前使用 Qwen 图像编辑模型，支持中文自然语言指令。请将以下描述转换为简洁明确的中文图像编辑指令，说明对图像做什么修改（如改变颜色、调整风格、修改内容等）：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "一个女孩"
-        - name: "strength"
-          label: "重绘强度"
-          type: "number"
-          min: 0
-          max: 1
-          step: 0.01
-          default: 1
-        - name: "count"
-          label: "生成数量"
-          type: "number"
-          min: 1
-          max: 8
-          step: 1
-          default: 1
-        - name: "width"
-          label: "图像宽度"
-          type: "number"
-          min: 512
-          max: 2048
-          step: 64
-          default: 1024
-        - name: "height"
-          label: "图像高度"
-          type: "number"
-          min: 512
-          max: 2048
-          step: 64
-          default: 1024
-    nano_banana_pro:
-      label: "图生图（Nano Banana Pro）"
-      description: "基于 Nano Banana Pro 的图生图工作流"
-      category: "图生图"
-      method: "Nano Banana Pro"
+    qwen_image_21_t2i: &qwen_image_21
+      provider: "comfyui_qwen_image_21"
+      label: "文生图（Qwen-Image-2.1）"
+      description: "文字生成图片，添加参考图后切换为编辑；支持专用 LoRA"
+      category: "生图"
+      method: "Qwen-Image-2.1"
+      default_prompt_preset_id: "sketch_finish"
+      method_group: "qwen_image_21_t2i"
+      text_workflow: "qwen_image_21_t2i"
+      image_workflow: "qwen_image_21_i2i"
+      reference_image_label: "参考图"
+      reference_image_description: "第一张为编辑目标，其余图片提供参考；输入 @ 选择参考图"
       requires_image: false
       supports_multi_image: true
       output_type: "image"
-      prompt_template: "你是一个图像描述扩写专家，当前使用 Nano Banana Pro（Gemini）模型，能够理解极为丰富的中文细节描述。请将以下简短描述扩写为非常详细丰富的中文描述，涵盖人物外貌、表情、服装、姿势、场景环境、光线氛围、风格等所有细节：\n描述：{desc}\n只输出扩写后的中文描述，不要解释："
+      lora_models:
+        - {name: "Ameniwa.safetensors", label: "Ameniwa"}
+      prompt_template: "你是 Qwen-Image-2.1 图像生成提示词专家。将描述扩写为明确的中文自然语言提示词，忠实保留主体、文字、构图和用户指定的画风。不要擅自添加风格词；用户要求透明背景时明确 alpha 透明通道。\n描述：{desc}\n只输出提示词："
+      parameters: &qwen_image_21_parameters
+        - {name: "prompt", label: "画面描述", type: "text", default: ""}
+        - {name: "lora_prompt", label: "风格 LoRA", type: "text", default: ""}
+        - {name: "count", label: "生成数量", type: "number", min: 1, max: 4, step: 1, default: 1}
+        - {name: "width", label: "图片宽度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
+        - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
+        - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
+    qwen_image_21_i2i:
+      <<: *qwen_image_21
+      label: "图生图（Qwen-Image-2.1）"
+      description: "通过文字编辑参考图，支持最多三张图片与专用 LoRA"
+      requires_image: true
+      supports_original_size: true
+      output_resize_mode: "contain"
+      prompt_template: "你是 Qwen-Image-2.1 图像编辑提示词专家。将描述整理为清晰的中文编辑指令，说明保留和修改的内容；第一张参考图为编辑目标，其余图为参考，可使用 <image1>、<image2>、<image3> 指代。不要擅自增加画风、材质或无关细节。\n描述：{desc}\n只输出提示词："
       parameters:
-        - name: "prompt"
-          label: "描述 / 指令"
-          type: "text"
-          default: "一个女孩"
+        - {name: "prompt", label: "编辑指令", type: "text", default: ""}
+        - {name: "lora_prompt", label: "风格 LoRA", type: "text", default: ""}
+        - {name: "count", label: "生成数量", type: "number", min: 1, max: 4, step: 1, default: 1}
+        - {name: "width", label: "图片宽度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
+        - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
+        - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
+        - {name: "qwen_reference_resolution", label: "参考图处理分辨率", type: "select", options: ["512", "768", "1024", "1536", "2048"], default: "1024"}
     gpt_image:
+      provider: "openai_image"
       label: "图生图（GPT Image · Codex 订阅）"
       description: "使用 Codex 订阅额度生成或编辑图片，支持多张参考图"
-      category: "图生图"
-      method: "GPT Image（Codex 订阅）"
+      category: "生图"
+      method: "GPT Image"
+      default_prompt_preset_id: "sketch_finish"
+      reference_image_label: "参考图"
+      reference_image_description: "描述编辑或合成要求，输入 @ 选择参考图"
       requires_image: false
       supports_multi_image: true
       output_type: "image"
@@ -114,106 +79,33 @@ workflow_defaults:
         - name: "prompt"
           label: "提示词"
           type: "text"
-          default: "一个女孩"
-    flf2v:
-      label: "首尾帧生视频（Wan FLF2V）"
-      description: "基于首尾帧生成过渡视频"
+          default: ""
+    minimax_h3_ref:
+      provider: "comfyui_minimax_h3_ref"
+      label: "动作参考视频（MiniMax H3）"
+      description: "保留原图人物、背景和固定镜头，自动识别 1–8 张动作图，只改变姿势"
       category: "图生视频"
-      method: "Wan FLF2V"
+      method: "MiniMax H3 · 动作参考"
+      default_prompt_preset_id: "video_fixed_camera"
       requires_image: true
-      requires_end_image: true
-      supports_original_size: true
-      supports_loop: true
+      supports_motion_reference: true
+      max_motion_reference_images: 8
+      reference_image_label: "角色与场景图"
+      reference_image_description: "保留人物、背景、光照、画风、镜头与取景，只按下方动作图改变姿势"
       output_type: "video"
-      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Wan2.2 视频模型，基于首帧和尾帧生成过渡视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出动态感和画面过渡效果：\n描述：{desc}\n只输出提示词，不要解释："
+      # 固定画面要求和参考动作由服务端拼接，扩写只处理用户的补充描述
+      prompt_template: "你是固定画面动作动画的补充描述扩写助手。保持原图人物、画风、背景、光照与固定镜头，以及按动作参考图顺序完成基本动作，这些要求都由系统自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容（包括看图得到的动作）保持原意和顺序，不删减。不得新增、替换或改变参考动作，不引入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
       parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "一个女孩"
-        - name: "width"
-          label: "视频宽度"
-          type: "number"
-          min: 256
-          max: 1280
-          step: 64
-          default: 1024
-        - name: "height"
-          label: "视频高度"
-          type: "number"
-          min: 256
-          max: 1280
-          step: 64
-          default: 1024
-        - name: "startFrameCount"
-          label: "起始帧长度"
-          type: "number"
-          min: 1
-          max: 200
-          step: 1
-          default: 33
-        - name: "endFrameCount"
-          label: "结束帧长度"
-          type: "number"
-          min: 1
-          max: 200
-          step: 1
-          default: 33
-        - name: "frameRate"
-          label: "帧率"
-          type: "number"
-          min: 1
-          max: 60
-          step: 1
-          default: 16
-    kling_flf2v:
-      label: "首尾帧生视频（Kling）"
-      description: "基于 Kling API 的首尾帧图生视频"
-      category: "图生视频"
-      method: "Kling"
-      requires_image: true
-      requires_end_image: true
-      output_type: "video"
-      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Kling 视频模型，基于首帧和尾帧生成过渡视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出从首帧到尾帧的自然过渡和动态感：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "duration"
-          label: "时长（秒）"
-          type: "select"
-          options: ["5", "10"]
-          default: "5"
-    i2v:
-      label: "图生视频（Wan i2v）"
-      description: "基于参考图生成视频"
-      category: "图生视频"
-      method: "Wan i2v"
-      requires_image: true
-      supports_original_size: true
-      output_type: "video"
-      prompt_template: "你是一个 AI 视频生成提示词专家，当前使用 Wan2.2 i2v 视频模型，基于起始帧图像生成视频，支持中文自然语言描述。请将以下描述扩写为详细的中文视频提示词，描述画面内容、人物动作、场景变化、运镜方式、氛围风格，突出动态感：\n描述：{desc}\n只输出提示词，不要解释："
-      parameters:
-        - name: "prompt"
-          label: "提示词"
-          type: "text"
-          default: "一个女孩"
-        - name: "frameCount"
-          label: "总帧数"
-          type: "number"
-          min: 1
-          max: 200
-          step: 1
-          default: 33
-        - name: "frameRate"
-          label: "帧率"
-          type: "number"
-          min: 1
-          max: 60
-          step: 1
-          default: 16
+        - {name: "prompt", label: "额外补充（可留空）", type: "text", default: ""}
+        - {name: "h3_duration", label: "时长（秒）", type: "select", options: ["4", "5", "6", "8", "10", "12", "15"], default: "5"}
+        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "跟随原图（固定画面）"}, default: "auto"}
     minimax_h3:
-      label: "全模态视频（MiniMax H3）"
+      provider: "comfyui_minimax_h3"
+      label: "MiniMax H3 · 首尾帧"
       description: "支持文本及可选首尾关键帧，原生生成同步双声道音视频"
       category: "图生视频"
-      method: "MiniMax H3"
+      method: "MiniMax H3 · 首尾帧"
+      default_prompt_preset_id: "video_transition"
       requires_image: false
       supports_optional_keyframes: true
       output_type: "video"
@@ -222,7 +114,7 @@ workflow_defaults:
         - name: "prompt"
           label: "音视频描述"
           type: "text"
-          default: "电影感镜头，人物自然运动，环境音与配乐同步"
+          default: ""
         - name: "h3_duration"
           label: "时长（秒）"
           type: "select"

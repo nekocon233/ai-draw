@@ -42,32 +42,15 @@ class ComfyUIConfig(BaseSettings):
 
 class AIPromptConfig(BaseSettings):
     """AI Prompt 生成配置"""
-    provider: str = Field(min_length=1, validation_alias="AI_PROMPT_PROVIDER")
-    api_key: str = Field(validation_alias="AI_PROMPT_API_KEY")
-    base_url: str = Field(min_length=1, validation_alias="AI_PROMPT_BASE_URL")
-    model: str = Field(min_length=1, validation_alias="AI_PROMPT_MODEL")
+    provider: Literal["codex"] = Field(validation_alias="AI_PROMPT_PROVIDER")
     template: str = Field(min_length=1, validation_alias="AI_PROMPT_TEMPLATE")
-    reuse_session_title: bool = Field(validation_alias="AI_PROMPT_REUSE_SESSION_TITLE")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
-class SessionTitleConfig(BaseSettings):
-    """会话标题自动总结配置。"""
-    api_key: str = Field(validation_alias="SESSION_TITLE_API_KEY")
-    base_url: str = Field(min_length=1, validation_alias="SESSION_TITLE_BASE_URL")
-    model: str = Field(min_length=1, validation_alias="SESSION_TITLE_MODEL")
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-
-class NanoBananaConfig(BaseSettings):
-    """Nano Banana (Gemini) 配置"""
-    api_key: str = Field(validation_alias="NANO_BANANA_API_KEY")
-    base_url: str = Field(min_length=1, validation_alias="NANO_BANANA_BASE_URL")
-    model: str = Field(min_length=1, validation_alias="NANO_BANANA_MODEL")
-    analysis_model: str = Field(min_length=1, validation_alias="NANO_BANANA_ANALYSIS_MODEL")
-
+class CodexLLMConfig(BaseSettings):
+    """Text/vision model served through the existing Codex image proxy connection."""
+    model: str = Field(min_length=1, validation_alias="CODEX_LLM_MODEL")
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
@@ -79,7 +62,7 @@ class PixelLabConfig(BaseSettings):
 
 
 class GptImageConfig(BaseSettings):
-    """GPT Image（OpenAI 兼容 API，如 UniAPI 的 gpt-image）配置"""
+    """GPT Image 与共享 Codex 反代连接配置。"""
     api_key: str = Field(validation_alias="GPT_IMAGE_API_KEY")
     base_url: str = Field(min_length=1, validation_alias="GPT_IMAGE_BASE_URL")
     model: str = Field(min_length=1, validation_alias="GPT_IMAGE_MODEL")
@@ -87,12 +70,11 @@ class GptImageConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
-class KlingConfig(BaseSettings):
-    """Kling 视频生成（首尾帧图生视频）配置"""
-    api_key: str = Field(validation_alias="KLING_API_KEY")
-    base_url: str = Field(min_length=1, validation_alias="KLING_BASE_URL")
-    model: str = Field(min_length=1, validation_alias="KLING_MODEL")
-
+class QwenImage21Config(BaseSettings):
+    """Official ComfyUI filenames for the unified Qwen-Image-2.1 model."""
+    model: str = Field(min_length=1, validation_alias="QWEN_IMAGE_21_MODEL_FILE")
+    text_encoder: str = Field(min_length=1, validation_alias="QWEN_IMAGE_21_TEXT_ENCODER_FILE")
+    vae: str = Field(min_length=1, validation_alias="QWEN_IMAGE_21_VAE_FILE")
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
@@ -245,11 +227,10 @@ class Config(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     ai_prompt: AIPromptConfig = Field(default_factory=AIPromptConfig)
-    session_title: SessionTitleConfig = Field(default_factory=SessionTitleConfig)
-    nano_banana: NanoBananaConfig = Field(default_factory=NanoBananaConfig)
+    codex_llm: CodexLLMConfig = Field(default_factory=CodexLLMConfig)
     pixel_lab: PixelLabConfig = Field(default_factory=PixelLabConfig)
     gpt_image: GptImageConfig = Field(default_factory=GptImageConfig)
-    kling: KlingConfig = Field(default_factory=KlingConfig)
+    qwen_image_21: QwenImage21Config = Field(default_factory=QwenImage21Config)
     video_frames: VideoFramesConfig = Field(default_factory=VideoFramesConfig)
     image_upscale: ImageUpscaleConfig = Field(default_factory=ImageUpscaleConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
@@ -332,16 +313,6 @@ def get_ai_prompt_config() -> AIPromptConfig:
     return get_config().ai_prompt
 
 
-def get_session_title_config() -> SessionTitleConfig:
-    """获取会话标题总结配置。"""
-    return get_config().session_title
-
-
-def get_nano_banana_config() -> NanoBananaConfig:
-    """获取 Nano Banana 配置"""
-    return get_config().nano_banana
-
-
 def get_pixel_lab_config() -> PixelLabConfig:
     """获取 PixelLab 配置"""
     return get_config().pixel_lab
@@ -350,11 +321,6 @@ def get_pixel_lab_config() -> PixelLabConfig:
 def get_gpt_image_config() -> GptImageConfig:
     """获取 GPT Image 配置"""
     return get_config().gpt_image
-
-
-def get_kling_config() -> KlingConfig:
-    """获取 Kling 视频配置"""
-    return get_config().kling
 
 
 def get_video_frames_config() -> VideoFramesConfig:
@@ -393,5 +359,5 @@ if __name__ == "__main__":
     print(f"应用名称: {config.app.name}")
     print(f"服务器地址: {config.server.host}:{config.server.port}")
     print(f"ComfyUI 地址: {config.comfyui.local.host}:{config.comfyui.local.port}")
-    print(f"AI Prompt 模型: {config.ai_prompt.model}")
+    print(f"LLM 模型: {config.codex_llm.model}")
     print(f"数据库: {config.database.host}:{config.database.port}/{config.database.name}")

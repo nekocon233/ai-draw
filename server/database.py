@@ -60,6 +60,30 @@ def init_db():
                     "ADD COLUMN IF NOT EXISTS workflow_options JSON"
                 ))
                 conn.execute(text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN IF NOT EXISTS config_prompt_preset JSON"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN IF NOT EXISTS config_prompt_preset_choices JSON"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE chat_messages "
+                    "ADD COLUMN IF NOT EXISTS prompt_preset JSON"
+                ))
+                # Preserve NULL for old rows: their original dimensions were never recorded.
+                for table, prefix in (("chat_sessions", "config_"), ("chat_messages", "")):
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}motion_reference_images JSON"
+                    ))
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}motion_prompt JSON"
+                    ))
+                    for field, sql_type in (("width", "INTEGER"), ("height", "INTEGER"), ("use_original_size", "BOOLEAN")):
+                        conn.execute(text(
+                            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}{field} {sql_type}"
+                        ))
+                conn.execute(text(
                     "DELETE FROM generated_images older USING generated_images newer "
                     "WHERE older.message_id = newer.message_id "
                     "AND older.image_index = newer.image_index "
@@ -69,6 +93,8 @@ def init_db():
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_generated_images_message_index "
                     "ON generated_images (message_id, image_index)"
                 ))
+                from server.legacy_media import migrate_retired_style_references
+                migrate_retired_style_references(conn)
             print("[Database] 数据库表初始化完成")
             return
         except Exception as e:

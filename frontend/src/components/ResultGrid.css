@@ -147,6 +147,21 @@
   word-break: break-word;
 }
 
+/* 预设与用户描述分开显示，点击标签可查看预设原文 */
+.chat-message-preset {
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+.chat-message-edit-mode .chat-message-preset {
+  margin-bottom: 0;
+}
+
+.user-message .prompt-preset-tag {
+  border-color: var(--user-message-field-border);
+  background: var(--user-message-field-bg);
+}
+
 .chat-message-text-end {
   font-size: 14px;
   margin-top: 4px;
@@ -445,10 +460,6 @@
 
 .user-message.is-editing .edit-content-textarea {
   width: 100%;
-}
-
-.edit-content-textarea-end {
-  border-top: 1px dashed var(--user-message-divider) !important;
 }
 
 /* 编辑模式参考图区域 */
@@ -2845,6 +2856,12 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  /* Keep the two 44px touch targets vertically separated. */
+  .edit-ref-image-tile,
+  .edit-ref-add {
+    height: 96px;
+  }
+
   .user-message-actions {
     min-height: 44px;
     opacity: 1;

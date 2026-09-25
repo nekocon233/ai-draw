@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { WorkflowMetadata } from '../src/types/api.ts';
-import { getWorkflowOptions } from '../src/utils/workflowOptions.ts';
+import { getWorkflowOptions, resolveAvailableWorkflow } from '../src/utils/workflowOptions.ts';
 
 const metadata: WorkflowMetadata = {
   key: 'minimax_h3',
@@ -42,4 +42,28 @@ test('replaces stale option values with metadata defaults', () => {
     h3_duration: '5',
     h3_aspect_ratio: 'auto',
   });
+});
+
+test('restores retired workflows to an available default regardless of loading order', () => {
+  const workflows = [metadata, { ...metadata, key: 'qwen_image_21_t2i' }];
+  assert.equal(resolveAvailableWorkflow('retired_provider', workflows), 'qwen_image_21_t2i');
+  assert.equal(resolveAvailableWorkflow('minimax_h3', workflows), 'minimax_h3');
+  assert.equal(resolveAvailableWorkflow('retired_provider', [metadata]), 'minimax_h3');
+  assert.equal(resolveAvailableWorkflow('retired_provider', []), 'retired_provider');
+});
+
+test('retry discards a retired final image provider saved on old messages', () => {
+  assert.deepEqual(getWorkflowOptions({ ...metadata, key: 'ideogram_style', parameters: [] }, {
+    final_model: 'retired_provider',
+  }), {});
+});
+
+test('retired Qwen seed and reference-mode options saved on sessions are not sent', () => {
+  const qwen: WorkflowMetadata = {
+    ...metadata,
+    key: 'qwen_image_21_i2i',
+    parameters: [{ name: 'qwen_steps', label: '采样步数', type: 'select', options: ['20', '25', '40', '50'], default: '40' }],
+  };
+  assert.deepEqual(getWorkflowOptions(qwen, { qwen_steps: '25', qwen_seed: '42', qwen_reference_mode: 'reference' }),
+    { qwen_steps: '25' });
 });

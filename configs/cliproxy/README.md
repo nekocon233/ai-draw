@@ -1,5 +1,27 @@
 # Codex subscription image proxy
 
+## Shared text and vision LLM calls
+
+Set `AI_PROMPT_PROVIDER=codex` and `CODEX_LLM_MODEL=gpt-6-astra` to route prompt
+expansion, session titles, image/frame analysis, and
+training captions through the existing proxy. These calls reuse
+`GPT_IMAGE_BASE_URL` and `GPT_IMAGE_API_KEY`; they use the **text/vision model**
+from `CODEX_LLM_MODEL`, never the image-generation model from `GPT_IMAGE_MODEL`.
+
+The shared client uses OpenAI-compatible Chat Completions. Images are passed as
+base64 data URLs in ordered `image_url` content items. `gpt-6-astra` was checked
+against the deployed proxy with text and training-image captions.
+This establishes request compatibility, not independent verification
+of the upstream model identity.
+
+Legacy prompt/title connections and retired image/video providers have been removed.
+All LLM callers share one proxy client; there is no external-provider fallback.
+Run `python scripts/migrate_chatgpt_env.py --apply` to remove obsolete environment
+fields and select Astra 6 without printing credentials. The existing proxy
+credentials and `codex-proxy-auth` volume remain in their current locations.
+
+## Image generation
+
 The `gpt_image` workflow uses CLIProxyAPI v7.3.6 with Codex subscription OAuth.
 The UI identifies this as the Codex subscription channel. The configured image
 model is `gpt-image-2.5-flare`; accepting that name does not by itself establish

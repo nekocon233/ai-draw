@@ -19,44 +19,15 @@ import {
 import { saveImage, saveImages, deleteMessageImages } from '../utils/indexedDB';
 import { clearScrollPosition } from '../utils/scrollPosition';
 import { DEFAULT_CONFIG } from '../utils/constants';
-import type { ChatSession } from '../types/models';
-import type { WorkflowMetadata, WorkflowParameterValue } from '../types/api';
-import { getWorkflowOptions } from '../utils/workflowOptions';
+import type { ChatSession, ChatMessage, ApiChatMessage } from '../types/models';
+import { createGenerationSlice, type GenerationSlice } from '../features/generation/slice';
+import type { MotionPromptSnapshot, PromptPreset, PromptPresetChoices, WorkflowMetadata, WorkflowParameterValue } from '../types/api';
+import { rememberWorkflowPromptPreset, resolveWorkflowPromptPreset, restorePromptPresetChoices } from '../utils/promptPresets';
+import { motionPromptSource, resolveMotionPrompt } from '../utils/motionPrompt';
+import { carryReferenceImages, compactReferenceImages, getImageGenerationSettings, getGenerationCount, getWorkflowOptions, NO_PARKED_REFERENCES, resolveAvailableWorkflow, restoreWorkflowSelection, getWorkflowMethodKey, rememberWorkflowMethod, resolveInputWorkflow, resolveInputLora, type ParkedReferences } from '../utils/workflowOptions';
+import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
+import { getMotionReferenceError, MAX_MOTION_REFERENCES } from '../utils/motionReferences';
 
-interface ChatMessage {
-  id: string;
-  session_id: string; // 关联会话ID
-  type: 'user' | 'assistant';
-  content: string; // 用户输入的提示词
-  images?: (string | { loading: true })[]; // 生成的图片或加载状态
-  timestamp: number;
-  params?: {
-    workflow: string;
-    strength?: number;
-    count?: number;
-    loraPrompt?: string;       // LoRA 提示词
-    promptEnd?: string;        // 结束帧提示词
-    referenceImage?: string;   // 参考图 base64
-    referenceImage2?: string;  // i2i 第 2 张参考图
-    referenceImage3?: string;  // i2i 第 3 张参考图
-    referenceImageEnd?: string; // 尾帧参考图 base64
-    isLoop?: boolean;          // flf2v 是否循环
-    frameRate?: number;        // flf2v 帧率
-    startFrameCount?: number;  // flf2v 起始帧长度
-    endFrameCount?: number;    // flf2v 结束帧长度
-    frameCount?: number;       // i2v 总帧数
-    workflowOptions?: Record<string, WorkflowParameterValue>;
-  }
-}
-
-interface ApiChatMessage {
-  id: string;
-  type: 'user' | 'assistant';
-  content?: string;
-  images?: ChatMessage['images'];
-  timestamp: number;
-  params?: ChatMessage['params'];
-}
 
 export interface GenerationSettingsDraft {
   workflow: string;
@@ -66,14 +37,10 @@ export interface GenerationSettingsDraft {
   width: number | null;
   height: number | null;
   useOriginalSize: boolean;
-  startFrameCount: number | null;
-  endFrameCount: number | null;
-  frameRate: number | null;
-  frameCount: number | null;
   selectOptions: Record<string, WorkflowParameterValue>;
 }
 
-interface AppState {
+export interface AppState extends GenerationSlice {
   // 聊天会话
   sessions: ChatSession[];
   currentSessionId: string | null;
@@ -85,10 +52,7 @@ interface AppState {
   // 服务状态
   isServiceAvailable: boolean;
   serviceStatusChecked: boolean;
-  isGenerating: boolean;
   isGeneratingPrompt: boolean;
-  currentGeneratingMessageId: string | null; // 当前正在生成的消息ID
-  currentGenerationTaskId: string | null;
   
   // 当前工作流
   currentWorkflow: string;
@@ -97,7 +61,9 @@ interface AppState {
   // Prompt
   prompt: string;
   loraPrompt: string;
-  promptEnd: string; // flf2v 结束帧提示词
+  promptPreset: PromptPreset | null; // 输入框上方所选预设（快照），prompt 只存用户描述
+  promptPresetChoices: PromptPresetChoices;
+  availablePromptPresets: PromptPreset[];
   
   // 参数
   strength: number;
@@ -106,11 +72,6 @@ interface AppState {
   width: number | null;  // 图像宽度（部分工作流支持）
   height: number | null; // 图像高度（部分工作流支持）
   useOriginalSize: boolean; // 是否使用原图尺寸（默认开启）
-  isLoop: boolean;           // flf2v 循环生成
-  startFrameCount: number | null; // flf2v 起始帧长度
-  endFrameCount: number | null;   // flf2v 结束帧长度
-  frameRate: number | null;       // flf2v 帧率
-  frameCount: number | null;      // i2v 总帧数
   // PixelLab 动画参数
   pixelLabAction: string;        // 动画动作
   pixelLabView: string;          // 视角
@@ -123,19 +84,21 @@ interface AppState {
   
   // 参考图片
   referenceImage: string | null;
-  referenceImage2: string | null; // i2i 第 2 张参考图
-  referenceImage3: string | null; // i2i 第 3 张参考图
-  referenceImageEnd: string | null; // flf2v 结束帧
+  referenceImage2: string | null; // 第 2 张参考图
+  referenceImage3: string | null; // 第 3 张参考图
+  referenceImageEnd: string | null; // 视频尾帧
+  motionReferenceImages: string[];
+  motionPrompt: MotionPromptSnapshot | null;
 
-  // 工作流图片暂存（切换工作流时保存各工作流的图片，切回时恢复）
-  workflowImageStash: Record<string, {
-    referenceImage: string | null;
-    referenceImage2: string | null;
-    referenceImage3: string | null;
-    referenceImageEnd: string | null;
-    promptEnd: string;
-    prompt: string;       // 工作流独立 prompt
+  // 目标方式放不下的参考图（如文生图、单图视频）：切回可容纳的方式时自动回到输入栏
+  parkedReferences: ParkedReferences;
+
+  // 各生成方式记住的生成设置（切换方式时输入栏不变，仅设置按方式恢复）
+  workflowSettingsStash: Record<string, {
     loraPrompt: string;   // 工作流独立 LoRA prompt
+    width?: number | null;
+    height?: number | null;
+    useOriginalSize?: boolean;
   }>;
   
   // UI 状态
@@ -147,38 +110,39 @@ interface AppState {
   setServiceStatus: (status: { available: boolean; is_generating?: boolean; is_generating_prompt?: boolean }) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setCurrentWorkflow: (workflow: string) => void;
+  syncInputWorkflow: (remember?: boolean) => void;
   commitGenerationSettings: (draft: GenerationSettingsDraft) => void;
   setPrompt: (prompt: string) => void;
   setLoraPrompt: (prompt: string) => void;
-  setPromptEnd: (prompt: string) => void;
+  setPromptPreset: (preset: PromptPreset | null) => void;
+  syncPromptPreset: () => void;
+  loadPromptPresets: () => Promise<PromptPreset[]>;
   setStrength: (strength: number) => void;
   setCount: (count: number) => void;
   setImagesPerRow: (count: number) => void;
   setWidth: (width: number | null) => void;
   setHeight: (height: number | null) => void;
   setUseOriginalSize: (v: boolean) => void;
-  setIsLoop: (v: boolean) => void;
-  setStartFrameCount: (v: number | null) => void;
-  setEndFrameCount: (v: number | null) => void;
-  setFrameRate: (v: number | null) => void;
-  setFrameCount: (v: number | null) => void;
   setPixelLabAction: (v: string) => void;
   setPixelLabView: (v: string) => void;
   setPixelLabDirection: (v: string) => void;
   setSelectOption: (name: string, value: WorkflowParameterValue) => void;
   setReferenceImage: (image: string | null) => void;
+  setReferenceImages: (images: readonly (string | null | undefined)[]) => void;
   setReferenceImage2: (image: string | null) => void;
   setReferenceImage3: (image: string | null) => void;
   setReferenceImageEnd: (image: string | null) => void;
-  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; promptEnd?: string; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; isLoop?: boolean; frameRate?: number | null; startFrameCount?: number | null; endFrameCount?: number | null; frameCount?: number | null; workflowOptions?: Record<string, WorkflowParameterValue> }) => Promise<{ messageId: string; sessionId: string } | null>;
+  setMotionReferenceImages: (images: string[]) => void;
+  setMotionPrompt: (snapshot: MotionPromptSnapshot | null) => void;
+  addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; width?: number; height?: number; useOriginalSize?: boolean; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; workflowOptions?: Record<string, WorkflowParameterValue>; promptPreset?: PromptPreset | null; motionReferenceImages?: string[]; motionPrompt?: MotionPromptSnapshot }) => Promise<{ messageId: string; sessionId: string } | null>;
   updateChatImages: (messageId: string, images: string[], persist?: boolean) => void;
   appendChatMedia: (messageId: string, image: string, index: number) => void;
   deleteChatMessage: (messageId: string) => Promise<void>;
   editAndRegenerateMessage: (
     userMsgId: string,
     newContent: string,
-    newRefImages: { referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null },
-    newPromptEnd?: string
+    newRefImages: { referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; motionReferenceImages?: string[]; motionPrompt?: MotionPromptSnapshot | null },
+    newPromptPreset?: PromptPreset | null
   ) => Promise<void>;
   clearChatHistory: () => void;
   loadEarlierMessages: () => Promise<void>;
@@ -186,7 +150,6 @@ interface AppState {
   setError: (error: string | null) => void;
   clearError: () => void;
   reset: () => void;
-  stopGeneration: () => Promise<void>;
   loadDefaultConfig: () => Promise<void>;
   loadAvailableWorkflows: () => Promise<void>;
   loadUserConfig: () => Promise<void>;
@@ -206,28 +169,40 @@ interface AppState {
   loadSessionConfig: (sessionId: string) => Promise<void>;
 }
 
-const buildWorkflowTransition = (state: AppState, workflow: string): Partial<AppState> => {
+export const buildWorkflowTransition = (state: AppState, workflow: string): Partial<AppState> => {
+  workflow = resolveAvailableWorkflow(workflow, state.availableWorkflows);
+  const sourceMethod = getWorkflowMethodKey(state.currentWorkflow, state.availableWorkflows);
+  const targetMethod = getWorkflowMethodKey(workflow, state.availableWorkflows);
+  // 切换生成方式不改写输入栏：文字原样保留，参考图能放下就带走，放不下的先暂存。
+  const composer = [state.referenceImage, state.referenceImage2, state.referenceImage3];
+  const carryInto = (key: string) => carryReferenceImages(
+    state.availableWorkflows.find(item => item.key === key),
+    composer, state.referenceImageEnd, state.parkedReferences);
+  workflow = resolveInputWorkflow(workflow, state.availableWorkflows, carryInto(workflow).images);
   const workflowMeta = state.availableWorkflows.find(item => item.key === workflow);
   if (!workflowMeta) return { currentWorkflow: workflow };
+  const carried = carryInto(workflow);
 
   const updates: Partial<AppState> = {
+    ...resolveWorkflowPromptPreset(workflowMeta, state.availablePromptPresets, state.promptPresetChoices, state.promptPreset),
     currentWorkflow: workflow,
-    isLoop: false,
     useOriginalSize: true,
+    referenceImage: carried.images[0],
+    motionPrompt: carried.images[0] === state.referenceImage ? state.motionPrompt : null,
+    referenceImage2: carried.images[1],
+    referenceImage3: carried.images[2],
+    referenceImageEnd: carried.endImage,
+    parkedReferences: carried.parked,
   };
+  // 提示词原样保留：多图方式容量相同，带走的图片编号不变，暂存的图片回来时编号也回到原位。
   const parameterNames = new Set(workflowMeta.parameters.map(param => param.name));
 
   workflowMeta.parameters.forEach(param => {
-    if (param.name === 'prompt') updates.prompt = String(param.default);
     if (param.name === 'strength') updates.strength = Number(param.default);
     if (param.name === 'count') updates.count = Number(param.default);
     if (param.name === 'lora_prompt') updates.loraPrompt = String(param.default);
     if (param.name === 'width') updates.width = Number(param.default);
     if (param.name === 'height') updates.height = Number(param.default);
-    if (param.name === 'startFrameCount') updates.startFrameCount = Number(param.default);
-    if (param.name === 'endFrameCount') updates.endFrameCount = Number(param.default);
-    if (param.name === 'frameRate') updates.frameRate = Number(param.default);
-    if (param.name === 'frameCount') updates.frameCount = Number(param.default);
   });
 
   if (!parameterNames.has('lora_prompt')) updates.loraPrompt = '';
@@ -235,30 +210,22 @@ const buildWorkflowTransition = (state: AppState, workflow: string): Partial<App
   if (!parameterNames.has('count')) updates.count = DEFAULT_CONFIG.COUNT;
   if (!parameterNames.has('width')) updates.width = null;
   if (!parameterNames.has('height')) updates.height = null;
-  if (!parameterNames.has('startFrameCount')) updates.startFrameCount = null;
-  if (!parameterNames.has('endFrameCount')) updates.endFrameCount = null;
-  if (!parameterNames.has('frameRate')) updates.frameRate = null;
-  if (!parameterNames.has('frameCount')) updates.frameCount = null;
 
-  const stash = { ...state.workflowImageStash };
-  stash[state.currentWorkflow] = {
-    referenceImage: state.referenceImage,
-    referenceImage2: state.referenceImage2,
-    referenceImage3: state.referenceImage3,
-    referenceImageEnd: state.referenceImageEnd,
-    promptEnd: state.promptEnd,
-    prompt: state.prompt,
+  // 生成设置按方式记忆（输入栏内容不进暂存），切回时恢复上次的 LoRA 与尺寸。
+  const stash = { ...state.workflowSettingsStash };
+  stash[sourceMethod] = {
     loraPrompt: state.loraPrompt,
+    width: state.width,
+    height: state.height,
+    useOriginalSize: state.useOriginalSize,
   };
-  const saved = stash[workflow];
-  updates.referenceImage = saved?.referenceImage ?? null;
-  updates.referenceImage2 = saved?.referenceImage2 ?? null;
-  updates.referenceImage3 = saved?.referenceImage3 ?? null;
-  updates.referenceImageEnd = saved?.referenceImageEnd ?? null;
-  updates.promptEnd = saved?.promptEnd ?? '';
-  if (saved?.prompt !== undefined) updates.prompt = saved.prompt;
+  const saved = stash[targetMethod];
   if (saved?.loraPrompt !== undefined) updates.loraPrompt = saved.loraPrompt;
-  updates.workflowImageStash = stash;
+  if (saved?.width !== undefined) updates.width = saved.width;
+  if (saved?.height !== undefined) updates.height = saved.height;
+  if (saved?.useOriginalSize !== undefined) updates.useOriginalSize = saved.useOriginalSize;
+  updates.loraPrompt = resolveInputLora(updates.loraPrompt, workflow, state.availableWorkflows);
+  updates.workflowSettingsStash = stash;
 
   const nextSelectOptions = { ...state.selectOptions };
   workflowMeta.parameters.forEach(param => {
@@ -268,17 +235,13 @@ const buildWorkflowTransition = (state: AppState, workflow: string): Partial<App
     if (!valid) nextSelectOptions[param.name] = param.default;
   });
   updates.selectOptions = nextSelectOptions;
+  if ((updates.promptPreset?.prompt.trim() ?? '') !== (state.promptPreset?.prompt.trim() ?? '')) updates.motionPrompt = null;
 
   return updates;
 };
 
 const getRememberedMethodUpdate = (state: AppState, workflow: string) => {
-  const workflowMeta = state.availableWorkflows.find(item => item.key === workflow);
-  const sameCategoryCount = state.availableWorkflows.filter(
-    item => item.category && item.category === workflowMeta?.category,
-  ).length;
-  if (!workflowMeta?.category || sameCategoryCount <= 1) return null;
-  return { ...state.rememberedMethod, [workflowMeta.category]: workflow };
+  return rememberWorkflowMethod(state.rememberedMethod, state.availableWorkflows, workflow);
 };
 
 const createLocalSessionTitle = (content: string) => {
@@ -306,35 +269,33 @@ const initialConfig = guestConfig ? {
 } : defaultConfig;
 
 let sessionSwitchSequence = 0;
+let sessionConfigLoadSequence = 0;
+let sessionConfigLoading = false;
+let promptPresetLoadSequence = 0;
 let sessionConfigSaveTimer: number | undefined;
 const sessionConfigSaveChains = new Map<string, Promise<void>>();
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set, get, store) => ({
+  ...createGenerationSlice(set, get, store),
   // 初始状态
   sessions: [],
   currentSessionId: null,
   isServiceAvailable: false,
   serviceStatusChecked: false,
-  isGenerating: false,
   isGeneratingPrompt: false,
-  currentGeneratingMessageId: null,
-  currentGenerationTaskId: null,
   currentWorkflow: initialConfig.currentWorkflow,
   availableWorkflows: [], // 初始为空，从后端动态获取
   prompt: initialConfig.prompt,
   loraPrompt: initialConfig.loraPrompt,
-  promptEnd: '',
+  promptPreset: null,
+  promptPresetChoices: {},
+  availablePromptPresets: [],
   strength: initialConfig.strength,
   count: initialConfig.count,
   imagesPerRow: initialConfig.imagesPerRow,
   width: null,  // 图像宽度，默认为 null 表示使用工作流默认值
   height: null, // 图像高度，默认为 null 表示使用工作流默认值
   useOriginalSize: true,  // 默认使用原图尺寸
-  isLoop: false,
-  startFrameCount: null,
-  endFrameCount: null,
-  frameRate: null,
-  frameCount: null,
   pixelLabAction: 'walk',
   pixelLabView: 'sidescroller',
   pixelLabDirection: 'east',
@@ -344,7 +305,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   referenceImage2: null,
   referenceImage3: null,
   referenceImageEnd: null,
-  workflowImageStash: {},
+  motionReferenceImages: [],
+  motionPrompt: null,
+  workflowSettingsStash: {},
+  parkedReferences: NO_PARKED_REFERENCES,
   chatHistory: [],
   hasEarlierMessages: false,
   isLoadingEarlierMessages: false,
@@ -356,14 +320,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   setServiceStatus: (status) => set(state => ({
     isServiceAvailable: status.available,
     serviceStatusChecked: true,
-    isGenerating: status.is_generating ?? state.isGenerating,
     isGeneratingPrompt: status.is_generating_prompt ?? state.isGeneratingPrompt,
   })),
   
   setCurrentWorkflow: (workflow) => {
     const state = get();
     const updates = buildWorkflowTransition(state, workflow);
-    const rememberedMethod = getRememberedMethodUpdate(state, workflow);
+    const rememberedMethod = getRememberedMethodUpdate(state, updates.currentWorkflow ?? workflow);
     if (rememberedMethod) updates.rememberedMethod = rememberedMethod;
 
     set(updates);
@@ -375,27 +338,41 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     get().saveSessionConfig();
   },
+  syncInputWorkflow: (remember = true) => {
+    const state = get();
+    const restored = restoreWorkflowSelection(state.currentWorkflow, state.loraPrompt, state.availableWorkflows);
+    const workflow = resolveInputWorkflow(restored.currentWorkflow, state.availableWorkflows,
+      [state.referenceImage, state.referenceImage2, state.referenceImage3]);
+    const metadata = state.availableWorkflows.find(item => item.key === workflow);
+    const rememberedMethod = rememberWorkflowMethod(state.rememberedMethod, state.availableWorkflows, remember ? workflow : undefined);
+    set({
+      currentWorkflow: workflow,
+      loraPrompt: resolveInputLora(restored.loraPrompt, workflow, state.availableWorkflows),
+      count: metadata ? getGenerationCount(metadata, state.count) : state.count,
+      selectOptions: { ...state.selectOptions, ...getWorkflowOptions(metadata, state.selectOptions) },
+      rememberedMethod,
+    });
+    localStorage.setItem('rememberedMethod', JSON.stringify(rememberedMethod));
+    get().syncPromptPreset();
+  },
   commitGenerationSettings: (draft) => {
     const state = get();
     const updates = buildWorkflowTransition(state, draft.workflow);
-    const rememberedMethod = getRememberedMethodUpdate(state, draft.workflow);
+    const workflow = updates.currentWorkflow ?? draft.workflow;
+    const rememberedMethod = getRememberedMethodUpdate(state, workflow);
     const mergedSelectOptions = {
       ...(updates.selectOptions ?? state.selectOptions),
       ...draft.selectOptions,
     };
 
     Object.assign(updates, {
-      currentWorkflow: draft.workflow,
+      currentWorkflow: workflow,
       strength: draft.strength,
       count: draft.count,
-      loraPrompt: draft.loraPrompt,
+      loraPrompt: resolveInputLora(draft.loraPrompt, workflow, state.availableWorkflows),
       width: draft.width,
       height: draft.height,
       useOriginalSize: draft.useOriginalSize,
-      startFrameCount: draft.startFrameCount,
-      endFrameCount: draft.endFrameCount,
-      frameRate: draft.frameRate,
-      frameCount: draft.frameCount,
       selectOptions: mergedSelectOptions,
     });
     if (rememberedMethod) updates.rememberedMethod = rememberedMethod;
@@ -408,7 +385,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().saveSessionConfig();
   },
   setPrompt: async (prompt) => {
-    set({ prompt });
+    set({ prompt, motionPrompt: null });
     const state = get();
     state.saveSessionConfig();
   },
@@ -417,10 +394,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
-  setPromptEnd: async (prompt) => {
-    set({ promptEnd: prompt });
+  setPromptPreset: (promptPreset) => {
+    set(state => {
+      const metadata = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
+      return { promptPreset, motionPrompt: null,
+        promptPresetChoices: metadata
+          ? rememberWorkflowPromptPreset(metadata, promptPreset, state.promptPresetChoices)
+          : { ...state.promptPresetChoices, [state.currentWorkflow]: promptPreset } };
+    });
+    get().saveSessionConfig();
+  },
+  syncPromptPreset: () => {
+    if (sessionConfigLoading) return;
     const state = get();
-    state.saveSessionConfig();
+    const selection = resolveWorkflowPromptPreset(
+      state.availableWorkflows.find(item => item.key === state.currentWorkflow),
+      state.availablePromptPresets, state.promptPresetChoices, state.promptPreset,
+    );
+    if (selection.promptPreset === state.promptPreset && selection.promptPresetChoices === state.promptPresetChoices) return;
+    // Restored snapshots are separate objects; only a changed prompt prefix invalidates pose analysis.
+    const samePrompt = (selection.promptPreset?.prompt.trim() ?? '') === (state.promptPreset?.prompt.trim() ?? '');
+    set({ ...selection, motionPrompt: samePrompt ? state.motionPrompt : null });
+    get().saveSessionConfig();
+  },
+  loadPromptPresets: async () => {
+    const sequence = ++promptPresetLoadSequence;
+    const { presets } = await apiService.getPromptPresets();
+    if (sequence === promptPresetLoadSequence) {
+      set({ availablePromptPresets: presets });
+      get().syncPromptPreset();
+    }
+    return presets;
   },
   setStrength: async (strength) => {
     set({ strength });
@@ -447,21 +451,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     state.saveSessionConfig();
   },
-  setReferenceImage: async (image) => {
-    set({ referenceImage: image });
+  setReferenceImages: (images) => {
     const state = get();
-    state.saveSessionConfig();
+    const metadata = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
+    const next = supportsImageMentions(metadata)
+      ? compactImageReferences(state.prompt, images)
+      : { prompt: state.prompt, images };
+    set({ prompt: next.prompt, referenceImage: next.images[0] ?? null,
+      motionPrompt: (next.images[0] ?? null) === state.referenceImage ? state.motionPrompt : null,
+      referenceImage2: next.images[1] ?? null, referenceImage3: next.images[2] ?? null });
+    get().syncInputWorkflow();
+    get().saveSessionConfig();
   },
-  setReferenceImage2: async (image) => {
-    set({ referenceImage2: image });
-    const state = get();
-    state.saveSessionConfig();
+  setReferenceImage: (image) => get().setReferenceImages([image, get().referenceImage2, get().referenceImage3]),
+  setMotionReferenceImages: (images) => {
+    const previous = get().motionReferenceImages;
+    set({ motionReferenceImages: images.slice(0, MAX_MOTION_REFERENCES),
+      motionPrompt: previous.length === images.length && previous.every((image, index) => image === images[index]) ? get().motionPrompt : null });
+    get().saveSessionConfig();
   },
-  setReferenceImage3: async (image) => {
-    set({ referenceImage3: image });
-    const state = get();
-    state.saveSessionConfig();
+  setMotionPrompt: (motionPrompt) => {
+    set({ motionPrompt });
+    get().saveSessionConfig();
   },
+  setReferenceImage2: (image) => get().setReferenceImages([get().referenceImage, image, get().referenceImage3]),
+  setReferenceImage3: (image) => get().setReferenceImages([get().referenceImage, get().referenceImage2, image]),
   setReferenceImageEnd: async (image) => {
     set({ referenceImageEnd: image });
     const state = get();
@@ -469,31 +483,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setUseOriginalSize: (v) => {
     set({ useOriginalSize: v });
-  },
-  setIsLoop: (v) => {
-    set({ isLoop: v });
-    const state = get();
-    state.saveSessionConfig();
-  },
-  setStartFrameCount: (v) => {
-    set({ startFrameCount: v });
-    const state = get();
-    state.saveSessionConfig();
-  },
-  setEndFrameCount: (v) => {
-    set({ endFrameCount: v });
-    const state = get();
-    state.saveSessionConfig();
-  },
-  setFrameRate: (v) => {
-    set({ frameRate: v });
-    const state = get();
-    state.saveSessionConfig();
-  },
-  setFrameCount: (v) => {
-    set({ frameCount: v });
-    const state = get();
-    state.saveSessionConfig();
+    get().saveSessionConfig();
   },
   setPixelLabAction: (v) => {
     set({ pixelLabAction: v });
@@ -511,8 +501,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const updated = { ...get().selectOptions, [name]: value };
     set({ selectOptions: updated });
     localStorage.setItem('selectOptions', JSON.stringify(updated));
+    get().saveSessionConfig();
   },
-  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, promptEnd, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, isLoop, frameRate, startFrameCount, endFrameCount, frameCount, workflowOptions }) => {
+  addChatMessage: async ({ prompt, workflow, strength, count, loraPrompt, width, height, useOriginalSize, referenceImage, referenceImage2, referenceImage3, referenceImageEnd, workflowOptions, promptPreset, motionReferenceImages, motionPrompt }) => {
     const state = get();
     // 如果没有当前会话，自动创建一个
     let sessionId = state.currentSessionId;
@@ -574,17 +565,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       timestamp: Date.now(),
       params: {
         workflow, strength, count, loraPrompt,
-        promptEnd: promptEnd || undefined,
+        width, height, useOriginalSize,
         referenceImage: referenceImage || undefined,
         referenceImage2: referenceImage2 || undefined,
         referenceImage3: referenceImage3 || undefined,
         referenceImageEnd: referenceImageEnd || undefined,
-        isLoop: isLoop ?? undefined,
-        frameRate: frameRate ?? undefined,
-        startFrameCount: startFrameCount ?? undefined,
-        endFrameCount: endFrameCount ?? undefined,
-        frameCount: frameCount ?? undefined,
+        motionReferenceImages: motionReferenceImages ? [...motionReferenceImages] : undefined,
+        motionPrompt: motionPrompt ? {...motionPrompt} : undefined,
         workflowOptions,
+        promptPreset: promptPreset || undefined,
       }
     };
     const assistantMessage: ChatMessage = {
@@ -594,7 +583,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       content: '',
       images: [{ loading: true as const }],
       timestamp: Date.now(),
-      params: { workflow, strength, count, loraPrompt, isLoop, frameRate: frameRate ?? undefined, startFrameCount: startFrameCount ?? undefined, endFrameCount: endFrameCount ?? undefined, workflowOptions } // 存储总数用于判断
+      params: { workflow, strength, count, loraPrompt, workflowOptions } // 存储总数用于判断
     };
     set((state) => {
       const newHistory = [...state.chatHistory, userMessage, assistantMessage];
@@ -618,12 +607,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { 
         chatHistory: newHistory,
         sessions: updatedSessions,
-        currentGeneratingMessageId: `${messageId}-reply`, // 设置当前生成任务ID
-        currentGenerationTaskId: null,
-        isGenerating: true,
       };
     });
     
+    get().startGeneration(`${messageId}-reply`, null);
     // 登录用户：先落库用户消息，避免助手占位消息先写入导致轮次顺序反转。
     if (isLoggedIn()) {
       try {
@@ -636,16 +623,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           strength,
           count,
           lora_prompt: loraPrompt,
+          width, height, use_original_size: useOriginalSize,
           reference_image: referenceImage || undefined,
           reference_image_2: referenceImage2 || undefined,
           reference_image_3: referenceImage3 || undefined,
           reference_image_end: referenceImageEnd || undefined,
-          prompt_end: promptEnd || undefined,
-          frame_rate: frameRate ?? undefined,
-          start_frame_count: startFrameCount ?? undefined,
-          end_frame_count: endFrameCount ?? undefined,
-          frame_count: frameCount ?? undefined,
+          motion_reference_images: motionReferenceImages,
+          motion_prompt: motionPrompt,
           workflow_options: workflowOptions,
+          prompt_preset: promptPreset || undefined,
         });
         void apiService.summarizeSessionTitle(sessionId).then(response => {
           set(current => ({
@@ -665,11 +651,9 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? { ...session, message_count: Math.max(0, session.message_count - 2) }
               : session
           ),
-          currentGeneratingMessageId: null,
-          currentGenerationTaskId: null,
-          isGenerating: false,
           error: '保存消息失败，请重试',
         }));
+        get().finishGeneration();
         return null;
       }
     }
@@ -721,7 +705,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (msg.id === messageId && msg.images) {
           const newImages = [...msg.images];
           
-          // 确保数组长度足够（扩展到 index+1），不依赖 params.count（flf2v 等工作流可能为 null）
+          // 确保数组长度足够（扩展到 index+1），不依赖 params.count（视频工作流可能为 null）
           while (newImages.length <= index) {
             newImages.push({ loading: true as const });
           }
@@ -820,7 +804,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { chatHistory: newHistory, sessions: updatedSessions };
     });
   },
-  editAndRegenerateMessage: async (userMsgId, newContent, newRefImages, newPromptEnd) => {
+  editAndRegenerateMessage: async (userMsgId, newContent, newRefImages, newPromptPreset) => {
     const state = get();
     const sessionId = state.currentSessionId;
     if (!sessionId) return;
@@ -833,12 +817,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!nextMsg || nextMsg.type !== 'assistant') return;
     const assistantMsgId = nextMsg.id;
     const params = userMsg.params!;
-    const count = params.workflow === 'minimax_h3' ? 1 : (params.count || 1);
-    const finalImg1 = newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : params.referenceImage;
-    const finalImg2 = newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : params.referenceImage2;
-    const finalImg3 = newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : params.referenceImage3;
+    if (!state.availableWorkflows.some(item => item.key === params.workflow)) {
+      set({ error: '此记录使用的生成方式已停用，请选择当前可用的方式创建新任务。原结果已保留。' });
+      return;
+    }
+    const references = [
+      newRefImages.referenceImage !== undefined ? newRefImages.referenceImage : params.referenceImage,
+      newRefImages.referenceImage2 !== undefined ? newRefImages.referenceImage2 : params.referenceImage2,
+      newRefImages.referenceImage3 !== undefined ? newRefImages.referenceImage3 : params.referenceImage3,
+    ];
+    if (supportsImageMentions(state.availableWorkflows.find(item => item.key === params.workflow))) {
+      const error = getImageMentionError(newContent, references);
+      if (error) { set({ error }); return; }
+      newContent = compactImageReferences(newContent, references).prompt;
+    }
+    const [finalImg1, finalImg2, finalImg3] = compactReferenceImages(references);
+    const workflow = resolveInputWorkflow(params.workflow, state.availableWorkflows, finalImg1);
+    const workflowMetadata = state.availableWorkflows.find(item => item.key === workflow);
+    const finalMotionImages = workflowMetadata?.supports_motion_reference
+      ? [...(newRefImages.motionReferenceImages ?? params.motionReferenceImages ?? [])] : undefined;
+    if (finalMotionImages) {
+      const error = getMotionReferenceError(finalImg1, finalMotionImages);
+      if (error) { set({ error }); return; }
+    }
     const finalImgEnd = newRefImages.referenceImageEnd !== undefined ? newRefImages.referenceImageEnd : params.referenceImageEnd;
-    const finalPromptEnd = newPromptEnd !== undefined ? newPromptEnd : params.promptEnd;
+    const finalMotionPrompt = finalMotionImages ? (newRefImages.motionPrompt !== undefined ? newRefImages.motionPrompt : params.motionPrompt) : null;
+    const promptPreset = newPromptPreset !== undefined ? newPromptPreset : params.promptPreset ?? null;
+    if (promptPreset) {
+      const presetError = getPresetBlocker(promptPreset, workflowMetadata, [finalImg1, finalImg2, finalImg3], finalImgEnd, finalMotionImages);
+      if (presetError) { set({ error: `预设「${promptPreset.title}」：${presetError}` }); return; }
+    }
+    const effectiveLora = resolveInputLora(params.loraPrompt, workflow, state.availableWorkflows);
+    const count = getGenerationCount(workflowMetadata, params.count || 1);
+    const imageSettings = getImageGenerationSettings(workflowMetadata, params, Boolean(finalImg1));
+    const workflowOptions = getWorkflowOptions(workflowMetadata, params.workflowOptions ?? {});
     const previousAssistantImages = nextMsg.images ?? [];
     const hasExistingResult = previousAssistantImages.some(image => typeof image === 'string');
     const pendingImages = hasExistingResult
@@ -854,11 +866,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             content: newContent,
             params: {
               ...message.params!,
+              workflow,
+              loraPrompt: effectiveLora,
+              ...imageSettings,
+              workflowOptions,
               referenceImage: finalImg1 || undefined,
               referenceImage2: finalImg2 || undefined,
               referenceImage3: finalImg3 || undefined,
               referenceImageEnd: finalImgEnd || undefined,
-              promptEnd: finalPromptEnd || undefined,
+              motionReferenceImages: finalMotionImages,
+              motionPrompt: finalMotionPrompt,
+              promptPreset: promptPreset || undefined,
               count,
             },
           };
@@ -866,34 +884,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (message.id === assistantMsgId) return { ...message, images: pendingImages };
         return message;
       }),
-      currentGeneratingMessageId: assistantMsgId,
-      currentGenerationTaskId: generationTaskId,
-      isGenerating: true,
     }));
+    get().startGeneration(assistantMsgId, generationTaskId);
 
     if (!isLoggedIn()) saveGuestSessionHistory(sessionId, get().chatHistory);
 
     try {
       await apiService.generateMedia({
         prompt: newContent,
-        workflow: params.workflow,
+        workflow,
         strength: params.strength ?? undefined,
-        lora_prompt: params.loraPrompt,
+        lora_prompt: effectiveLora,
         count: count,
         reference_image: finalImg1 || undefined,
         reference_image_2: finalImg2 || undefined,
         reference_image_3: finalImg3 || undefined,
         reference_image_end: finalImgEnd || undefined,
-        prompt_end: finalPromptEnd || undefined,
-        is_loop: params.isLoop,
-        frame_rate: params.frameRate ?? undefined,
-        start_frame_count: params.startFrameCount ?? undefined,
-        end_frame_count: params.endFrameCount ?? undefined,
-        frame_count: params.frameCount ?? undefined,
-        workflow_options: params.workflowOptions,
-        use_original_size: true,
-        // Kling 视频运行时选项（前端用 selectOptions 存储）
-        kling_options: params.workflow === 'kling_flf2v' ? get().selectOptions : undefined,
+        motion_reference_images: finalMotionImages,
+        motion_prompt: finalMotionPrompt?.prompt.trim() ? finalMotionPrompt : undefined,
+        workflow_options: workflowOptions,
+        prompt_preset: promptPreset || undefined,
+        width: imageSettings.width,
+        height: imageSettings.height,
+        use_original_size: imageSettings.useOriginalSize,
         // 任务关联：让后端落库 + 断线恢复能定位到助手消息
         message_id: assistantMsgId,
         session_id: sessionId,
@@ -901,17 +914,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     } catch (err) {
       console.error('重新生成失败:', err);
+      if (get().currentGenerationTaskId !== generationTaskId) return;
       set((current) => ({
         chatHistory: current.chatHistory.map((message) => {
           if (message.id === userMsgId) return userMsg;
           if (message.id === assistantMsgId) return { ...message, images: previousAssistantImages };
           return message;
         }),
-        currentGeneratingMessageId: null,
-        currentGenerationTaskId: null,
-        isGenerating: false,
         error: '重新生成未启动，已保留原结果',
       }));
+      get().finishGeneration();
     }
   },
   clearChatHistory: () => set({ chatHistory: [], hasEarlierMessages: false }),
@@ -953,71 +965,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ sidebarCollapsed: collapsed });
     localStorage.setItem('sidebarCollapsed', String(collapsed));
   },
-  stopGeneration: async () => {
-    await apiService.stopGeneration();
-    const messageId = get().currentGeneratingMessageId;
-    const taskMessage = messageId ? get().chatHistory.find(item => item.id === messageId) : undefined;
-    if (messageId) {
-      const existingImages = (taskMessage?.images ?? []).filter(
-        (image): image is string => typeof image === 'string',
-      );
-      get().updateChatImages(messageId, existingImages, false);
-    }
+  reset: () => {
+    get().finishGeneration();
     set({
+      prompt: '',
+      loraPrompt: '',
+      promptPreset: null,
+      promptPresetChoices: {},
+      strength: 0.5,
+      count: 1,
+      referenceImage: null,
+      referenceImage2: null,
+      referenceImage3: null,
+      referenceImageEnd: null,
+      chatHistory: [],
+      motionReferenceImages: [],
+      motionPrompt: null,
+      hasEarlierMessages: false,
       loading: false,
-      isGenerating: false,
-      currentGeneratingMessageId: null,
-      currentGenerationTaskId: null,
+      error: null,
     });
-    if (isLoggedIn() && taskMessage?.session_id && get().currentSessionId === taskMessage.session_id) {
-      try {
-        const response = await apiService.getMessageRound(taskMessage.session_id, messageId!);
-        if (get().currentSessionId !== taskMessage.session_id) return;
-        const messages = (response.messages as ApiChatMessage[]).map(message => ({
-          id: message.id,
-          session_id: taskMessage.session_id,
-          type: message.type,
-          content: message.content || '',
-          images: message.images || [],
-          timestamp: message.timestamp,
-          params: message.params || undefined,
-        }));
-        const messageById = new Map(messages.map(message => [message.id, message]));
-        set(current => ({
-          chatHistory: current.chatHistory.map(message => messageById.get(message.id) ?? message),
-        }));
-      } catch (error) {
-        console.error('停止后恢复会话历史失败:', error);
-      }
-    }
   },
-  reset: () => set({
-    prompt: '',
-    loraPrompt: '',
-    strength: 0.5,
-    count: 1,
-    referenceImage: null,
-    referenceImage2: null,
-    referenceImage3: null,
-    referenceImageEnd: null,
-    chatHistory: [],
-    hasEarlierMessages: false,
-    loading: false,
-    error: null,
-    isGenerating: false,
-    currentGeneratingMessageId: null,
-    currentGenerationTaskId: null,
-  }),
   
   // 加载用户配置
   loadUserConfig: async () => {
     try {
       const config = await apiService.getUserConfig();
       set({
-        currentWorkflow: config.current_workflow,
-        prompt: config.prompt,
-        loraPrompt: config.lora_prompt,
-        strength: config.strength,
+        ...restoreWorkflowSelection(config.current_workflow, config.lora_prompt, get().availableWorkflows),
+        prompt: config.prompt ?? DEFAULT_CONFIG.PROMPT,
+        strength: config.strength ?? DEFAULT_CONFIG.STRENGTH,
         count: config.count,
         imagesPerRow: config.images_per_row,
       });
@@ -1027,6 +1004,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (refImg.image) {
         set({ referenceImage: refImg.image });
       }
+      // The active session (or browser method preference when there is none) wins next.
+      get().syncInputWorkflow(false);
     } catch (error) {
       console.error('加载用户配置失败:', error);
     }
@@ -1056,11 +1035,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const response = await apiService.getWorkflowDefaults();
       if (response.success && response.defaults) {
         const defaults = response.defaults;
-        // 从 workflow_metadata 中获取 t2i 的 parameters 数组，转成 {name: default} 映射
-        const t2iParams: { name: string; default?: unknown }[] =
-          defaults.workflow_metadata?.t2i?.parameters || [];
+        const workflow = defaults.current_workflow_type || DEFAULT_CONFIG.WORKFLOW;
+        const parameters: { name: string; default?: unknown }[] =
+          defaults.workflow_metadata?.[workflow]?.parameters || [];
         const getParamDefault = (name: string) =>
-          t2iParams.find((p) => p.name === name)?.default;
+          parameters.find((p) => p.name === name)?.default;
 
         // 游客模式下：如果当前 loraPrompt 为空，则更新为后端默认值
         if (!isLoggedIn()) {
@@ -1094,18 +1073,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const state = useAppStore.getState();
       const workflowKeys = workflows.map(w => w.key);
       if (workflows.length > 0 && !workflowKeys.includes(state.currentWorkflow)) {
-        state.setCurrentWorkflow(defaultWorkflow || workflows[0].key);
+        set(restoreWorkflowSelection(state.currentWorkflow, state.loraPrompt, workflows, defaultWorkflow));
       }
 
-      // 会话恢复后，仅多种方式的分组（如图生图、图生视频）需要同步记住的方式
-      const curState = useAppStore.getState();
-      const curMeta = workflows.find(w => w.key === curState.currentWorkflow);
-      const curCategoryCount = workflows.filter(w => w.category && w.category === curMeta?.category).length;
-      if (curMeta?.category && curCategoryCount > 1) {
-        const updated = { ...curState.rememberedMethod, [curMeta.category]: curState.currentWorkflow };
-        set({ rememberedMethod: updated });
-        localStorage.setItem('rememberedMethod', JSON.stringify(updated));
-      }
+      // Metadata arrives before saved user/session settings; migrate without recording an initial default.
+      get().syncInputWorkflow(false);
     } catch (error) {
       console.error('加载工作流列表失败:', error);
     }
@@ -1123,6 +1095,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         strength: message.params?.strength,
         count: message.params?.count,
         lora_prompt: message.params?.loraPrompt,
+        width: message.params?.width,
+        height: message.params?.height,
+        use_original_size: message.params?.useOriginalSize,
+        workflow_options: message.params?.workflowOptions,
+        reference_image: message.params?.referenceImage,
+        motion_reference_images: message.params?.motionReferenceImages,
+        motion_prompt: message.params?.motionPrompt ?? undefined,
+        prompt_preset: message.params?.promptPreset,
         images: message.images?.filter(img => typeof img === 'string') as string[],
       });
     } catch (error) {
@@ -1198,6 +1178,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         // 否则选择最新的会话
         const latestSession = sessions.sort((a, b) => b.updated_at - a.updated_at)[0];
         await state.switchSession(latestSession.id);
+      } else {
+        const current = get();
+        const category = current.availableWorkflows.find(item => item.key === current.currentWorkflow)?.category;
+        const remembered = category ? current.rememberedMethod[category] : undefined;
+        if (remembered && current.availableWorkflows.some(item => item.key === remembered && item.category === category)) {
+          current.setCurrentWorkflow(remembered);
+        }
       }
     } catch (error) {
       console.error('加载会话列表失败:', error);
@@ -1220,8 +1207,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await state.loadAvailableWorkflows();
     }
     
-    // 从 availableWorkflows 获取默认工作流（文生图）的默认参数
-    const defaultWorkflow = state.availableWorkflows.find(w => w.key === DEFAULT_CONFIG.WORKFLOW);
+    // 工作流列表加载后，读取当前可用的默认方式及其参数。
+    const workflows = get().availableWorkflows;
+    const workflow = resolveAvailableWorkflow(DEFAULT_CONFIG.WORKFLOW, workflows);
+    const defaultWorkflow = workflows.find(w => w.key === workflow);
     let defaultPrompt: string = DEFAULT_CONFIG.PROMPT;
     let defaultLoraPrompt: string = DEFAULT_CONFIG.LORA_PROMPT;
     let defaultStrength: number = DEFAULT_CONFIG.STRENGTH;
@@ -1258,7 +1247,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     
     // 为新会话初始化配置（使用默认工作流的默认参数）
     const newSessionConfig = {
-      workflow: DEFAULT_CONFIG.WORKFLOW,
+      workflow,
       prompt: defaultPrompt,
       loraPrompt: defaultLoraPrompt,
       strength: defaultStrength,
@@ -1311,9 +1300,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           referenceImage2: null,
           referenceImage3: null,
           referenceImageEnd: null,
-          promptEnd: '',
-          workflowImageStash: {},
+          motionReferenceImages: [],
+          motionPrompt: null,
+          promptPreset: null,
+          promptPresetChoices: {},
+          workflowSettingsStash: {},
+          parkedReferences: NO_PARKED_REFERENCES,
         });
+        get().syncPromptPreset();
         
         return realSessionId;
       } catch (error) {
@@ -1339,9 +1333,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         referenceImage2: null,
         referenceImage3: null,
         referenceImageEnd: null,
-        promptEnd: '',
-        workflowImageStash: {},
+        motionReferenceImages: [],
+        motionPrompt: null,
+        promptPreset: null,
+        promptPresetChoices: {},
+        workflowSettingsStash: {},
+        parkedReferences: NO_PARKED_REFERENCES,
       });
+      get().syncPromptPreset();
       
       return sessionId;
     }
@@ -1357,7 +1356,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (otherSessions.length > 0) {
         await state.switchSession(otherSessions[0].id);
       } else {
-        set({ currentSessionId: null, chatHistory: [], hasEarlierMessages: false });
+        set({ currentSessionId: null, chatHistory: [], hasEarlierMessages: false, motionReferenceImages: [], motionPrompt: null });
       }
     }
     
@@ -1511,20 +1510,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       strength: state.strength,
       count: state.count,
       images_per_row: state.imagesPerRow,
+      width: state.width,
+      height: state.height,
+      use_original_size: state.useOriginalSize,
       reference_image: state.referenceImage,
       reference_image_2: state.referenceImage2,
       reference_image_3: state.referenceImage3,
-      prompt_end: state.promptEnd || null,
       reference_image_end: state.referenceImageEnd,
-      is_loop: state.isLoop,
-      start_frame_count: state.startFrameCount ?? undefined,
-      end_frame_count: state.endFrameCount ?? undefined,
-      frame_rate: state.frameRate ?? undefined,
-      frame_count: state.frameCount ?? undefined,
+      motion_reference_images: [...state.motionReferenceImages],
+      motion_prompt: (() => {
+        const snapshot = resolveMotionPrompt(state.motionPrompt, state.chatHistory,
+          motionPromptSource(state.referenceImage, state.motionReferenceImages, state.prompt, state.promptPreset));
+        return snapshot?.prompt.trim() ? snapshot : null;
+      })(),
       workflow_options: getWorkflowOptions(
         state.availableWorkflows.find(workflow => workflow.key === state.currentWorkflow),
         state.selectOptions,
       ),
+      prompt_preset: state.promptPreset,
+      prompt_preset_choices: state.promptPresetChoices,
     };
     
     const persist = () => {
@@ -1552,14 +1556,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         referenceImage: config.reference_image,
         referenceImage2: config.reference_image_2 || undefined,
         referenceImage3: config.reference_image_3 || undefined,
-        promptEnd: config.prompt_end || undefined,
         referenceImageEnd: config.reference_image_end,
-        isLoop: config.is_loop,
-        startFrameCount: config.start_frame_count,
-        endFrameCount: config.end_frame_count,
-        frameRate: config.frame_rate,
-        frameCount: config.frame_count,
+        motionReferenceImages: config.motion_reference_images,
+        motionPrompt: config.motion_prompt,
         workflowOptions: config.workflow_options,
+        width: config.width,
+        height: config.height,
+        useOriginalSize: config.use_original_size,
+        promptPreset: config.prompt_preset,
+        promptPresetChoices: config.prompt_preset_choices,
       });
     };
 
@@ -1573,53 +1578,61 @@ export const useAppStore = create<AppState>((set, get) => ({
   
   // 加载指定会话的配置
   loadSessionConfig: async (sessionId: string) => {
+    const sequence = ++sessionConfigLoadSequence;
+    sessionConfigLoading = true;
+    try {
     if (isLoggedIn()) {
       // 登录用户：从后端加载
       try {
         const config = await apiService.getSessionConfig(sessionId);
-        if (get().currentSessionId !== sessionId) return;
+        if (get().currentSessionId !== sessionId || sequence !== sessionConfigLoadSequence) return;
         set({
-          currentWorkflow: config.workflow || DEFAULT_CONFIG.WORKFLOW,
-          prompt: config.prompt || DEFAULT_CONFIG.PROMPT,
-          loraPrompt: config.lora_prompt || DEFAULT_CONFIG.LORA_PROMPT,
+          ...restoreWorkflowSelection(config.workflow, config.lora_prompt, get().availableWorkflows),
+          prompt: config.prompt ?? DEFAULT_CONFIG.PROMPT,
           strength: config.strength ?? DEFAULT_CONFIG.STRENGTH,
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.images_per_row ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.reference_image || null,
           referenceImage2: config.reference_image_2 || null,
           referenceImage3: config.reference_image_3 || null,
-          promptEnd: config.prompt_end || '',
           referenceImageEnd: config.reference_image_end || null,
-          isLoop: config.is_loop ?? false,
-          startFrameCount: config.start_frame_count ?? null,
-          endFrameCount: config.end_frame_count ?? null,
-          frameRate: config.frame_rate ?? null,
-          frameCount: config.frame_count ?? null,
-          selectOptions: { ...get().selectOptions, ...(config.workflow_options ?? {}) },
-          workflowImageStash: {},
+          motionReferenceImages: config.motion_reference_images ?? [],
+          motionPrompt: config.motion_prompt ?? null,
+          width: config.width ?? null,
+          height: config.height ?? null,
+          useOriginalSize: config.use_original_size ?? true,
+          selectOptions: config.workflow_options ?? {},
+          promptPreset: config.prompt_preset ?? null,
+          promptPresetChoices: restorePromptPresetChoices(config.workflow, config.prompt_preset, config.prompt_preset_choices),
+          workflowSettingsStash: {},
+          parkedReferences: NO_PARKED_REFERENCES,
         });
+        get().syncInputWorkflow();
       } catch (error) {
         console.error('加载会话配置失败:', error);
-        if (get().currentSessionId !== sessionId) return;
+        if (get().currentSessionId !== sessionId || sequence !== sessionConfigLoadSequence) return;
         // 失败时使用默认配置
         set({
           currentWorkflow: DEFAULT_CONFIG.WORKFLOW,
           prompt: DEFAULT_CONFIG.PROMPT,
           loraPrompt: DEFAULT_CONFIG.LORA_PROMPT,
+          width: null,
+          height: null,
+          useOriginalSize: true,
+          selectOptions: {},
           strength: DEFAULT_CONFIG.STRENGTH,
           count: DEFAULT_CONFIG.COUNT,
           imagesPerRow: DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: null,
           referenceImage2: null,
           referenceImage3: null,
-          promptEnd: '',
           referenceImageEnd: null,
-          isLoop: false,
-          startFrameCount: null,
-          endFrameCount: null,
-          frameRate: null,
-          frameCount: null,
-          workflowImageStash: {},
+          motionReferenceImages: [],
+          motionPrompt: null,
+          promptPreset: null,
+          promptPresetChoices: {},
+          workflowSettingsStash: {},
+          parkedReferences: NO_PARKED_REFERENCES,
         });
       }
     } else {
@@ -1628,25 +1641,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (get().currentSessionId !== sessionId) return;
       if (config) {
         set({
-          currentWorkflow: config.workflow || DEFAULT_CONFIG.WORKFLOW,
-          prompt: config.prompt || DEFAULT_CONFIG.PROMPT,
-          loraPrompt: config.loraPrompt || DEFAULT_CONFIG.LORA_PROMPT,
+          ...restoreWorkflowSelection(config.workflow, config.loraPrompt, get().availableWorkflows),
+          prompt: config.prompt ?? DEFAULT_CONFIG.PROMPT,
           strength: config.strength ?? DEFAULT_CONFIG.STRENGTH,
           count: config.count ?? DEFAULT_CONFIG.COUNT,
           imagesPerRow: config.imagesPerRow ?? DEFAULT_CONFIG.IMAGES_PER_ROW,
           referenceImage: config.referenceImage || null,
           referenceImage2: config.referenceImage2 || null,
           referenceImage3: config.referenceImage3 || null,
-          promptEnd: config.promptEnd || '',
           referenceImageEnd: config.referenceImageEnd || null,
-          isLoop: config.isLoop ?? false,
-          startFrameCount: config.startFrameCount ?? null,
-          endFrameCount: config.endFrameCount ?? null,
-          frameRate: config.frameRate ?? null,
-          frameCount: config.frameCount ?? null,
-          selectOptions: { ...get().selectOptions, ...(config.workflowOptions ?? {}) },
-          workflowImageStash: {},
+          motionReferenceImages: config.motionReferenceImages ?? [],
+          motionPrompt: config.motionPrompt ?? null,
+          width: config.width ?? null,
+          height: config.height ?? null,
+          useOriginalSize: config.useOriginalSize ?? true,
+          selectOptions: config.workflowOptions ?? {},
+          promptPreset: config.promptPreset ?? null,
+          promptPresetChoices: restorePromptPresetChoices(config.workflow, config.promptPreset, config.promptPresetChoices),
+          workflowSettingsStash: {},
+          parkedReferences: NO_PARKED_REFERENCES,
         });
+        get().syncInputWorkflow();
       } else {
         // 如果没有保存的配置，使用当前 store 值（已由 loadDefaultConfig 设置）
         // 不覆盖，以免丢失从后端加载的默认值
@@ -1654,10 +1669,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           currentWorkflow: currentState.currentWorkflow || DEFAULT_CONFIG.WORKFLOW,
           // 保持 prompt, loraPrompt, strength, count 等值不变
+          motionReferenceImages: [],
+          motionPrompt: null,
           referenceImage: null,
           referenceImage2: null,
           referenceImage3: null,
         });
+      }
+    }
+    } finally {
+      if (sequence === sessionConfigLoadSequence) {
+        sessionConfigLoading = false;
+        if (get().currentSessionId === sessionId) get().syncPromptPreset();
       }
     }
   },

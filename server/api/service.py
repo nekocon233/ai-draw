@@ -1,13 +1,29 @@
 """
 服务状态管理 API
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.auth import get_current_user
 from server.schemas import ServiceStatusResponse
+from server.generation.tasks import TaskBusyError
+from server.lora_catalog import workflow_lora_options
 
 router = APIRouter(prefix="/service", tags=["服务管理"])
+
+
+@router.get("/pose-embedding-check", dependencies=[Depends(get_current_user)])
+async def check_pose_embedding() -> JSONResponse:
+    """The browser checks whether an enabled extension removed these headers."""
+    return JSONResponse(
+        {"probe": "pose-embedding-v1"},
+        headers={
+            "Content-Security-Policy": "frame-ancestors 'none'",
+            "X-Frame-Options": "DENY",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/status", response_model=ServiceStatusResponse)
@@ -29,6 +45,8 @@ async def start_service(service: AIDrawService = Depends(get_ai_draw_service)) -
 @router.post("/stop", dependencies=[Depends(get_current_user)])
 async def stop_service(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """停止服务"""
+    if service.generation.tasks.active is not None:
+        raise HTTPException(status_code=409, detail="已有生成任务正在运行，无法停止服务")
     service.stop_service()
     return {"success": True, "message": "服务已停止"}
 
@@ -37,32 +55,30 @@ async def stop_service(service: AIDrawService = Depends(get_ai_draw_service)) ->
 async def get_available_workflows(service: AIDrawService = Depends(get_ai_draw_service)) -> dict:
     """获取可用的工作流列表和默认工作流"""
     from utils.config_loader import get_config
-    config = get_config()
-    
-    # 获取所有工作流及其元数据
-    workflows = []
-    for workflow_key in service.get_available_workflows():
-        metadata = config.workflow_defaults.workflow_metadata.get(workflow_key, {})
-        workflows.append({
-            "key": workflow_key,
-            "label": metadata.get("label", workflow_key),
-            "description": metadata.get("description", ""),
-            "requires_image": metadata.get("requires_image", False),
-            "requires_end_image": metadata.get("requires_end_image", False),
-            "supports_optional_keyframes": metadata.get("supports_optional_keyframes", False),
-            "supports_original_size": metadata.get("supports_original_size", False),
-            "supports_loop": metadata.get("supports_loop", False),
-            "output_type": metadata.get("output_type", "image"),
-            "category": metadata.get("category", None),  # 工作流分组（下拉折叠用）
-            "method": metadata.get("method", None),      # 同组内具体方式名（设置里展示用）
-            "supports_multi_image": metadata.get("supports_multi_image", False),  # 是否支持多张参考图
-            "parameters": metadata.get("parameters", [])  # 添加参数配置
-        })
-    
+
     return {
-        "workflows": workflows,
-        "default_workflow": service.get_current_workflow()
+        "workflows": service.catalog.list(),
+        "default_workflow": get_config().workflow_defaults.current_workflow_type,
     }
+
+
+@router.get("/loras", dependencies=[Depends(get_current_user)])
+async def get_workflow_loras(
+    workflow: str,
+    service: AIDrawService = Depends(get_ai_draw_service),
+) -> dict:
+    try:
+        metadata = service.catalog.metadata(workflow)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if not metadata.get("lora_models"):
+        return {"workflow": workflow, "models": []}
+    try:
+        node = await service.get_comfyui_object_info("LoraLoaderModelOnly")
+        models = workflow_lora_options(metadata, node)
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="暂时无法获取 LoRA 列表，请检查 ComfyUI 后重试") from error
+    return {"workflow": workflow, "models": models}
 
 
 @router.get("/workflow/defaults")
@@ -82,5 +98,10 @@ async def switch_workflow(
     service: AIDrawService = Depends(get_ai_draw_service)
 ) -> dict:
     """切换工作流"""
-    service.switch_workflow(workflow_type)
+    try:
+        service.switch_workflow(workflow_type)
+    except TaskBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return {"success": True, "workflow": workflow_type}

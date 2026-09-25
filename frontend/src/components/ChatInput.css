@@ -90,6 +90,16 @@
   gap: 12px;
 }
 
+/* 所选预设位于输入框上方，输入框只放具体要求 */
+.chat-input-preset-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 0 2px 8px;
+}
+
 .reference-strip {
   flex: 0 0 auto;
   max-width: 156px;
@@ -404,7 +414,7 @@
   }
 
   /* 帧卡片在手机上缩小一点 */
-  .flf2v-frame-card {
+  .keyframe-frame-card {
     width: 64px;
     height: 64px;
   }
@@ -413,33 +423,26 @@
     font-size: 14px !important;
   }
 
-  /* flf2v 双帧布局在手机上纵向排列 */
-  .flf2v-input-area {
+  /* 首尾帧布局在手机上纵向排列 */
+  .keyframe-input-area {
     flex-direction: column;
   }
 
-  .flf2v-frames {
+  .keyframe-frames {
     align-self: center;
   }
 
-  .flf2v-mode-option {
-    min-height: 34px;
-  }
-
-  .flf2v-prompts {
+  .keyframe-prompts {
     padding-right: 0;
   }
 
-  .flf2v-prompts--loop {
-    flex-direction: column;
-  }
+}
 
-  .flf2v-prompts--loop .flf2v-prompt-divider {
-    width: auto;
-    height: 1px;
-    margin: 4px 0;
-    align-self: auto;
-  }
+.chat-input-reference-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
 }
 
 .chat-input-icon-button {
@@ -630,8 +633,8 @@
   margin-bottom: 4px;
 }
 
-/* flf2v 双帧输入区域 */
-.flf2v-input-area {
+/* 首尾帧输入区域 */
+.keyframe-input-area {
   display: flex;
   align-items: stretch;
   gap: 8px;
@@ -639,7 +642,7 @@
 }
 
 
-.flf2v-frames {
+.keyframe-frames {
   width: 184px;
   display: flex;
   flex-direction: column;
@@ -648,59 +651,14 @@
   flex-shrink: 0;
 }
 
-.flf2v-frame-row {
+.keyframe-frame-row {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.flf2v-mode-switch {
-  width: 100%;
-  padding: 3px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-tertiary);
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-}
-
-.flf2v-mode-switch:focus-within {
-  border-color: var(--control-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--control-accent) 20%, transparent);
-}
-
-.flf2v-mode-option {
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
-}
-
-.flf2v-mode-option:hover:not(.is-active) {
-  color: var(--text-primary);
-}
-
-.flf2v-mode-option.is-active {
-  background: var(--bg-primary);
-  color: var(--control-accent);
-  box-shadow: var(--shadow-sm);
-}
-
-.flf2v-frame-card {
+.keyframe-frame-card {
   width: 76px;
   height: 76px;
   border-radius: 10px;
@@ -739,36 +697,36 @@
   outline-offset: -3px;
 }
 
-.flf2v-frame-card:hover {
+.keyframe-frame-card:hover {
   border-color: var(--accent-color);
   background: var(--accent-subtle);
 }
 
-.flf2v-frame-card.has-image {
+.keyframe-frame-card.has-image {
   border-style: solid;
   border-color: var(--accent-color);
   cursor: default;
 }
 
-.flf2v-frame-card img {
+.keyframe-frame-card img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.flf2v-frame-card .ant-image {
+.keyframe-frame-card .ant-image {
   width: 100%;
   height: 100%;
   display: block;
 }
 
-.flf2v-frame-card .ant-image-img {
+.keyframe-frame-card .ant-image-img {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover;
 }
 
-.flf2v-frame-card-remove {
+.keyframe-frame-card-remove {
   position: absolute;
   top: 3px;
   right: 3px;
@@ -788,17 +746,17 @@
   z-index: 1;
 }
 
-.flf2v-frame-card-remove:hover {
+.keyframe-frame-card-remove:hover {
   background: rgba(0, 0, 0, 0.85);
   transform: scale(1.1);
 }
 
-.flf2v-frame-card-remove:focus-visible {
+.keyframe-frame-card-remove:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.flf2v-frame-placeholder {
+.keyframe-frame-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -807,16 +765,16 @@
   pointer-events: none;
 }
 
-.flf2v-frame-placeholder-icon {
+.keyframe-frame-placeholder-icon {
   font-size: 20px;
 }
 
-.flf2v-frame-placeholder-label {
+.keyframe-frame-placeholder-label {
   font-size: 11px;
   line-height: 1;
 }
 
-.flf2v-frame-swap {
+.keyframe-frame-swap {
   width: 30px;
   height: 30px;
   padding: 0;
@@ -832,18 +790,18 @@
   transition: color 180ms ease;
 }
 
-.flf2v-frame-swap:hover:not(:disabled) {
+.keyframe-frame-swap:hover:not(:disabled) {
   color: var(--control-accent);
 }
 
-.flf2v-frame-swap:disabled {
+.keyframe-frame-swap:disabled {
   background: transparent;
   color: color-mix(in srgb, var(--text-secondary) 45%, transparent);
   cursor: not-allowed;
 }
 
-/* flf2v 双提示词区域 */
-.flf2v-prompts {
+/* 视频描述区域 */
+.keyframe-prompts {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -853,7 +811,7 @@
   padding-right: calc(36px + 8px);
 }
 
-.flf2v-prompt-item {
+.keyframe-prompt-item {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -861,7 +819,7 @@
   gap: 2px;
 }
 
-.flf2v-prompt-label {
+.keyframe-prompt-label {
   font-size: 11px;
   color: var(--text-secondary);
   padding: 0 2px;
@@ -869,31 +827,7 @@
   user-select: none;
 }
 
-.flf2v-prompt-divider {
-  height: 1px;
-  background: var(--border-color, #e8e8e8);
-  margin: 3px 0;
-}
-
 /* 循环模式：首尾帧描述左右对称 */
-.flf2v-prompts--loop {
-  flex-direction: row;
-  gap: 0;
-  align-items: stretch;
-}
-
-.flf2v-prompts--loop .flf2v-prompt-item {
-  flex: 1;
-  min-width: 0;
-}
-
-.flf2v-prompts--loop .flf2v-prompt-divider {
-  width: 1px;
-  height: auto;
-  margin: 0 8px;
-  align-self: stretch;
-}
-
 @media (max-width: 768px) {
   .chat-input-row {
     flex-direction: column;
@@ -954,8 +888,13 @@
     opacity: 1;
   }
 
-  .flf2v-frame-card-remove {
+  .keyframe-frame-card-remove {
     width: 32px;
     height: 32px;
   }
+}
+.generation-stage-progress {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #888);
 }

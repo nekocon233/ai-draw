@@ -3,6 +3,7 @@
  */
 import { STORAGE_KEYS } from './constants';
 import { clearAllData, deleteSessionImages, loadSessionImages } from './indexedDB';
+import type { PromptPreset } from '../types/api';
 
 export const AUTH_REQUIRED_EVENT = 'ai-draw:auth-required';
 
@@ -525,6 +526,9 @@ export async function compressImage(
 // ============ 会话配置管理（游客模式）============
 
 export interface GuestSessionConfig {
+  width?: number | null;
+  height?: number | null;
+  useOriginalSize?: boolean;
   workflow: string;
   prompt: string;
   loraPrompt: string;
@@ -534,14 +538,12 @@ export interface GuestSessionConfig {
   referenceImage: string | null;
   referenceImage2?: string | null;
   referenceImage3?: string | null;
-  promptEnd?: string;
   referenceImageEnd?: string | null;
-  isLoop?: boolean;
-  startFrameCount?: number | null;
-  endFrameCount?: number | null;
-  frameRate?: number | null;
-  frameCount?: number | null;
   workflowOptions?: Record<string, string | number>;
+  motionReferenceImages?: string[];
+  motionPrompt?: import('../types/api').MotionPromptSnapshot | null;
+  promptPreset?: PromptPreset | null;
+  promptPresetChoices?: import('../types/api').PromptPresetChoices;
 }
 
 /**

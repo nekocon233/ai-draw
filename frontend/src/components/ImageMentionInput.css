@@ -1,0 +1,7 @@
+.image-mention-input { width: 100%; min-width: 0; }
+.image-mention-list { width: 224px; max-width: calc(100vw - 48px); max-height: 240px; overflow-y: auto; }
+.image-mention-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.image-mention-option img { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 4px; object-fit: contain; }
+.image-mention-empty { padding: 12px 8px; }
+.image-mention-error { padding-top: 6px; font-size: 12px; line-height: 1.5; }
+.image-reference-caption { display: block; font-size: 11px; line-height: 20px; text-align: center; }

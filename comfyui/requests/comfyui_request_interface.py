@@ -23,21 +23,11 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         例如：关闭WebSocket连接或HTTP连接
         """
 
-    @abstractmethod
-    async def generate_t2i(self, workflow, prompt_text, denoise_value, lora_prompt, seed) -> ComfyUIRequestResult:
-        """
-        文生图（Text-to-Image）推理请求，由子类实现
-        """
-
-    @abstractmethod
-    async def generate_i2i(self, workflow, image_b64, prompt_text, denoise_value, lora_prompt, seed, width=None, height=None, image_base64_2=None, image_base64_3=None) -> ComfyUIRequestResult:
-        """
-        图生图（Image-to-Image）推理请求，由子类实现
-        width: 图像宽度（可选）
-        height: 图像高度（可选）
-        image_b64_2: 第 2 张参考图 base64（可选）
-        image_b64_3: 第 3 张参考图 base64（可选）
-        """
+    async def generate_qwen_image_21(
+        self, workflow, prompt_text, images, loras, seed, width, height,
+        use_original_size, steps, reference_resolution,
+    ) -> ComfyUIRequestResult:
+        raise NotImplementedError("此 ComfyUI 后端不支持 Qwen-Image-2.1")
 
     @abstractmethod
     async def get_upscale_models(self) -> list[str]:
@@ -69,38 +59,6 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         """执行 InvSR 扩散放大工作流。"""
 
     @abstractmethod
-    async def generate_flf2v(
-        self,
-        workflow,
-        start_image_base64: str,
-        end_image_base64: str,
-        prompt_start: str,
-        prompt_end: str,
-        seed: int,
-        is_loop: bool = False,
-        start_frame_count=None,
-        end_frame_count=None,
-        frame_rate=None,
-    ) -> ComfyUIRequestResult:
-        """
-        首尾帧生视频（First-Last-Frame to Video）推理请求，由子类实现
-        """
-
-    @abstractmethod
-    async def generate_i2v(
-        self,
-        workflow,
-        image_base64: str,
-        prompt_text: str,
-        seed: int,
-        frame_count=None,
-        frame_rate=None,
-    ) -> ComfyUIRequestResult:
-        """
-        图生视频（Image-to-Video）推理请求，由子类实现
-        """
-
-    @abstractmethod
     async def generate_minimax_h3(
         self,
         workflow,
@@ -112,6 +70,9 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         aspect_ratio: str = "auto",
     ) -> ComfyUIRequestResult:
         """MiniMax H3 文本/可选首尾帧音视频生成请求。"""
+
+    async def generate_minimax_h3_ref(self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto") -> ComfyUIRequestResult:
+        raise NotImplementedError("此 ComfyUI 后端不支持 H3 动作参考")
 
     @abstractmethod
     async def get_state(self) -> ComfyUIRequestState:

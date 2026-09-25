@@ -68,6 +68,7 @@ client.interceptors.response.use(
     return response.data;
   },
   (error: AxiosError<APIErrorResponse>) => {
+    if (axios.isCancel(error)) return Promise.reject(error);
     console.error('Response error:', error);
     
     // 处理网络错误

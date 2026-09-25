@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, useCallback } from 'react';
-import { Image, Tag, Button, Popconfirm, Input, message as antMessage } from 'antd';
+import { Image, Tag, Button, Popconfirm, message as antMessage } from 'antd';
 import {
   DownloadOutlined, PictureOutlined, ReloadOutlined,
   DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
@@ -8,6 +8,15 @@ import {
 import { useAppStore } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getScrollPosition, setScrollPosition, type StoredScrollPosition } from '../utils/scrollPosition';
+import { formatLoraPromptForDisplay } from '../utils/loraOptions';
+import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
+import type { MotionPromptSnapshot, PromptPreset } from '../types/api';
+import ImageMentionInput from './ImageMentionInput';
+import PromptPresetTag from './PromptPresetTag';
+import MotionReferenceImages from './MotionReferenceImages';
+import MotionPromptPanel from './MotionPromptPanel';
+import { motionPromptSource } from '../utils/motionPrompt';
+import { getMotionReferenceError } from '../utils/motionReferences';
 import './ResultGrid.css';
 
 const loadFrameEditors = () => import('./FrameExtractionModal');
@@ -15,6 +24,15 @@ const FrameExtractionModal = lazy(loadFrameEditors);
 const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default: module.ImageEditorModal })));
 
 type EditReferenceSlot = 'img1' | 'img2' | 'img3' | 'imgEnd';
+type EditReferences = Partial<Record<EditReferenceSlot, string | null>>;
+
+function normalizeEditReferences(content: string, images: EditReferences, mentionsEnabled: boolean) {
+  const compact = compactImageReferences(content, [images.img1, images.img2, images.img3]);
+  return {
+    content: mentionsEnabled ? compact.prompt : content,
+    images: { ...images, img1: compact.images[0] ?? null, img2: compact.images[1] ?? null, img3: compact.images[2] ?? null },
+  };
+}
 
 export default function ResultGrid() {
   const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore(useShallow(state => ({
@@ -33,6 +51,9 @@ export default function ResultGrid() {
   })));
   const activeWorkflow = availableWorkflows.find(item => item.key === currentWorkflow);
   const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_optional_keyframes || activeWorkflow?.supports_multi_image;
+  const formatLora = (loraPrompt: string, workflow?: string) =>
+    formatLoraPromptForDisplay(loraPrompt, availableWorkflows.find(item => item.key === workflow)?.lora_labels);
+  const isWorkflowAvailable = (workflow?: string) => availableWorkflows.some(item => item.key === workflow);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -175,8 +196,19 @@ export default function ResultGrid() {
 
   // ---- 编辑状态 ----
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [editPromptEnd, setEditPromptEnd] = useState('');
+  const [editDraft, setEditDraft] = useState<{ content: string; images: EditReferences }>({ content: '', images: {} });
+  const { content: editContent, images: editRefImages } = editDraft;
+  const editVersionRef = useRef(0);
+  const editWorkflow = chatHistory.find(item => item.id === editingMsgId)?.params?.workflow;
+  const editWorkflowMeta = availableWorkflows.find(item => item.key === editWorkflow);
+  const editMentionsEnabled = supportsImageMentions(editWorkflowMeta);
+  const [editPreset, setEditPreset] = useState<PromptPreset | null>(null);
+  const [editMotionImages, setEditMotionImages] = useState<string[]>([]);
+  const [editMotionUploading, setEditMotionUploading] = useState(false);
+  const [editMotionPrompt, setEditMotionPrompt] = useState<MotionPromptSnapshot | null>(null);
+  const [editMotionPreviewing, setEditMotionPreviewing] = useState(false);
+  const editPresetIssue = editPreset
+    ? getPresetBlocker(editPreset, editWorkflowMeta, [editRefImages.img1, editRefImages.img2, editRefImages.img3], editRefImages.imgEnd, editMotionImages) : null;
   const [frameEditor, setFrameEditor] = useState<{
     videoUrl: string;
     messageId: string;
@@ -187,56 +219,74 @@ export default function ResultGrid() {
   const [mediaRetryVersions, setMediaRetryVersions] = useState<Record<string, number>>({});
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [scrollButtonPosition, setScrollButtonPosition] = useState({ left: 0, bottom: 0 });
-  const [editRefImages, setEditRefImages] = useState<{
-    img1?: string | null;
-    img2?: string | null;
-    img3?: string | null;
-    imgEnd?: string | null;
-  }>({});
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const activeRefSlot = useRef<EditReferenceSlot>('img1');
 
 
-  const startEdit = useCallback((message: { id: string; content: string; params?: { promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string; referenceImageEnd?: string } }) => {
+  const startEdit = useCallback((message: { id: string; content: string; params?: { workflow?: string; promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string; referenceImageEnd?: string; promptPreset?: PromptPreset; motionReferenceImages?: string[]; motionPrompt?: MotionPromptSnapshot | null } }) => {
+    editVersionRef.current++;
     setEditingMsgId(message.id);
-    setEditContent(message.content);
-    setEditPromptEnd(message.params?.promptEnd || '');
-    setEditRefImages({
+    setEditPreset(message.params?.promptPreset ?? null);
+    setEditMotionImages([...(message.params?.motionReferenceImages ?? [])]);
+    setEditMotionPrompt(message.params?.motionPrompt ?? null);
+    setEditDraft(normalizeEditReferences(message.content, {
       img1: message.params?.referenceImage ?? null,
       img2: message.params?.referenceImage2 ?? null,
       img3: message.params?.referenceImage3 ?? null,
       imgEnd: message.params?.referenceImageEnd ?? null,
-    });
-  }, []);
+    }, supportsImageMentions(availableWorkflows.find(item => item.key === message.params?.workflow))));
+  }, [availableWorkflows]);
 
-  const cancelEdit = useCallback(() => setEditingMsgId(null), []);
+  const cancelEdit = useCallback(() => { editVersionRef.current++; setEditingMsgId(null); }, []);
+
+  const updateEditReference = useCallback((slot: EditReferenceSlot, image: string | null) => {
+    setEditMotionPrompt(null);
+    setEditDraft(previous => {
+      const images = { ...previous.images, [slot]: image };
+      return slot === 'imgEnd' ? { ...previous, images } : normalizeEditReferences(previous.content, images, editMentionsEnabled);
+    });
+  }, [editMentionsEnabled]);
 
   const confirmEdit = useCallback(async (msgId: string) => {
+    if (editMotionPreviewing) { antMessage.warning('请等待动作提示词分析完成'); return; }
+    if (editMotionUploading) { antMessage.warning('请等待动作图上传完成'); return; }
+    if (editWorkflowMeta?.supports_motion_reference) {
+      const issue = getMotionReferenceError(editRefImages.img1, editMotionImages);
+      if (issue) { antMessage.warning(issue); return; }
+    }
+    if (editPreset && editPresetIssue) { antMessage.warning(`预设「${editPreset.title}」：${editPresetIssue}`); return; }
+    const error = editMentionsEnabled ? getImageMentionError(editContent, [editRefImages.img1, editRefImages.img2, editRefImages.img3]) : null;
+    if (error) { antMessage.warning(error); return; }
     // 立即退出编辑模式，不等待生成完成
     const content = editContent;
     const refImages = { ...editRefImages };
-    const promptEnd = editPromptEnd;
+    editVersionRef.current++;
     setEditingMsgId(null);
     await editAndRegenerateMessage(msgId, content, {
       referenceImage: refImages.img1,
       referenceImage2: refImages.img2,
       referenceImage3: refImages.img3,
       referenceImageEnd: refImages.imgEnd,
-    }, promptEnd);
-  }, [editAndRegenerateMessage, editContent, editPromptEnd, editRefImages]);
+      motionReferenceImages: editWorkflowMeta?.supports_motion_reference ? [...editMotionImages] : undefined,
+      motionPrompt: editWorkflowMeta?.supports_motion_reference ? editMotionPrompt : undefined,
+    }, editPreset);
+  }, [editAndRegenerateMessage, editContent, editRefImages, editMentionsEnabled, editPreset, editPresetIssue, editMotionImages, editWorkflowMeta, editMotionUploading, editMotionPrompt, editMotionPreviewing]);
 
   const handleEditFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const slot = activeRefSlot.current;
+    const version = editVersionRef.current;
+    const sessionId = useAppStore.getState().currentSessionId;
     const reader = new FileReader();
     reader.onload = (ev) => {
+      if (version !== editVersionRef.current || sessionId !== useAppStore.getState().currentSessionId) return;
       const base64 = ev.target?.result as string;
-      const slot = activeRefSlot.current;
-      setEditRefImages(prev => ({ ...prev, [slot]: base64 }));
+      updateEditReference(slot, base64);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
-  }, []);
+  }, [updateEditReference]);
 
   const isVideo = (url: string) => url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url) || url.includes('/video/');
 
@@ -251,13 +301,14 @@ export default function ResultGrid() {
     const workflow = availableWorkflows.find(item => item.key === params.workflow);
     const supportsEnd = Boolean(workflow?.requires_end_image || workflow?.supports_optional_keyframes);
     const supportsMulti = Boolean(workflow?.supports_multi_image);
+    const supportsSketch = Boolean(workflow?.image_workflow);
     const hasReference = Boolean(
       params.referenceImage || params.referenceImage2 || params.referenceImage3 || params.referenceImageEnd,
     );
-    if (!hasReference && !workflow?.requires_image && !supportsEnd && !supportsMulti) return [];
+    if (!hasReference && !workflow?.requires_image && !supportsEnd && !supportsMulti && !supportsSketch) return [];
 
     const slots: Array<{ key: EditReferenceSlot; label: string }> = [
-      { key: 'img1', label: supportsEnd ? '首帧' : '参考图 1' },
+      { key: 'img1', label: workflow?.supports_motion_reference ? '角色外观图' : supportsEnd ? '首帧' : '参考图 1' },
     ];
     if (supportsMulti || params.referenceImage2 || params.referenceImage3) {
       slots.push(
@@ -587,7 +638,7 @@ export default function ResultGrid() {
                                 <button
                                   type="button"
                                   className="edit-ref-remove"
-                                  onClick={() => setEditRefImages(prev => ({ ...prev, [slot.key]: null }))}
+                                  onClick={() => updateEditReference(slot.key, null)}
                                   aria-label={`移除${slot.label}`}
                                 >
                                   <CloseOutlined />
@@ -617,27 +668,28 @@ export default function ResultGrid() {
                         </div>
                       )}
 
+                      {editPreset && (
+                        <div className="chat-message-preset">
+                          <PromptPresetTag preset={editPreset} issue={editPresetIssue} onRemove={() => { setEditPreset(null); setEditMotionPrompt(null); }} />
+                        </div>
+                      )}
+
                       {/* 提示词文本编辑 */}
-                      <Input.TextArea
+                      {editWorkflowMeta?.supports_motion_reference && <MotionReferenceImages key={`motion-images-${currentSessionId}-${message.id}`}
+                        images={editMotionImages} onChange={images => { setEditMotionImages(images); setEditMotionPrompt(null); }} onUploadingChange={setEditMotionUploading} />}
+                      {editWorkflowMeta?.supports_motion_reference && <MotionPromptPanel key={`motion-prompt-${currentSessionId}-${message.id}`}
+                        source={motionPromptSource(editRefImages.img1, editMotionImages, editContent, editPreset)} snapshot={editMotionPrompt}
+                        onChange={setEditMotionPrompt} onBusyChange={setEditMotionPreviewing} disabled={editMotionUploading} />}
+                      <ImageMentionInput
                         className="edit-content-textarea"
                         value={editContent}
-                        onChange={e => setEditContent(e.target.value)}
+                        onChange={content => { setEditDraft(previous => ({ ...previous, content })); setEditMotionPrompt(null); }}
+                        images={[editRefImages.img1, editRefImages.img2, editRefImages.img3]}
+                        enabled={editMentionsEnabled}
                         autoSize={{ minRows: 2, maxRows: 8 }}
-                        placeholder="输入提示词…"
+                        placeholder={editMentionsEnabled ? '输入提示词，输入 @ 引用参考图…' : '输入提示词…'}
                         aria-label="提示词"
                       />
-
-                      {/* 尾帧提示词（flf2v 循环模式） */}
-                      {message.params?.isLoop && (
-                        <Input.TextArea
-                          className="edit-content-textarea edit-content-textarea-end"
-                          value={editPromptEnd}
-                          onChange={e => setEditPromptEnd(e.target.value)}
-                          autoSize={{ minRows: 2, maxRows: 4 }}
-                          placeholder="结束帧提示词…"
-                          aria-label="结束帧提示词"
-                        />
-                      )}
 
                       {/* 参数标签（只读）+ 操作按钮 */}
                       {message.params && (
@@ -645,7 +697,7 @@ export default function ResultGrid() {
                           <Tag>{message.params.workflow}</Tag>
                           {message.params.strength != null && <Tag>强度: {message.params.strength}</Tag>}
                           {message.params.count != null && message.params.count > 1 && <Tag>数量: {message.params.count}</Tag>}
-                          {message.params.loraPrompt && <Tag>LoRA: {message.params.loraPrompt}</Tag>}
+                          {message.params.loraPrompt && <Tag>LoRA: {formatLora(message.params.loraPrompt, message.params.workflow)}</Tag>}
                         </div>
                       )}
                       <div className="edit-actions">
@@ -654,7 +706,7 @@ export default function ResultGrid() {
                           size="small"
                           icon={<CheckOutlined />}
                           onClick={() => confirmEdit(message.id)}
-                          disabled={!editContent.trim()}
+                          disabled={(!editContent.trim() && !editPreset && !editWorkflowMeta?.supports_motion_reference) || editMotionPreviewing || !isWorkflowAvailable(message.params?.workflow)}
                         >
                           重新生成
                         </Button>
@@ -670,10 +722,11 @@ export default function ResultGrid() {
                   {(message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
                     <div className="user-reference-images">
                       {([
-                        { src: message.params.referenceImage, label: '参考图 1' },
+                        { src: message.params.referenceImage, label: message.params.motionReferenceImages?.length ? '角色外观图' : '参考图 1' },
                         { src: message.params.referenceImage2, label: '参考图 2' },
                         { src: message.params.referenceImage3, label: '参考图 3' },
                         { src: message.params.referenceImageEnd, label: '尾帧参考图' },
+                        ...(message.params.motionReferenceImages ?? []).map((src, index) => ({ src, label: `动作 ${index + 1}` })),
                       ] as { src?: string; label: string }[]).filter(item => item.src).map((item) => (
                         <div
                           key={item.label}
@@ -710,12 +763,22 @@ export default function ResultGrid() {
                             style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }}
                             preview={{ mask: '预览' }}
                           />
+                          <span className="image-reference-caption">{item.label}</span>
                         </div>
                       ))}
                     </div>
                   )}
-                  <div className="chat-message-text">{message.content}</div>
-                  {message.params?.isLoop && message.params?.promptEnd && (
+                  {message.params?.promptPreset && (
+                    <div className="chat-message-preset">
+                      <PromptPresetTag preset={message.params.promptPreset} />
+                    </div>
+                  )}
+                  {message.content && <div className="chat-message-text">{message.content}</div>}
+                  {message.params?.motionPrompt && <details className="motion-prompt-history">
+                    <summary>本轮动作提示词 · 保持原画面</summary><div>{message.params.motionPrompt.prompt}</div>
+                  </details>}
+                  {/* 保留已停用工作流的历史补充描述与参数。 */}
+                  {message.params?.promptEnd && (
                     <div className="chat-message-text chat-message-text-end">{message.params.promptEnd}</div>
                   )}
                   {message.params && (
@@ -728,7 +791,7 @@ export default function ResultGrid() {
                         <Tag>数量: {message.params.count}</Tag>
                       )}
                       {message.params.loraPrompt && (
-                        <Tag>LoRA: {message.params.loraPrompt}</Tag>
+                        <Tag>LoRA: {formatLora(message.params.loraPrompt, message.params.workflow)}</Tag>
                       )}
                       {message.params.frameRate != null && (
                         <Tag>帧率: {message.params.frameRate}</Tag>
@@ -736,7 +799,7 @@ export default function ResultGrid() {
                       {message.params.startFrameCount != null && (
                         <Tag>起始帧: {message.params.startFrameCount}</Tag>
                       )}
-                      {message.params.isLoop && message.params.endFrameCount != null && (
+                      {message.params.endFrameCount != null && (
                         <Tag>结束帧: {message.params.endFrameCount}</Tag>
                       )}
                     </div>
@@ -751,7 +814,8 @@ export default function ResultGrid() {
                       type="text"
                       size="small"
                       icon={<EditOutlined />}
-                      disabled={isGenerating}
+                      disabled={isGenerating || !isWorkflowAvailable(message.params?.workflow)}
+                      title={!isWorkflowAvailable(message.params?.workflow) ? '此生成方式已停用，请选择可用方式创建新任务。原结果已保留。' : undefined}
                       onClick={() => startEdit(message)}
                       aria-label="编辑并重新生成"
                     />

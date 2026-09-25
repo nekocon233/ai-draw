@@ -1,17 +1,60 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, Button, Typography, message } from 'antd';
-import { CameraOutlined } from '@ant-design/icons';
+import { CameraOutlined, DownloadOutlined, ExportOutlined, QuestionCircleOutlined, ReloadOutlined, UpOutlined } from '@ant-design/icons';
+import { apiService } from '../api/services';
+import './PoseEditorWeb.css';
+
+const POSE_EDITOR_URL = 'https://posemy.art/app/?lang=zhHans';
+const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/ignore-x-frame-headers/gleekbfjekiniecknbkamfmkohkpodhe';
 
 interface PoseEditorWebProps {
   open: boolean;
   onClose: () => void;
   targetSlot?: 1 | 2 | 3;
+  targetLabel?: string;
   onApplyImage?: (base64: string) => void;
 }
 
-export default function PoseEditorWeb({ open, onClose, targetSlot = 1, onApplyImage }: PoseEditorWebProps) {
+export default function PoseEditorWeb({ open, onClose, targetSlot = 1, targetLabel, onApplyImage }: PoseEditorWebProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [frameVersion, setFrameVersion] = useState(0);
+  const [embeddingStatus, setEmbeddingStatus] = useState<'checking' | 'enabled' | 'disabled' | 'unknown'>('checking');
+  const lastEmbeddingCheck = useRef<boolean | null>(null);
+  const [guideOverride, setGuideOverride] = useState<boolean | null>(null);
+  const showInstallGuide = guideOverride ?? (embeddingStatus === 'disabled' || embeddingStatus === 'unknown');
+
+  useEffect(() => {
+    if (!open || isCapturing) return;
+    let disposed = false;
+    let revision = 0;
+    const check = async () => {
+      const current = ++revision;
+      let enabled: boolean | null = null;
+      try {
+        enabled = await apiService.checkPoseEmbedding();
+      } catch {
+        // Keep the guide available if support cannot be confirmed.
+      }
+      if (!disposed && current === revision) {
+        const previouslyEnabled = lastEmbeddingCheck.current;
+        if (enabled !== null) lastEmbeddingCheck.current = enabled;
+        setEmbeddingStatus(enabled === null ? 'unknown' : enabled ? 'enabled' : 'disabled');
+        if (enabled && previouslyEnabled === false) setFrameVersion(version => version + 1);
+      }
+    };
+    void check();
+    window.addEventListener('focus', check);
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', check);
+    };
+  }, [open, frameVersion, isCapturing]);
+
+  const reloadEditor = () => {
+    setGuideOverride(null);
+    setFrameVersion(version => version + 1);
+  };
 
   const handleCapture = async () => {
     setIsCapturing(true);
@@ -98,7 +141,7 @@ export default function PoseEditorWeb({ open, onClose, targetSlot = 1, onApplyIm
 
       const base64 = cropCanvas.toDataURL('image/png');
       onApplyImage?.(base64);
-      message.success(`已应用到参考图 ${targetSlot}`);
+      message.success(`已应用到${targetLabel || `参考图 ${targetSlot}`}`);
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'NotAllowedError') {
@@ -112,21 +155,21 @@ export default function PoseEditorWeb({ open, onClose, targetSlot = 1, onApplyIm
     }
   };
 
-  const slotLabel = targetSlot === 1 ? '参考图' : `参考图 ${targetSlot}`;
+  const slotLabel = targetLabel || (targetSlot === 1 ? '参考图' : `参考图 ${targetSlot}`);
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
       title={`姿势参考 — posemy.art`}
+      className="pose-editor-modal"
       width="90vw"
       style={{ top: '3vh' }}
-      styles={{ body: { padding: 0, height: '82vh', overflow: 'hidden' } }}
       destroyOnHidden
       footer={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0' }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            摆好姿势后点击右侧按钮截图，浏览器会弹出分享对话框，选择「当前标签页」即可自动裁切并应用
+        <div className="pose-editor-footer">
+          <Typography.Text type="secondary" className="pose-editor-capture-hint">
+            编辑器显示后，摆好姿势再截图。在浏览器分享窗口选择当前 ai-draw 标签页，即可自动裁切并应用。
           </Typography.Text>
           <Button
             type="primary"
@@ -139,10 +182,69 @@ export default function PoseEditorWeb({ open, onClose, targetSlot = 1, onApplyIm
         </div>
       }
     >
+      {showInstallGuide ? (
+      <section className="pose-editor-install-guide" aria-label="姿势编辑器扩展安装指南">
+        <div className="pose-editor-guide-heading">
+          <Typography.Text strong>{embeddingStatus === 'disabled' ? '首次使用：安装姿势编辑器扩展' : '姿势编辑器安装说明'}</Typography.Text>
+          <Button type="text" size="small" icon={<UpOutlined />} disabled={isCapturing} onClick={() => setGuideOverride(false)}>
+            收起说明
+          </Button>
+        </div>
+        <ol>
+          <li>点击“安装扩展”，在 Chrome 商店为 Ignore X-Frame headers 点击“添加至 Chrome”并确认安装。</li>
+          <li>在 Chrome 中启用扩展，允许在本站和 posemy.art 上运行，再点击“已安装，重新加载”。</li>
+        </ol>
+        <div className="pose-editor-guide-actions">
+          <Button
+            href={EXTENSION_STORE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            icon={<DownloadOutlined />}
+          >
+            安装扩展
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            disabled={isCapturing}
+            onClick={reloadEditor}
+          >
+            已安装，重新加载
+          </Button>
+          <Button
+            type="link"
+            href={POSE_EDITOR_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            icon={<ExportOutlined />}
+            disabled={isCapturing}
+            onClick={onClose}
+          >
+            直接打开网页
+          </Button>
+        </div>
+        <Typography.Text type="secondary" className="pose-editor-guide-note">
+          建议仅在使用姿势工具时启用扩展。无法安装扩展时，可直接打开网页，截图后返回上传或粘贴。
+        </Typography.Text>
+      </section>
+      ) : (
+        <div className="pose-editor-toolbar">
+          {embeddingStatus === 'checking' && <Typography.Text type="secondary" role="status">正在检查编辑器支持…</Typography.Text>}
+          <Button type="text" size="small" icon={<QuestionCircleOutlined />} disabled={isCapturing} onClick={() => setGuideOverride(true)}>
+            安装说明
+          </Button>
+          <Button type="text" size="small" icon={<ReloadOutlined />} disabled={isCapturing} onClick={reloadEditor}>
+            重新加载
+          </Button>
+          <Button type="link" size="small" href={POSE_EDITOR_URL} target="_blank" rel="noopener noreferrer" icon={<ExportOutlined />} disabled={isCapturing} onClick={onClose}>
+            直接打开网页
+          </Button>
+        </div>
+      )}
       <iframe
+        key={frameVersion}
         ref={iframeRef}
-        src="https://posemy.art/app/?lang=zhHans"
-        style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+        src={POSE_EDITOR_URL}
+        className="pose-editor-frame"
         allow="fullscreen"
         title="posemy.art 姿势参考"
       />

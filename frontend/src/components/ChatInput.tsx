@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Input, Button, message, Select, Image } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { 
@@ -12,17 +12,24 @@ import {
   FontColorsOutlined,
   VideoCameraOutlined,
   CheckOutlined,
-  ArrowRightOutlined,
   SwapOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import { apiService } from '../api/services';
-import { getWorkflowOptions } from '../utils/workflowOptions';
+import { compactReferenceImages, getImageGenerationSettings, getGenerationCount, getWorkflowOptions, getWorkflowMethods } from '../utils/workflowOptions';
+import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
+import type { PromptPreset } from '../types/api';
+import ImageMentionInput from './ImageMentionInput';
+import PromptPresetTag from './PromptPresetTag';
+import PromptPresetQuickSelect from './PromptPresetQuickSelect';
+import MotionReferenceImages from './MotionReferenceImages';
+import { motionPromptSource, motionPromptSourceKey, rebindMotionPrompt, resolveMotionPrompt } from '../utils/motionPrompt';
+import { getMotionReferenceError } from '../utils/motionReferences';
 import './ChatInput.css';
 
 const SettingsModal = lazy(() => import('./SettingsModal'));
-const PromptAssistantModal = lazy(() => import('./PromptAssistantModal'));
+const PromptExpansionModal = lazy(() => import('./PromptExpansionModal'));
 const PoseEditorWeb = lazy(() => import('./PoseEditorWeb'));
 
 const { TextArea } = Input;
@@ -55,13 +62,13 @@ interface FrameCardProps {
 
 function FrameCard({ image, label, alt, onUpload, onRemove }: FrameCardProps) {
   return (
-    <div className={`flf2v-frame-card ${image ? 'has-image' : ''}`}>
+    <div className={`keyframe-frame-card ${image ? 'has-image' : ''}`}>
       {image ? (
         <>
           <Image src={image} alt={alt} preview={{ mask: '预览' }} />
           <button
             type="button"
-            className="flf2v-frame-card-remove"
+            className="keyframe-frame-card-remove"
             onClick={onRemove}
             aria-label={`移除${alt}`}
           >
@@ -76,9 +83,9 @@ function FrameCard({ image, label, alt, onUpload, onRemove }: FrameCardProps) {
             onClick={onUpload}
             aria-label={`上传${label}`}
           >
-            <span className="flf2v-frame-placeholder">
-              <PlusOutlined className="flf2v-frame-placeholder-icon" />
-              <span className="flf2v-frame-placeholder-label">{label}</span>
+            <span className="keyframe-frame-placeholder">
+              <PlusOutlined className="keyframe-frame-placeholder-icon" />
+              <span className="keyframe-frame-placeholder-label">{label}</span>
             </span>
           </button>
         </>
@@ -113,7 +120,7 @@ function ReferenceThumbnail({ image, index, onRemove }: ReferenceThumbnailProps)
 export default function ChatInput() {
   const {
     prompt,
-    promptEnd,
+    promptPreset,
     strength,
     count,
     loraPrompt,
@@ -126,24 +133,19 @@ export default function ChatInput() {
     referenceImageEnd,
     isGenerating,
     currentSessionId,
-    isLoop,
-    frameRate,
-    startFrameCount,
-    endFrameCount,
-    frameCount,
     setPrompt,
-    setPromptEnd,
+    setPromptPreset,
     setCurrentWorkflow,
     setReferenceImage,
+    setReferenceImages,
     setReferenceImage2,
     setReferenceImage3,
     setReferenceImageEnd,
-    setIsLoop,
     setError,
     clearError,
   } = useAppStore(useShallow(state => ({
     prompt: state.prompt,
-    promptEnd: state.promptEnd,
+    promptPreset: state.promptPreset,
     strength: state.strength,
     count: state.count,
     loraPrompt: state.loraPrompt,
@@ -156,35 +158,40 @@ export default function ChatInput() {
     referenceImageEnd: state.referenceImageEnd,
     isGenerating: state.isGenerating,
     currentSessionId: state.currentSessionId,
-    isLoop: state.isLoop,
-    frameRate: state.frameRate,
-    startFrameCount: state.startFrameCount,
-    endFrameCount: state.endFrameCount,
-    frameCount: state.frameCount,
     setPrompt: state.setPrompt,
-    setPromptEnd: state.setPromptEnd,
+    setPromptPreset: state.setPromptPreset,
     setCurrentWorkflow: state.setCurrentWorkflow,
     setReferenceImage: state.setReferenceImage,
+    setReferenceImages: state.setReferenceImages,
     setReferenceImage2: state.setReferenceImage2,
     setReferenceImage3: state.setReferenceImage3,
     setReferenceImageEnd: state.setReferenceImageEnd,
-    setIsLoop: state.setIsLoop,
     setError: state.setError,
     clearError: state.clearError,
   })));
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
-  const isFlf2v = workflowMeta?.requires_end_image === true;
-  const hasOptionalKeyframes = workflowMeta?.supports_optional_keyframes === true;
-  const isFrameVideo = isFlf2v || hasOptionalKeyframes;
-  const isLoopMode = isFlf2v && isLoop;
-  const isI2V = currentWorkflow === 'i2v'; // Wan i2v：图生视频
+  const motionReferenceImages = useAppStore(state => state.motionReferenceImages);
+  const setMotionReferenceImages = useAppStore(state => state.setMotionReferenceImages);
+  const isMotionReference = workflowMeta?.supports_motion_reference === true;
+  const storedMotionPrompt = useAppStore(state => state.motionPrompt);
+  const history = useAppStore(state => state.chatHistory);
+  const motionSource = useMemo(() => motionPromptSource(referenceImage, motionReferenceImages, prompt, promptPreset), [referenceImage, motionReferenceImages, prompt, promptPreset]);
+  const motionSnapshot = useMemo(() => resolveMotionPrompt(storedMotionPrompt, history, motionSource), [storedMotionPrompt, history, motionSource]);
+  const motionRequestKey = JSON.stringify([currentSessionId, currentWorkflow, motionPromptSourceKey(motionSource)]);
+  const mentionsEnabled = supportsImageMentions(workflowMeta);
+  const generationProgress = useAppStore(state => state.generationProgress);
+  const acceptsSketch = !!workflowMeta?.image_workflow;
+  const isFrameVideo = workflowMeta?.supports_optional_keyframes === true;
   const isRequiresImage = workflowMeta?.requires_image === true && !isFrameVideo;
-  const isNanoBananaPro = currentWorkflow === 'nano_banana_pro'; // Gemini 单轮图像生成
-  const isKlingFlf2v = currentWorkflow === 'kling_flf2v'; // Kling 首尾帧图生视频
+  const acceptsOptionalImages = workflowMeta?.supports_multi_image === true && !workflowMeta.requires_image;
   const supportsMultiImage = workflowMeta?.supports_multi_image === true; // 多参考图工作流（图生图类目）
-  const isT2I = !isRequiresImage && !isFrameVideo && !supportsMultiImage; // 不接受图片输入的工作流
+  const acceptsReferenceImages = isRequiresImage || isFrameVideo || supportsMultiImage || acceptsSketch;
+  // 预设显示在输入框上方，输入框只写具体要求；缺图等问题在标签上提示，发送时拦截。
+  const presetIssue = promptPreset
+    ? getPresetBlocker(promptPreset, workflowMeta, [referenceImage, referenceImage2, referenceImage3], referenceImageEnd, motionReferenceImages) : null;
+  const presetPlaceholder = promptPreset ? (promptPreset.hint || '补充具体要求…') : undefined;
 
-  // 下拉分组：同 category 的工作流折叠为一项（如 图生图：i2i / nano_banana_pro）
+  // 下拉分组：同 category 的工作流折叠为一项。
   const groupedOptions = (() => {
     const seen = new Set<string>();
     const out: WorkflowSelectOption[] = [];
@@ -204,14 +211,14 @@ export default function ChatInput() {
       const description = kind === 'video'
         ? '从文字或参考帧生成动态视频'
         : kind === 'image'
-          ? '上传参考图进行编辑与重绘'
+          ? '通过文字或参考图生成图像'
           : '从文字描述开始创作图像';
 
       out.push({
         label,
         value: w.key,
         description,
-        methodCount: members.length,
+        methodCount: getWorkflowMethods(members).length,
         kind,
       });
     }
@@ -223,10 +230,21 @@ export default function ChatInput() {
     : currentWorkflow;
   const [isDragging, setIsDragging] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [promptAssistantOpen, setPromptAssistantOpen] = useState(false);
+  const [promptExpansionOpen, setPromptExpansionOpen] = useState(false);
+  const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [poseWebOpen, setPoseWebOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadingMotion, setUploadingMotion] = useState(false);
+  const [generatingMotionPrompt, setGeneratingMotionPrompt] = useState(false);
+  const motionPromptRequest = useRef<AbortController | null>(null);
+  const motionPromptMounted = useRef(true);
+  useEffect(() => {
+    motionPromptMounted.current = true;
+    return () => { motionPromptMounted.current = false; motionPromptRequest.current?.abort(); };
+  }, []);
+  useEffect(() => () => { motionPromptRequest.current?.abort(); }, [motionRequestKey]);
   const [poseWebTargetSlot, setPoseWebTargetSlot] = useState<1 | 2 | 3>(1);
+  const poseSessionRef = useRef<string | null>(null);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
@@ -252,8 +270,38 @@ export default function ChatInput() {
   };
 
   const openPoseReference = () => {
+    if (isMotionReference && motionReferenceImages.length >= 8) { message.warning('最多添加 8 张动作参考图'); return; }
+    poseSessionRef.current = currentSessionId;
     setPoseWebTargetSlot(getNextReferenceSlot());
     setPoseWebOpen(true);
+  };
+
+  const generateMotionPrompt = async () => {
+    if (motionPromptRequest.current || isGenerating || isSubmitting || uploadingMotion) return;
+    const issue = getMotionReferenceError(referenceImage, motionReferenceImages) || presetIssue;
+    if (issue) { message.warning(issue); return; }
+    const controller = new AbortController();
+    motionPromptRequest.current = controller;
+    setGeneratingMotionPrompt(true);
+    try {
+      const result = await apiService.analyzeMotionPrompt(motionSource, controller.signal);
+      const snapshot = await rebindMotionPrompt(result, motionPromptSource(referenceImage, motionReferenceImages, result.prompt, promptPreset));
+      const state = useAppStore.getState();
+      const latestKey = JSON.stringify([state.currentSessionId, state.currentWorkflow,
+        motionPromptSourceKey(motionPromptSource(state.referenceImage, state.motionReferenceImages, state.prompt, state.promptPreset))]);
+      if (controller.signal.aborted || !motionPromptMounted.current || latestKey !== motionRequestKey || state.isGenerating) return;
+      useAppStore.setState({ prompt: result.prompt, motionPrompt: snapshot });
+      useAppStore.getState().saveSessionConfig();
+      requestAnimationFrame(() => textAreaRef.current?.focus({ cursor: 'end' }));
+      message.success('提示词已填入输入框');
+    } catch (error) {
+      if (!controller.signal.aborted && motionPromptMounted.current) message.error(getErrorMessage(error));
+    } finally {
+      if (motionPromptRequest.current === controller) {
+        motionPromptRequest.current = null;
+        if (motionPromptMounted.current) setGeneratingMotionPrompt(false);
+      }
+    }
   };
 
   const swapFrameImages = () => {
@@ -336,19 +384,20 @@ export default function ChatInput() {
     }
 
     if (submissionPendingRef.current) return;
-
-    if (isFlf2v && !referenceImage) {
-      message.warning('请上传开始帧图片');
-      return;
+    if (uploadingMotion) { message.warning('请等待动作图上传完成'); return; }
+    if (generatingMotionPrompt) { message.warning('请等待提示词生成完成'); return; }
+    if (isMotionReference) {
+      const error = getMotionReferenceError(referenceImage, motionReferenceImages);
+      if (error) { message.warning(error); return; }
     }
 
-    if (isFlf2v && !referenceImageEnd) {
-      message.warning('请上传结束帧图片');
-      return;
-    }
+    if (promptPreset && presetIssue) { message.warning(`预设「${promptPreset.title}」：${presetIssue}`); return; }
 
-    if (isRequiresImage && !isNanoBananaPro && !referenceImage) {
-      message.warning('请上传参考图片');
+    const mentionError = mentionsEnabled ? getImageMentionError(prompt, [referenceImage, referenceImage2, referenceImage3]) : null;
+    if (mentionError) { message.warning(mentionError); return; }
+
+    if (isRequiresImage && !hasReferenceImages) {
+      message.warning(`请上传${workflowMeta?.reference_image_label || '参考图片'}`);
       return;
     }
 
@@ -360,62 +409,61 @@ export default function ChatInput() {
     // 使用用户选择的工作流
     const hasStrength = workflowMeta?.parameters?.some(p => p.name === 'strength') ?? false;
     const effectiveStrength = hasStrength ? strength : undefined;
-    const effectiveCount = currentWorkflow === 'minimax_h3' ? 1 : count;
+    const effectiveCount = getGenerationCount(workflowMeta, count);
     const workflowOptions = getWorkflowOptions(workflowMeta, useAppStore.getState().selectOptions);
+    const references = isMotionReference ? [referenceImage] : [referenceImage, referenceImage2, referenceImage3];
+    const submittedMotionImages = isMotionReference ? [...motionReferenceImages] : undefined;
+    const submittedMotionPrompt = isMotionReference && motionSnapshot?.prompt.trim() ? {...motionSnapshot} : undefined;
+    const submittedPrompt = mentionsEnabled ? compactImageReferences(prompt, references).prompt : prompt;
+    const [image1, image2, image3] = compactReferenceImages(references);
+    const imageSettings = getImageGenerationSettings(workflowMeta, useAppStore.getState(), Boolean(image1));
     let messageId = '';
     try {
       const addedMessage = await useAppStore.getState().addChatMessage({
-        prompt,
+        prompt: submittedPrompt,
         workflow: currentWorkflow,
         strength: effectiveStrength,
         count: effectiveCount,
         loraPrompt,
-        promptEnd: isFlf2v && isLoop ? promptEnd : undefined,
-        referenceImage,
-        referenceImage2: referenceImage2 || undefined,
-        referenceImage3: referenceImage3 || undefined,
+        ...imageSettings,
+        referenceImage: image1,
+        referenceImage2: image2,
+        referenceImage3: image3,
         referenceImageEnd: isFrameVideo ? referenceImageEnd : undefined,
-        isLoop: isFlf2v ? isLoop : undefined,
-        frameRate: isFlf2v ? frameRate : (isI2V ? frameRate : undefined),
-        startFrameCount: isFlf2v ? startFrameCount : undefined,
-        endFrameCount: isFlf2v ? endFrameCount : undefined,
-        frameCount: isI2V ? frameCount : undefined,
+        motionReferenceImages: submittedMotionImages,
+        motionPrompt: submittedMotionPrompt,
         workflowOptions,
+        promptPreset,
       });
       if (!addedMessage) return;
       messageId = addedMessage.messageId;
       const generationTaskId = crypto.randomUUID();
-      useAppStore.setState({ currentGenerationTaskId: generationTaskId });
+      useAppStore.getState().startGeneration(messageId, generationTaskId);
 
       const state = useAppStore.getState();
 
       // 接口立即返回，生成在后台执行，结果和错误通过 WebSocket 推送
       await apiService.generateMedia({
-        prompt,
+        prompt: submittedPrompt,
         workflow: currentWorkflow,
         strength: effectiveStrength,
         count: effectiveCount,
         lora_prompt: loraPrompt || undefined,
-        reference_image: referenceImage || undefined,
-        reference_image_2: referenceImage2 || undefined,
-        reference_image_3: referenceImage3 || undefined,
-        width: state.width || undefined,
-        height: state.height || undefined,
-        prompt_end: isFlf2v && isLoop ? (promptEnd || undefined) : undefined,
+        reference_image: image1,
+        reference_image_2: image2,
+        reference_image_3: image3,
+        width: imageSettings.width,
+        height: imageSettings.height,
         reference_image_end: isFrameVideo ? (referenceImageEnd || undefined) : undefined,
-        use_original_size: state.useOriginalSize,
-        is_loop: isFlf2v ? isLoop : undefined,
-        start_frame_count: isFlf2v ? (state.startFrameCount ?? undefined) : undefined,
-        end_frame_count: isFlf2v ? (state.endFrameCount ?? undefined) : undefined,
-        frame_rate: (isFlf2v || isI2V) ? (state.frameRate ?? undefined) : undefined,
-        frame_count: isI2V ? (state.frameCount ?? undefined) : undefined,
+        motion_reference_images: submittedMotionImages,
+        motion_prompt: submittedMotionPrompt,
+        use_original_size: imageSettings.useOriginalSize,
         // PixelLab 动画参数
         action: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabAction : undefined,
         view: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabView : undefined,
         direction: currentWorkflow === 'pixel_lab_animate' ? state.pixelLabDirection : undefined,
-        // Kling 视频运行时选项（前端用 selectOptions 存储）
-        kling_options: isKlingFlf2v ? state.selectOptions : undefined,
         workflow_options: workflowOptions,
+        prompt_preset: promptPreset ?? undefined,
         // 任务关联：让后端落库 + 断线恢复能定位到助手消息
         message_id: messageId,
         session_id: addedMessage.sessionId,
@@ -424,11 +472,7 @@ export default function ChatInput() {
     } catch (err: unknown) {
       // HTTP 层面失败（任务未能提交到后台）
       if (messageId) useAppStore.getState().updateChatImages(messageId, []);
-      useAppStore.setState({
-        currentGeneratingMessageId: null,
-        currentGenerationTaskId: null,
-        isGenerating: false,
-      });
+      useAppStore.getState().finishGeneration();
       const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       message.error('提交失败: ' + errorMessage);
@@ -440,8 +484,21 @@ export default function ChatInput() {
 
   // 应用 AI 生成的 Prompt
   const handleApplyPrompt = (generatedPrompt: string) => {
+    const error = mentionsEnabled ? getImageMentionError(generatedPrompt, [referenceImage, referenceImage2, referenceImage3]) : null;
+    if (error) { message.warning(error); return false; }
     setPrompt(generatedPrompt);
-    message.success('Prompt 已应用到输入框');
+    message.success('扩写结果已应用到输入框');
+    return true;
+  };
+
+  // 预设不写进输入框，选中后光标回到描述末尾，方便接着补充具体要求
+  const handleApplyPreset = (preset: PromptPreset | null) => {
+    setPromptPreset(preset);
+    requestAnimationFrame(() => {
+      const textarea = textAreaRef.current?.resizableTextArea?.textArea;
+      textarea?.focus();
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
   };
 
   // 共享的图片上传逻辑（拖放/粘贴均复用）
@@ -458,12 +515,12 @@ export default function ChatInput() {
       return;
     }
 
-    // flf2v 模式下：首帧已有图时自动填充尾帧
+    // 首尾帧模式下：首帧已有图时自动填充尾帧
     const currentState = useAppStore.getState();
     const fillEnd = isFrameVideo && currentState.referenceImage && !currentState.referenceImageEnd;
 
     // 普通 requires_image 模式：按序填充槽位
-    // Q-Image (i2i) / Nano Banana Pro：最多 3 张；参考图工作流：仅 1 张
+    // 支持多图的工作流最多 3 张；其余参考图工作流仅 1 张
     const getNextSlot = () => {
       if (!currentState.referenceImage) return setReferenceImage;
       if (supportsMultiImage && !currentState.referenceImage2) return setReferenceImage2;
@@ -473,7 +530,12 @@ export default function ChatInput() {
 
     try {
       const res = await apiService.uploadImage(file);
-      if (fillEnd) {
+      if (useAppStore.getState().currentSessionId !== currentState.currentSessionId) return;
+      if (isMotionReference && currentState.referenceImage) {
+        const images = useAppStore.getState().motionReferenceImages;
+        if (images.length >= 8) { message.warning('最多添加 8 张动作参考图'); return; }
+        setMotionReferenceImages([...images, res.image]);
+      } else if (fillEnd) {
         setReferenceImageEnd(res.image);
         message.success('\u5c3e\u5e27\u4e0a\u4f20\u6210\u529f!');
       } else if (isRequiresImage || supportsMultiImage) {
@@ -493,7 +555,7 @@ export default function ChatInput() {
   // 粘贴处理（Ctrl/Cmd + V）：将剪切板中的图片作为参考图
   const handlePaste = async (e: React.ClipboardEvent) => {
     // 文生图不允许上传图片
-    if (isT2I) return;
+    if (!acceptsReferenceImages) return;
 
     const items = e.clipboardData?.items;
     if (!items || items.length === 0) return;
@@ -547,13 +609,16 @@ export default function ChatInput() {
     setIsDragging(false);
 
     // 文生图不允许拖放图片
-    if (isT2I) return;
+    if (!acceptsReferenceImages) return;
 
     // URL 直接设置的辅助函数（拖放 URL 时的 fallback）
     const setImageUrl = (url: string) => {
       const currentState = useAppStore.getState();
       const fillEnd = isFrameVideo && currentState.referenceImage && !currentState.referenceImageEnd;
-      if (fillEnd) {
+      if (isMotionReference && currentState.referenceImage) {
+        if (currentState.motionReferenceImages.length >= 8) { message.warning('最多添加 8 张动作参考图'); return; }
+        setMotionReferenceImages([...currentState.motionReferenceImages, url]);
+      } else if (fillEnd) {
         setReferenceImageEnd(url);
         message.success('尾帧已设置!');
       } else if (isRequiresImage || supportsMultiImage) {
@@ -571,7 +636,7 @@ export default function ChatInput() {
     // 情况1：拖放的是文件
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      await uploadImageFile(files[0]);
+      for (const file of isMotionReference ? Array.from(files) : [files[0]]) await uploadImageFile(file);
       return;
     }
 
@@ -654,22 +719,33 @@ export default function ChatInput() {
         onPaste={handlePaste}
       >
         {/* 拖放遮罩层（文生图不显示） */}
-        {isDragging && !isT2I && (
+        {isDragging && acceptsReferenceImages && (
           <div className="chat-drag-overlay">
             <PictureOutlined className="chat-drag-icon" />
             <span className="chat-drag-text">松开以上传图片</span>
           </div>
         )}
 
+        {promptPreset && (
+          <div className="chat-input-preset-row">
+            <PromptPresetTag
+              preset={promptPreset}
+              issue={presetIssue}
+              onRemove={() => setPromptPreset(null)}
+              onChange={() => setPresetMenuOpen(true)}
+            />
+          </div>
+        )}
+
         {/* 首尾帧输入布局 / 普通图文输入布局 */}
         {isFrameVideo ? (
-          <div className="flf2v-input-area">
+          <div className="keyframe-input-area">
             {/* 双帧卡片区 */}
-            <div className="flf2v-frames">
-              <div className="flf2v-frame-row">
+            <div className="keyframe-frames">
+              <div className="keyframe-frame-row">
                 <FrameCard
                   image={referenceImage}
-                  label={hasOptionalKeyframes ? '首帧·可选' : '首帧'}
+                  label="首帧·可选"
                   alt="开始帧"
                   onUpload={() => fileInputRef.current?.click()}
                   onRemove={() => setReferenceImage(null)}
@@ -677,7 +753,7 @@ export default function ChatInput() {
 
                 <button
                   type="button"
-                  className="flf2v-frame-swap"
+                  className="keyframe-frame-swap"
                   onClick={swapFrameImages}
                   disabled={!referenceImage && !referenceImageEnd}
                   title={referenceImage && referenceImageEnd
@@ -694,47 +770,25 @@ export default function ChatInput() {
 
                 <FrameCard
                   image={referenceImageEnd}
-                  label={hasOptionalKeyframes ? '尾帧·可选' : '尾帧'}
+                  label="尾帧·可选"
                   alt="结束帧"
                   onUpload={() => fileInputEndRef.current?.click()}
                   onRemove={() => setReferenceImageEnd(null)}
                 />
               </div>
 
-              {workflowMeta?.supports_loop && (
-                <div className="flf2v-mode-switch" role="group" aria-label="视频过渡模式">
-                  <button
-                    type="button"
-                    className={`flf2v-mode-option${!isLoop ? ' is-active' : ''}`}
-                    onClick={() => setIsLoop(false)}
-                    aria-pressed={!isLoop}
-                  >
-                    <ArrowRightOutlined aria-hidden="true" />
-                    <span>单程</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`flf2v-mode-option${isLoop ? ' is-active' : ''}`}
-                    onClick={() => setIsLoop(true)}
-                    aria-pressed={isLoop}
-                  >
-                    <SwapOutlined aria-hidden="true" />
-                    <span>循环</span>
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* 右侧：文字描述 */}
-            <div className={`flf2v-prompts${isLoopMode ? ' flf2v-prompts--loop' : ''}`}>
-              <div className="flf2v-prompt-item">
-                <span className="flf2v-prompt-label">{hasOptionalKeyframes ? '音视频描述' : '首帧描述'}</span>
+            <div className="keyframe-prompts">
+              <div className="keyframe-prompt-item">
+                <span className="keyframe-prompt-label">音视频描述</span>
                 <TextArea
                   ref={textAreaRef}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={hasOptionalKeyframes ? '描述镜头、动作、对白、音效与配乐...' : '描述开始帧画面内容...'}
-                  aria-label={hasOptionalKeyframes ? '音视频描述' : '首帧描述'}
+                  placeholder={presetPlaceholder ?? '描述镜头、动作、对白、音效与配乐...'}
+                  aria-label="音视频描述"
                   className="chat-textarea"
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   onPressEnter={(e) => {
@@ -745,20 +799,6 @@ export default function ChatInput() {
                   }}
                 />
               </div>
-              {isLoopMode && <div className="flf2v-prompt-divider" />}
-              {isLoopMode && (
-                <div className="flf2v-prompt-item">
-                  <span className="flf2v-prompt-label">尾帧描述</span>
-                  <TextArea
-                    value={promptEnd}
-                    onChange={(e) => setPromptEnd(e.target.value)}
-                    placeholder="描述结束帧画面内容..."
-                    aria-label="尾帧描述"
-                    className="chat-textarea"
-                    autoSize={{ minRows: 2, maxRows: 4 }}
-                  />
-                </div>
-              )}
             </div>
           </div>
         ) : (
@@ -771,24 +811,17 @@ export default function ChatInput() {
                     <ReferenceThumbnail
                       image={referenceImage}
                       index={1}
-                      onRemove={() => {
-                        setReferenceImage(referenceImage2);
-                        setReferenceImage2(referenceImage3);
-                        setReferenceImage3(null);
-                      }}
+                      onRemove={() => setReferenceImages([null, referenceImage2, referenceImage3])}
                     />
                   )}
-                  {referenceImage2 && (
+                  {!isMotionReference && referenceImage2 && (
                     <ReferenceThumbnail
                       image={referenceImage2}
                       index={2}
-                      onRemove={() => {
-                        setReferenceImage2(referenceImage3);
-                        setReferenceImage3(null);
-                      }}
+                      onRemove={() => setReferenceImages([referenceImage, null, referenceImage3])}
                     />
                   )}
-                  {referenceImage3 && (
+                  {!isMotionReference && referenceImage3 && (
                     <ReferenceThumbnail
                       image={referenceImage3}
                       index={3}
@@ -798,11 +831,13 @@ export default function ChatInput() {
                 </div>
               )}
               <div className="chat-textarea-wrapper">
-                <TextArea
+                <ImageMentionInput
                   ref={textAreaRef}
                   value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={isNanoBananaPro ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...'}
+                  onChange={setPrompt}
+                  images={[referenceImage, referenceImage2, referenceImage3]}
+                  enabled={mentionsEnabled}
+                  placeholder={presetPlaceholder ?? (isMotionReference ? '动作按参考图生成；仅补充节奏、停顿、音效等额外内容，可留空…' : workflowMeta?.reference_image_description && hasReferenceImages ? workflowMeta.reference_image_description : acceptsSketch ? '描述画面，也可添加图片进行编辑…' : acceptsOptionalImages ? '输入指令（可加载参考图）...' : '描述你想要生成的图片...')}
                   aria-label="生成提示词"
                   className="chat-textarea"
                   autoSize={{ minRows: 1, maxRows: 6 }}
@@ -818,6 +853,12 @@ export default function ChatInput() {
           </>
         )}
 
+        {isMotionReference && <MotionReferenceImages key={`motion-images-${currentSessionId ?? 'new'}`} images={motionReferenceImages}
+          onChange={setMotionReferenceImages} onCapture={openPoseReference} onUploadingChange={setUploadingMotion} disabled={isSubmitting} />}
+
+        {isGenerating && generationProgress && (
+          <div className="generation-stage-progress" role="status">{generationProgress}</div>
+        )}
         {/* 第二行：功能按钮 */}
         <div className="chat-input-buttons">
           <div className="chat-input-tools">
@@ -843,7 +884,7 @@ export default function ChatInput() {
               style={{ display: 'none' }}
               onChange={makeImageUploadHandler(setReferenceImage3)}
             />
-            {/* flf2v 结束帧上传 */}
+            {/* 尾帧上传 */}
             <input
               ref={fileInputEndRef}
               type="file"
@@ -864,19 +905,27 @@ export default function ChatInput() {
               }}
             />
 
-            {(isRequiresImage || supportsMultiImage) && (
-              <>
+            <div className="chat-input-reference-actions">
+              <PromptPresetQuickSelect preset={promptPreset} workflowMeta={workflowMeta} onChange={handleApplyPreset}
+                open={presetMenuOpen} onOpenChange={setPresetMenuOpen}
+                onGeneratePrompt={isMotionReference ? () => void generateMotionPrompt() : undefined}
+                generatingPrompt={generatingMotionPrompt} generatePromptDisabled={isGenerating || isSubmitting || uploadingMotion}
+                generatePromptBlockedReason={isMotionReference ? getMotionReferenceError(referenceImage, motionReferenceImages) || presetIssue : null} />
+              {(isRequiresImage || supportsMultiImage || acceptsSketch) && (
                 <button
                   type="button"
                   className="chat-input-attachment-button"
                   onClick={openReferenceImagePicker}
                   disabled={!canAddReference}
-                  title={canAddReference ? '添加普通参考图' : '最多添加 3 张参考图'}
-                  aria-label={canAddReference ? '添加普通参考图' : '参考图已达上限'}
+                  title={!canAddReference ? '最多添加 3 张参考图' : acceptsSketch ? '添加或替换参考图' : '添加参考图'}
+                  aria-label={canAddReference ? '添加参考图' : '参考图已达上限'}
                 >
                   <PictureOutlined aria-hidden="true" />
-                  <span>普通图</span>
+                  <span>参考图</span>
                 </button>
+              )}
+            </div>
+            {(isRequiresImage || supportsMultiImage || acceptsSketch) && (
                 <button
                   type="button"
                   className="chat-input-attachment-button"
@@ -888,7 +937,6 @@ export default function ChatInput() {
                   <UserOutlined aria-hidden="true" />
                   <span>姿势图</span>
                 </button>
-              </>
             )}
 
             {/* 参数设置 */}
@@ -902,13 +950,13 @@ export default function ChatInput() {
               <SettingOutlined />
             </button>
 
-            {/* 提示词助手 */}
+            {/* 扩写助手 */}
             <button
               type="button"
               className="chat-input-icon-button"
-              onClick={() => setPromptAssistantOpen(true)}
-              title="提示词助手"
-              aria-label="打开提示词助手"
+              onClick={() => setPromptExpansionOpen(true)}
+              title="扩写助手"
+              aria-label="打开扩写助手"
             >
               <BulbOutlined />
             </button>
@@ -985,7 +1033,7 @@ export default function ChatInput() {
             type="primary"
             icon={isGenerating ? <span className="chat-stop-icon" aria-hidden="true" /> : <ArrowUpOutlined />}
             onClick={handleSend}
-            disabled={isSubmitting || (!isGenerating && !!isRequiresImage && !referenceImage)}
+            disabled={isSubmitting || (!isGenerating && !!isRequiresImage && !hasReferenceImages)}
             loading={isSubmitting}
             className="chat-send-button"
             danger={isGenerating}
@@ -1004,15 +1052,13 @@ export default function ChatInput() {
         )}
       </Suspense>
 
-      <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载提示词助手...</div>}>
-        {promptAssistantOpen && (
-          <PromptAssistantModal
+      <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载扩写助手...</div>}>
+        {promptExpansionOpen && (
+          <PromptExpansionModal
             open
-            onClose={() => setPromptAssistantOpen(false)}
+            onClose={() => setPromptExpansionOpen(false)}
             onApply={handleApplyPrompt}
-            onApplyEnd={(p) => { setPromptEnd(p); message.success('尾帧描述已应用'); }}
             workflowId={currentWorkflow}
-            workflowMeta={workflowMeta}
             initialPrompt={prompt}
           />
         )}
@@ -1025,7 +1071,14 @@ export default function ChatInput() {
             open={poseWebOpen}
             onClose={() => setPoseWebOpen(false)}
             targetSlot={poseWebTargetSlot}
+            targetLabel={isMotionReference ? `动作图 ${motionReferenceImages.length + 1}` : undefined}
             onApplyImage={(base64) => {
+              if (poseSessionRef.current !== useAppStore.getState().currentSessionId) return;
+              if (isMotionReference) {
+                const images = useAppStore.getState().motionReferenceImages;
+                if (images.length < 8) setMotionReferenceImages([...images, base64]);
+                return;
+              }
               if (poseWebTargetSlot === 1) setReferenceImage(base64);
               else if (poseWebTargetSlot === 2) setReferenceImage2(base64);
               else setReferenceImage3(base64);

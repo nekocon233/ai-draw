@@ -2,20 +2,23 @@
  * API 服务方法
  */
 import client from './client';
+import { getAccessToken } from '../utils/helpers';
 import type {
   ServiceStatus,
   GeneratePromptRequest,
   GeneratePromptResponse,
+  PromptPreset,
+  PromptPresetChoices,
+  PromptPresetsResponse,
   AnalyzeImageForPromptRequest,
   AnalyzeImageForPromptResponse,
-  AnalyzeFramesForPromptRequest,
-  AnalyzeFramesForPromptResponse,
   GenerateMediaRequest,
   GenerateMediaResponse,
   UploadImageResponse,
   WorkflowsResponse,
   LastTaskInfo,
   WorkflowParameterValue,
+  LoraModelsResponse,
 } from '../types/api';
 import type { ChatSession } from '../types/models';
 
@@ -82,6 +85,7 @@ export interface ImageUpscaleBatchResponse {
 interface WorkflowDefaultsResponse {
   success: boolean;
   defaults: {
+    current_workflow_type: string;
     workflow_metadata?: Record<string, {
       parameters?: Array<{ name: string; default?: unknown }>;
     }>;
@@ -173,6 +177,10 @@ export const apiService = {
   login: (data: { username: string; password: string }): Promise<AuthResponse> =>
     client.post('/auth/login', data),
   
+  // 当前工作流适配且已安装的 LoRA
+  getLoraModels: (workflow: string): Promise<LoraModelsResponse> =>
+    client.get('/service/loras', { params: { workflow } }),
+
   // 用户配置
   getUserConfig: (): Promise<UserConfig> =>
     client.get('/config/user'),
@@ -205,7 +213,8 @@ export const apiService = {
     reference_image_2?: string | null;
     reference_image_3?: string | null;
     reference_image_end?: string | null;
-    prompt_end?: string | null;
+    motion_reference_images?: string[] | null;
+    motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
   }): Promise<{ updated: boolean }> =>
     client.patch(`/chat/messages/${messageId}`, data),
 
@@ -220,6 +229,9 @@ export const apiService = {
   
   // 会话配置
   getSessionConfig: (sessionId: string): Promise<{
+    width?: number | null;
+    height?: number | null;
+    use_original_size?: boolean | null;
     workflow: string;
     prompt: string;
     lora_prompt: string;
@@ -229,18 +241,21 @@ export const apiService = {
     reference_image: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
-    prompt_end?: string | null;
     reference_image_end?: string | null;
-    is_loop?: boolean;
-    start_frame_count?: number | null;
-    end_frame_count?: number | null;
-    frame_rate?: number | null;
-    frame_count?: number | null;
     workflow_options?: Record<string, WorkflowParameterValue> | null;
+    motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
+    motion_reference_images?: string[] | null;
+    prompt_preset?: PromptPreset | null;
+    prompt_preset_choices?: PromptPresetChoices | null;
   }> =>
     client.get(`/chat/sessions/${sessionId}/config`),
   
   updateSessionConfig: (sessionId: string, config: {
+    motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
+    motion_reference_images?: string[];
+    width?: number | null;
+    height?: number | null;
+    use_original_size?: boolean;
     workflow?: string;
     prompt?: string;
     lora_prompt?: string;
@@ -250,14 +265,10 @@ export const apiService = {
     reference_image?: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
-    prompt_end?: string | null;
     reference_image_end?: string | null;
-    is_loop?: boolean;
-    start_frame_count?: number;
-    end_frame_count?: number;
-    frame_rate?: number;
-    frame_count?: number;
     workflow_options?: Record<string, WorkflowParameterValue>;
+    prompt_preset?: PromptPreset | null;
+    prompt_preset_choices?: PromptPresetChoices;
   }): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}/config`, config),
   
@@ -266,6 +277,11 @@ export const apiService = {
     client.get('/chat/history', { params: { limit, offset, session_id: sessionId } }),
   
   saveChatMessage: (data: {
+    motion_prompt?: import('../types/api').MotionPromptSnapshot;
+    motion_reference_images?: string[];
+    width?: number;
+    height?: number;
+    use_original_size?: boolean;
     session_id: string;
     message_id: string;
     type: 'user' | 'assistant';
@@ -279,12 +295,8 @@ export const apiService = {
     reference_image_2?: string;
     reference_image_3?: string;
     reference_image_end?: string;
-    prompt_end?: string;
-    frame_rate?: number;
-    start_frame_count?: number;
-    end_frame_count?: number;
-    frame_count?: number;
     workflow_options?: Record<string, WorkflowParameterValue>;
+    prompt_preset?: PromptPreset;
   }): Promise<{ message: string }> =>
     client.post('/chat/save', data),
   
@@ -315,17 +327,16 @@ export const apiService = {
   generatePrompt: (data: GeneratePromptRequest): Promise<GeneratePromptResponse> =>
     client.post('/prompt/generate', data),
 
-  // Gemini 以图生词（分析单张图片风格/元素/动作/镜头 → 文生图提示词）
+  // LLM 以图生词（分析单张图片风格/元素/动作/镜头 → 文生图提示词）
+  analyzeMotionPrompt: (data: { reference_image: string; motion_reference_images: string[]; description: string }, signal?: AbortSignal): Promise<import('../types/api').MotionPromptSnapshot> =>
+    client.post('/prompt/analyze-motion', data, { signal }),
+
   analyzeImageForPrompt: (data: AnalyzeImageForPromptRequest): Promise<AnalyzeImageForPromptResponse> =>
     client.post('/prompt/analyze-image', data),
 
-  // Gemini 首尾帧分析 → flf2v 视频过渡提示词
-  analyzeFramesForPrompt: (data: AnalyzeFramesForPromptRequest): Promise<AnalyzeFramesForPromptResponse> =>
-    client.post('/prompt/analyze-frames', data),
-
-  // 获取姿势迁移预设提示词（与后端同源）
-  getPosePreset: (): Promise<{ prompt: string }> =>
-    client.get('/prompt/pose-preset'),
+  // 提示词预设（由服务端统一维护）
+  getPromptPresets: (): Promise<PromptPresetsResponse> =>
+    client.get('/prompt/presets'),
   
   // 媒体生成
   generateMedia: (data: GenerateMediaRequest): Promise<GenerateMediaResponse> =>
@@ -333,8 +344,8 @@ export const apiService = {
       timeout: 300000 // 5 分钟，因为生成多张图片耗时较长
     }),
 
-  stopGeneration: (): Promise<{ success: boolean; message: string }> =>
-    client.post('/media/stop'),
+  stopGeneration: (taskId?: string): Promise<{ success: boolean; message: string }> =>
+    client.post('/media/stop', null, { params: taskId ? { task_id: taskId } : undefined }),
 
   // 最近一次任务快照（断线补拉，30 分钟过期）
   getLastTask: (): Promise<{ last_task: LastTaskInfo | null }> =>
@@ -447,6 +458,24 @@ export const apiService = {
   getVideoFrameExportProgress: (progressId: string): Promise<VideoFrameExportProgress> =>
     client.get(`/media/export-progress/${progressId}`),
   
+  // Check the extension's effect, not the presence of an installed extension ID.
+  checkPoseEmbedding: async (): Promise<boolean | null> => {
+    const token = getAccessToken();
+    if (!token) return null;
+    // Read the original response headers; the shared client unwraps response.data.
+    const response = await fetch('/api/service/pose-embedding-check', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    // A login response or stale endpoint must not imply support.
+    if (data?.probe !== 'pose-embedding-v1') return null;
+    return !response.headers.has('content-security-policy')
+      && !response.headers.has('x-frame-options');
+  },
+
   // 工作流
   getWorkflows: (): Promise<WorkflowsResponse> =>
     client.get('/service/workflows'),

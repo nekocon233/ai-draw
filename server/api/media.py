@@ -1,7 +1,7 @@
 """
 媒体生成相关 API（图像 / 视频）
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import asyncio
 import base64
 import re
@@ -10,20 +10,15 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import List, Literal, Optional
-from urllib.parse import unquote, urlparse
 from PIL import Image
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.auth import get_current_user
-from server.database import get_db
-from server.models import ChatMessage, ChatSession, User
+from server.models import User
+from server.api.generation import router as generation_router
 from server.image_upscale_methods import build_upscale_method_registry
-from server.schemas import GenerateMediaRequest, GenerateMediaResponse
-from comfyui.structures.minimax_h3 import validate_minimax_h3_options
 from utils.config_loader import get_config, get_image_upscale_config, get_video_frames_config
-from utils.media_file_references import user_owns_media_path
 from utils.media_processor import ImageUpscaleValidationError, decode_upscale_png_data_url, upscale_image_lanczos
 from utils.video_frames import (
     BackgroundRemovalOptions,
@@ -41,6 +36,7 @@ from utils.video_frames import (
 )
 
 router = APIRouter(prefix="/media", tags=["媒体生成"], dependencies=[Depends(get_current_user)])
+router.include_router(generation_router)
 
 
 class BackgroundOptionsRequest(BaseModel):
@@ -147,27 +143,6 @@ def _resolve_upload_path(upload_url: str, label: str = '文件') -> Path:
     return local_path
 
 
-def _validate_reference_ownership(
-    value: Optional[str],
-    user_id: int,
-    db: Session,
-    label: str,
-) -> None:
-    """Reject local upload URLs that are not recorded as belonging to this user."""
-    if not value:
-        return
-
-    reference = value.strip()
-    if reference.startswith('data:'):
-        return
-
-    parsed = urlparse(reference)
-    path = unquote(parsed.path) if parsed.scheme in ('http', 'https') else reference
-    if not (path.startswith('/uploads/') or path.startswith('uploads/')):
-        return
-
-    if not user_owns_media_path(db, user_id, path):
-        raise HTTPException(status_code=403, detail=f'{label}不属于当前用户')
 
 
 def _background_options(request: BackgroundOptionsRequest, fallback_mode: str = 'ai') -> BackgroundRemovalOptions:
@@ -346,398 +321,6 @@ def _set_export_progress(
     }
 
 
-def _persist_assistant_message(
-    user_id: int,
-    session_id: str,
-    message_id: str,
-    images: List[str],
-    *,
-    replace_existing: bool = True,
-    source_updates: Optional[dict] = None,
-) -> Literal['persisted', 'target_missing', 'failed']:
-    """把生成结果（助手消息 + GeneratedImage 行）落库。
-
-    仅在 BackgroundTask 内调用，使用独立 DB session 避免与请求作用域冲突。
-    占位写入不会清除旧结果；新结果提交成功后才删除旧文件。
-    """
-    from server.database import SessionLocal
-    from server.models import ChatMessage, ChatSession, GeneratedImage
-    from utils.file_storage import get_file_storage
-    from utils.media_file_references import delete_unreferenced_media
-
-    db = SessionLocal()
-    file_storage = get_file_storage()
-    old_paths: list[str] = []
-    new_paths: list[str] = []
-    created_paths: list[str] = []
-    stale_reference_paths: list[str] = []
-    try:
-        session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == user_id,
-        ).first()
-        if not session:
-            return 'target_missing'
-
-        source_message_id = message_id.removesuffix('-reply')
-        source_message = db.query(ChatMessage).filter(
-            ChatMessage.user_id == user_id,
-            ChatMessage.session_id == session_id,
-            ChatMessage.message_id == source_message_id,
-            ChatMessage.type == 'user',
-        ).first()
-        if not source_message:
-            return 'target_missing'
-
-        if replace_existing and source_updates:
-            reference_fields = {
-                'reference_image',
-                'reference_image_2',
-                'reference_image_3',
-                'reference_image_end',
-            }
-            for field in (
-                'content',
-                'workflow',
-                'strength',
-                'count',
-                'lora_prompt',
-                'reference_image',
-                'reference_image_2',
-                'reference_image_3',
-                'reference_image_end',
-                'prompt_end',
-                'frame_rate',
-                'start_frame_count',
-                'end_frame_count',
-                'frame_count',
-                'workflow_options',
-            ):
-                if field in source_updates:
-                    old_value = getattr(source_message, field)
-                    if field in reference_fields and old_value and old_value != source_updates[field]:
-                        stale_reference_paths.append(old_value)
-                    setattr(source_message, field, source_updates[field])
-
-        existing = db.query(ChatMessage).filter(
-            ChatMessage.user_id == user_id,
-            ChatMessage.session_id == session_id,
-            ChatMessage.message_id == message_id,
-            ChatMessage.type == 'assistant',
-        ).first()
-
-        def _resolve_path(idx: int, img_data: str) -> str:
-            # 以 / 开头的是已落盘的视频/图片 URL（如 /uploads/video/xxx.mp4），直接存路径
-            if img_data.startswith('/'):
-                return img_data
-            # base64 数据走 file_storage 标准保存路径
-            file_path = file_storage.save_generated_image(
-                base64_data=img_data,
-                user_id=user_id,
-                message_id=message_id,
-                index=idx,
-            )
-            created_paths.append(file_path)
-            return file_path
-
-        if existing:
-            if not replace_existing:
-                return 'persisted'
-            old_paths = [image.file_path for image in existing.images]
-            for img in list(existing.images):
-                db.delete(img)
-            db.flush()
-        else:
-            chat_msg = ChatMessage(
-                session_id=session_id,
-                user_id=user_id,
-                message_id=message_id,
-                type='assistant',
-                content='',
-            )
-            db.add(chat_msg)
-            db.flush()
-
-        for idx, img_data in enumerate(images):
-            if not isinstance(img_data, str) or not img_data:
-                continue
-            try:
-                file_path = _resolve_path(idx, img_data)
-            except Exception as exc:
-                print(f"[media] 持久化生成图失败 idx={idx}: {exc}")
-                file_path = img_data
-            new_paths.append(file_path)
-            db.add(GeneratedImage(
-                message_id=message_id,
-                image_index=idx,
-                file_path=file_path,
-            ))
-        db.commit()
-        try:
-            delete_unreferenced_media(
-                db,
-                (set(old_paths) - set(new_paths)) | set(stale_reference_paths),
-            )
-        except Exception as cleanup_error:
-            print(f"[media] 清理旧媒体失败: {cleanup_error}")
-        return 'persisted'
-    except Exception as exc:
-        db.rollback()
-        for created_path in created_paths:
-            file_storage.delete_file(created_path)
-        print(f"[media] 持久化 assistant 消息失败: {exc}")
-        return 'failed'
-    finally:
-        db.close()
-
-
-def _delete_generated_files(images: List[str]) -> None:
-    from utils.file_storage import get_file_storage
-
-    file_storage = get_file_storage()
-    for image in images:
-        if isinstance(image, str):
-            file_storage.delete_file(image)
-
-
-@router.post("/generate", response_model=GenerateMediaResponse)
-async def generate_media(
-    request: GenerateMediaRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    service: AIDrawService = Depends(get_ai_draw_service),
-    db: Session = Depends(get_db),
-) -> GenerateMediaResponse:
-    """生成媒体 - 使用用户选择的工作流（立即返回，结果通过 WebSocket 推送 + 服务端落库）"""
-
-    if bool(request.message_id) != bool(request.session_id):
-        raise HTTPException(status_code=400, detail="message_id 和 session_id 必须同时提供")
-
-    if request.message_id and request.session_id:
-        session = db.query(ChatSession).filter(
-            ChatSession.session_id == request.session_id,
-            ChatSession.user_id == current_user.id,
-        ).first()
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        if not request.message_id.endswith('-reply'):
-            raise HTTPException(status_code=400, detail="助手消息 ID 格式无效")
-
-        source_message_id = request.message_id.removesuffix('-reply')
-        source_message = db.query(ChatMessage).filter(
-            ChatMessage.message_id == source_message_id,
-            ChatMessage.session_id == request.session_id,
-            ChatMessage.user_id == current_user.id,
-            ChatMessage.type == 'user',
-        ).first()
-        if not source_message:
-            raise HTTPException(status_code=400, detail="找不到对应的用户消息")
-
-    for value, label in (
-        (request.reference_image, '参考图 1'),
-        (request.reference_image_2, '参考图 2'),
-        (request.reference_image_3, '参考图 3'),
-        (request.reference_image_end, '尾帧参考图'),
-    ):
-        _validate_reference_ownership(value, current_user.id, db, label)
-
-    if request.workflow == 'minimax_h3':
-        if request.count != 1:
-            raise HTTPException(status_code=422, detail="MiniMax H3 每次仅支持生成 1 个视频")
-        try:
-            validate_minimax_h3_options(request.workflow_options)
-        except (TypeError, ValueError) as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-
-    # 服务实例是全局单任务模型；在首次 await 前占位，避免并发请求覆盖任务上下文。
-    if service.is_task_reserved or service.is_generating:
-        raise HTTPException(status_code=409, detail="已有生成任务正在运行")
-    service.is_task_reserved = True
-    service.is_generating = True
-
-    # 在调度前记录任务上下文（即使前端没传 message_id，也记录 user/workflow 便于 last_task 跟踪）
-    task_id = request.task_id or uuid.uuid4().hex
-    service.set_task_context(
-        user_id=current_user.id,
-        session_id=request.session_id,
-        message_id=request.message_id,
-        task_id=task_id,
-        workflow=request.workflow,
-        count=request.count,
-    )
-
-    async def _run_generation():
-        generation_task = asyncio.current_task()
-        service._generation_task = generation_task
-        images: List[str] = []
-        task_failed = False
-        try:
-            if service.is_generation_cancel_requested:
-                raise asyncio.CancelledError
-
-            # 新任务创建空助手占位；重新生成时保留旧结果，直到替换成功。
-            if request.message_id and request.session_id:
-                placeholder_status = 'failed'
-                for attempt in range(2):
-                    placeholder_status = await asyncio.to_thread(
-                        _persist_assistant_message,
-                        current_user.id,
-                        request.session_id,
-                        request.message_id,
-                        [],
-                        replace_existing=False,
-                    )
-                    if placeholder_status != 'failed':
-                        break
-                    if attempt == 0:
-                        await asyncio.sleep(0.25)
-                if placeholder_status != 'persisted':
-                    detail = "生成结果对应的消息已被删除" if placeholder_status == 'target_missing' else "生成任务占位写入失败"
-                    raise RuntimeError(detail)
-
-            if service.is_generation_cancel_requested:
-                raise asyncio.CancelledError
-
-            images = await service.generate_media(
-                prompt=request.prompt,
-                workflow=request.workflow,
-                strength=request.strength if request.strength is not None else 1,
-                lora_prompt=request.lora_prompt,
-                count=request.count,
-                reference_image=request.reference_image,
-                reference_image_2=request.reference_image_2,
-                reference_image_3=request.reference_image_3,
-                width=request.width,
-                height=request.height,
-                prompt_end=request.prompt_end,
-                reference_image_end=request.reference_image_end,
-                use_original_size=request.use_original_size,
-                is_loop=request.is_loop,
-                start_frame_count=request.start_frame_count,
-                end_frame_count=request.end_frame_count,
-                frame_rate=request.frame_rate,
-                frame_count=request.frame_count,
-                action=request.action,
-                view=request.view,
-                direction=request.direction,
-                kling_options=request.kling_options,
-                workflow_options=request.workflow_options,
-            )
-            # Generation is complete; a late stop must not cancel the authoritative DB commit.
-            service.is_persisting_generation = True
-            if service._generation_task is generation_task:
-                service._generation_task = None
-
-            # 落库 assistant 消息与图片（断线恢复的数据源）
-            if request.message_id and request.session_id:
-                source_updates = {
-                    'content': request.prompt,
-                    'workflow': request.workflow,
-                    'strength': request.strength,
-                    'count': request.count,
-                    'lora_prompt': request.lora_prompt,
-                    'reference_image': request.reference_image,
-                    'reference_image_2': request.reference_image_2,
-                    'reference_image_3': request.reference_image_3,
-                    'reference_image_end': request.reference_image_end,
-                    'prompt_end': request.prompt_end,
-                    'frame_rate': request.frame_rate,
-                    'start_frame_count': request.start_frame_count,
-                    'end_frame_count': request.end_frame_count,
-                    'frame_count': request.frame_count,
-                    'workflow_options': request.workflow_options,
-                }
-                persistence_status = 'failed'
-                for attempt in range(2):
-                    persistence_status = await asyncio.to_thread(
-                        _persist_assistant_message,
-                        current_user.id,
-                        request.session_id,
-                        request.message_id,
-                        images or [],
-                        source_updates=source_updates,
-                    )
-                    if persistence_status != 'failed':
-                        break
-                    if attempt == 0:
-                        await asyncio.sleep(0.25)
-                if persistence_status == 'target_missing':
-                    await asyncio.to_thread(_delete_generated_files, images or [])
-                    raise RuntimeError("生成结果对应的消息已被删除")
-                if persistence_status == 'failed':
-                    await asyncio.to_thread(_delete_generated_files, images or [])
-                    raise RuntimeError("生成结果持久化失败")
-            service._record_last_task(status='completed', images=images or [], error=None)
-        except asyncio.CancelledError:
-            task_failed = True
-            cancel_message = "生成任务已取消"
-            if images:
-                await asyncio.to_thread(_delete_generated_files, images)
-            if request.message_id and request.session_id:
-                await asyncio.to_thread(
-                    _persist_assistant_message,
-                    current_user.id,
-                    request.session_id,
-                    request.message_id,
-                    [],
-                    replace_existing=False,
-                )
-            service._record_last_task(status='error', images=[], error=cancel_message)
-            service._notify_state_change('error', cancel_message)
-        except Exception as e:
-            task_failed = True
-            error_msg = str(e)
-            # 失败时也持久化一条空 assistant 消息，避免前端历史里残留 loading 占位
-            if request.message_id and request.session_id:
-                await asyncio.to_thread(
-                    _persist_assistant_message,
-                    current_user.id,
-                    request.session_id,
-                    request.message_id,
-                    [],
-                    replace_existing=False,
-                )
-            service._record_last_task(status='error', images=[], error=error_msg)
-            service._notify_state_change('error', error_msg)
-        finally:
-            if service._generation_task is generation_task:
-                service._generation_task = None
-            service.is_persisting_generation = False
-            service.is_generating = False
-            if not task_failed:
-                service._notify_state_change('is_generating', False)
-            service.clear_task_context()
-            service.is_task_reserved = False
-
-    try:
-        background_tasks.add_task(_run_generation)
-    except BaseException:
-        service._record_last_task(status='error', images=[], error='生成任务调度失败')
-        service.is_generating = False
-        service._notify_state_change('is_generating', False)
-        service.clear_task_context()
-        service.is_task_reserved = False
-        raise
-    return GenerateMediaResponse(count=0, images=[])
-
-
-@router.get("/last-task")
-async def get_last_task(
-    current_user: User = Depends(get_current_user),
-    service: AIDrawService = Depends(get_ai_draw_service),
-) -> dict:
-    """返回当前用户最近一次任务的状态快照（用于断线补拉，30 分钟过期）。"""
-    lt = service.get_last_task(current_user.id)
-    if not lt:
-        return {'last_task': None}
-
-    status = lt.get('status')
-    finished_at = lt.get('finished_at')
-    if status == 'running':
-        return {'last_task': dict(lt)}
-    if finished_at and time.time() - finished_at < 1800:
-        return {'last_task': dict(lt)}
-    return {'last_task': None}
 
 
 @router.post("/upload-reference")
@@ -759,21 +342,6 @@ async def upload_reference_media(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail=f"图片处理失败: {str(e)}")
 
 
-@router.get("/stop")
-@router.post("/stop")
-async def stop_generation(
-    current_user: User = Depends(get_current_user),
-    service: AIDrawService = Depends(get_ai_draw_service),
-) -> dict:
-    """停止生成"""
-    if service.current_user_id is not None and service.current_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="不能停止其他用户的生成任务")
-    if service.is_persisting_generation:
-        raise HTTPException(status_code=409, detail="生成结果正在保存，无法停止")
-    if not service.is_task_reserved and not service.is_generating:
-        return {"success": True, "message": "当前没有生成任务"}
-    await service.stop_generation()
-    return {"success": True, "message": "已停止生成"}
 
 
 @router.post("/video-to-spritesheet")

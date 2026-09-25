@@ -2,7 +2,8 @@ from typing import Iterable
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
 
-from sqlalchemy import or_
+from sqlalchemy import or_, cast, Text
+import json
 from sqlalchemy.orm import Session
 
 from server.models import ChatMessage, ChatSession, GeneratedImage, ReferenceImage
@@ -89,12 +90,14 @@ def delete_unreferenced_media(db: Session, file_paths: Iterable[str]) -> None:
                 ChatMessage.reference_image_2.in_(variants),
                 ChatMessage.reference_image_3.in_(variants),
                 ChatMessage.reference_image_end.in_(variants),
+                *(cast(ChatMessage.motion_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
             )).first()
             or db.query(ChatSession.id).filter(or_(
                 ChatSession.config_reference_image.in_(variants),
                 ChatSession.config_reference_image_2.in_(variants),
                 ChatSession.config_reference_image_3.in_(variants),
                 ChatSession.config_reference_image_end.in_(variants),
+                *(cast(ChatSession.config_motion_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
             )).first()
         )
         if not referenced:

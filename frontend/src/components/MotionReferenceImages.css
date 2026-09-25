@@ -1,0 +1,14 @@
+.motion-references { margin: 8px 0; padding: 10px; border: 1px solid rgba(128,128,128,.25); border-radius: 8px; min-width: 0; }
+.motion-reference-heading, .motion-reference-upload-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.motion-reference-heading { margin-bottom: 8px; }
+.motion-reference-hint { font-size: 12px; opacity: .65; }
+.motion-reference-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 252px; overflow-y: auto; overscroll-behavior: contain; }
+.motion-reference-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border-radius: 6px; background: rgba(128,128,128,.07); font-size: 12px; }
+.motion-reference-actions { display: flex; }
+.motion-reference-upload-actions { margin-top: 8px; }
+.motion-prompt-panel { padding: 4px 2px 10px; min-width: 0; font-size: 12px; }
+.motion-prompt-panel p { margin: 4px 0; }
+.motion-prompt-details summary, .motion-prompt-history summary { cursor: pointer; margin: 6px 0; }
+.motion-prompt-details textarea { margin-bottom: 5px; }
+.motion-prompt-history { margin: 8px 0; font-size: 12px; }
+.motion-prompt-history div { white-space: pre-wrap; overflow-wrap: anywhere; }

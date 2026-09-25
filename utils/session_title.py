@@ -2,9 +2,7 @@
 import re
 from functools import lru_cache
 
-from openai import OpenAI
-
-from utils.config_loader import get_session_title_config
+from utils.llm import LanguageModel
 
 
 def fallback_session_title(content: str) -> str:
@@ -24,35 +22,19 @@ def clean_session_title(value: str, fallback: str) -> str:
 
 class SessionTitleGenerator:
     def __init__(self) -> None:
-        self.config = get_session_title_config()
-        self.client = OpenAI(
-            api_key=self.config.api_key or "not-configured",
-            base_url=self.config.base_url,
-            timeout=60.0,
-        )
+        self.llm = LanguageModel()
 
     def generate(self, content: str) -> str:
         fallback = fallback_session_title(content)
-        if not self.config.api_key:
+        if not self.llm.api_key:
             return fallback
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是会话标题生成器。根据用户的创作需求生成一个简洁中文标题，"
-                            "概括主体和任务，控制在4到10个汉字，不加引号、句号、前缀或解释。"
-                        ),
-                    },
-                    {"role": "user", "content": content[:12000]},
-                ],
-                temperature=0.2,
+            value = self.llm.complete(
+                content[:12000],
+                system="你是会话标题生成器。根据用户的创作需求生成一个简洁中文标题，概括主体和任务，控制在4到10个汉字，不加引号、句号、前缀或解释。",
                 max_tokens=40,
             )
-            value = response.choices[0].message.content or ""
             return clean_session_title(value, fallback)
         except Exception as error:
             print(f"[SessionTitle] 标题总结失败，使用本地标题: {error}")

@@ -1,0 +1,117 @@
+.pose-editor-modal :is(.ant-modal-container, .ant-modal-content) {
+  display: flex;
+  flex-direction: column;
+  max-height: 94dvh;
+  overflow: hidden;
+}
+
+.pose-editor-modal .ant-modal-header,
+.pose-editor-modal .ant-modal-footer {
+  flex-shrink: 0;
+}
+
+.pose-editor-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 78vh;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.pose-editor-install-guide {
+  flex-shrink: 0;
+  max-height: 38dvh;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.pose-editor-install-guide ol {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.pose-editor-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pose-editor-guide-heading,
+.pose-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.pose-editor-guide-heading {
+  justify-content: space-between;
+}
+
+.pose-editor-toolbar {
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+.pose-editor-toolbar [role="status"] {
+  margin-right: auto;
+  font-size: 12px;
+}
+
+.pose-editor-guide-note {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pose-editor-frame {
+  display: block;
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+.pose-editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-block: 4px;
+  text-align: left;
+}
+
+.pose-editor-capture-hint {
+  flex: 1 1 320px;
+  font-size: 12px;
+}
+
+@media (max-width: 600px) {
+  .pose-editor-modal.ant-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+  }
+
+  .pose-editor-modal :is(.ant-modal-container, .ant-modal-content) {
+    padding: 16px;
+  }
+
+  .pose-editor-install-guide {
+    padding: 10px;
+  }
+
+  .pose-editor-footer > .ant-btn {
+    width: 100%;
+  }
+}

@@ -77,18 +77,25 @@ class ChatSession(Base):
     config_lora_prompt = Column(String(255), nullable=True)
     config_strength = Column(Float, nullable=True)
     config_count = Column(Integer, nullable=True)
+    config_width = Column(Integer, nullable=True)
+    config_height = Column(Integer, nullable=True)
+    config_use_original_size = Column(Boolean, nullable=True)
     config_images_per_row = Column(Integer, default=4)
     config_reference_image = Column(Text, nullable=True)  # base64 编码的参考图
-    config_reference_image_2 = Column(Text, nullable=True)  # i2i 第 2 张参考图
-    config_reference_image_3 = Column(Text, nullable=True)  # i2i 第 3 张参考图
-    config_prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
-    config_reference_image_end = Column(Text, nullable=True)  # flf2v 结束帧图片
-    config_is_loop = Column(Boolean, default=False, nullable=True)          # flf2v 循环
-    config_start_frame_count = Column(Integer, nullable=True)               # flf2v 起始帧长度
-    config_end_frame_count = Column(Integer, nullable=True)                 # flf2v 结束帧长度
-    config_frame_rate = Column(Float, nullable=True)                        # flf2v 帧率
-    config_frame_count = Column(Integer, nullable=True)                     # i2v 总帧数
+    config_reference_image_2 = Column(Text, nullable=True)  # 第 2 张参考图
+    config_reference_image_3 = Column(Text, nullable=True)  # 第 3 张参考图
+    config_prompt_end = Column(Text, nullable=True)          # 历史视频字段（只读）：结束帧提示词
+    config_reference_image_end = Column(Text, nullable=True)  # 视频尾帧图片
+    config_is_loop = Column(Boolean, default=False, nullable=True)          # 历史视频字段（只读）：循环
+    config_start_frame_count = Column(Integer, nullable=True)               # 历史视频字段（只读）：起始帧长度
+    config_end_frame_count = Column(Integer, nullable=True)                 # 历史视频字段（只读）：结束帧长度
+    config_frame_rate = Column(Float, nullable=True)                        # 历史视频字段（只读）：帧率
+    config_frame_count = Column(Integer, nullable=True)                     # 历史视频字段（只读）：总帧数
     config_workflow_options = Column(JSON, nullable=True)                   # 元数据驱动的工作流参数
+    config_prompt_preset = Column(JSON, nullable=True)                      # 输入框上方所选预设的快照
+    config_prompt_preset_choices = Column(JSON, nullable=True)              # 工作流 -> 快照；null 表示手动取消
+    config_motion_reference_images = Column(JSON, nullable=True)           # 有序动作参考图
+    config_motion_prompt = Column(JSON, nullable=True)                     # 看图分析快照，原描述独立保留
     
     # 关系
     user = relationship("User", back_populates="sessions")
@@ -110,16 +117,22 @@ class ChatMessage(Base):
     strength = Column(Float)
     count = Column(Integer)
     lora_prompt = Column(String(255))
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    use_original_size = Column(Boolean, nullable=True)
     reference_image = Column(Text, nullable=True)
-    reference_image_2 = Column(Text, nullable=True)  # i2i 第 2 张参考图
-    reference_image_3 = Column(Text, nullable=True)  # i2i 第 3 张参考图
+    reference_image_2 = Column(Text, nullable=True)  # 第 2 张参考图
+    reference_image_3 = Column(Text, nullable=True)  # 第 3 张参考图
     reference_image_end = Column(Text, nullable=True)
-    prompt_end = Column(Text, nullable=True)          # flf2v 结束帧提示词
-    frame_rate = Column(Float, nullable=True)          # flf2v 帧率
-    start_frame_count = Column(Integer, nullable=True)  # flf2v 起始帧长度
-    end_frame_count = Column(Integer, nullable=True)    # flf2v 结束帧长度
-    frame_count = Column(Integer, nullable=True)        # i2v 总帧数
+    prompt_end = Column(Text, nullable=True)          # 历史视频字段（只读）：结束帧提示词
+    frame_rate = Column(Float, nullable=True)          # 历史视频字段（只读）：帧率
+    start_frame_count = Column(Integer, nullable=True)  # 历史视频字段（只读）：起始帧长度
+    end_frame_count = Column(Integer, nullable=True)    # 历史视频字段（只读）：结束帧长度
+    frame_count = Column(Integer, nullable=True)        # 历史视频字段（只读）：总帧数
     workflow_options = Column(JSON, nullable=True)      # 元数据驱动的工作流参数
+    prompt_preset = Column(JSON, nullable=True)         # 所选预设快照；content 只存用户描述
+    motion_reference_images = Column(JSON, nullable=True)  # 与本轮生成绑定的动作顺序
+    motion_prompt = Column(JSON, nullable=True)
     
     created_at = Column(DateTime, default=datetime.now, index=True)
     
