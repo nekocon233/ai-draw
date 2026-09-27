@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
@@ -14,7 +14,7 @@ from server.auth import get_current_user
 from server.schemas import PromptPreset, MotionPromptSnapshot
 from utils.motion_prompt import matching_motion_prompt
 from utils.file_storage import get_file_storage
-from utils.media_file_references import delete_unreferenced_media
+from utils.media_file_references import delete_unreferenced_media, input_draft_media_paths
 from utils.session_title import get_session_title_generator
 
 router = APIRouter(prefix="/chat")
@@ -50,6 +50,20 @@ class SessionResponse(BaseModel):
     message_count: int
     config: Optional[dict] = None  # 会话配置
 
+class InputDraft(BaseModel):
+    """生图或生视频输入栏的一套内容；切到另一类生成方式时原样保留。"""
+    prompt: str = ""
+    reference_image: Optional[str] = None
+    reference_image_2: Optional[str] = None
+    reference_image_3: Optional[str] = None
+    reference_image_end: Optional[str] = None
+    motion_reference_images: List[str] = Field(default_factory=list, max_length=8)
+    motion_prompt: Optional[MotionPromptSnapshot] = None
+    # 当前生成方式放不下的图片，切回能放下的方式时恢复
+    parked_images: List[str] = Field(default_factory=list, max_length=8)
+    parked_end_image: Optional[str] = None
+
+
 class SessionConfigRequest(BaseModel):
     """更新会话配置请求"""
     workflow: Optional[str] = None
@@ -70,6 +84,8 @@ class SessionConfigRequest(BaseModel):
     prompt_preset_choices: Optional[dict[str, Optional[PromptPreset]]] = Field(default=None, max_length=32)
     motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
     motion_prompt: Optional[MotionPromptSnapshot] = None
+    # image / video 两类生成方式各自的输入栏；当前使用的那一类同时写在上面的字段里
+    input_drafts: Optional[dict[Literal["image", "video"], InputDraft]] = None
 
 # ============ 会话管理 API ============
 
@@ -241,6 +257,7 @@ def delete_session(
     # 删除会话（级联删除所有消息和图片）
     file_paths = _stored_media_paths(session.messages)
     file_paths.extend(session.config_motion_reference_images or [])
+    file_paths.extend(input_draft_media_paths(session.config_input_drafts))
     file_paths.extend(filter(None, (
         session.config_reference_image,
         session.config_reference_image_2,
@@ -383,7 +400,16 @@ def update_session_config(
             old_value = getattr(session, model_field)
             if old_value and old_value != update_data[request_field]:
                 stale_reference_paths.append(old_value)
-    
+    if 'input_drafts' in update_data:
+        from server.api.generation import _validate_reference_ownership
+        drafts = update_data['input_drafts'] or None
+        draft_paths = input_draft_media_paths(drafts)
+        for image in draft_paths:
+            _validate_reference_ownership(image, current_user.id, db, '输入栏图片')
+        # Images moved between the live fields and a draft stay referenced; cleanup rechecks after commit.
+        stale_reference_paths.extend(set(input_draft_media_paths(session.config_input_drafts)) - set(draft_paths))
+        session.config_input_drafts = drafts
+
     if 'workflow' in update_data:
         session.config_workflow = update_data['workflow']
     if 'prompt' in update_data:
@@ -479,6 +505,7 @@ def get_session_config(
         "prompt_preset_choices": session.config_prompt_preset_choices,
         "motion_reference_images": session.config_motion_reference_images,
         "motion_prompt": session.config_motion_prompt,
+        "input_drafts": session.config_input_drafts,
     }
 
 

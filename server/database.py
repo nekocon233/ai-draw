@@ -68,6 +68,10 @@ def init_db():
                     "ADD COLUMN IF NOT EXISTS config_prompt_preset_choices JSON"
                 ))
                 conn.execute(text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN IF NOT EXISTS config_input_drafts JSON"
+                ))
+                conn.execute(text(
                     "ALTER TABLE chat_messages "
                     "ADD COLUMN IF NOT EXISTS prompt_preset JSON"
                 ))

@@ -27,6 +27,7 @@ import { motionPromptSource, resolveMotionPrompt } from '../utils/motionPrompt';
 import { carryReferenceImages, compactReferenceImages, getImageGenerationSettings, getGenerationCount, getWorkflowOptions, NO_PARKED_REFERENCES, resolveAvailableWorkflow, restoreWorkflowSelection, getWorkflowMethodKey, rememberWorkflowMethod, resolveInputWorkflow, resolveInputLora, type ParkedReferences } from '../utils/workflowOptions';
 import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
 import { getMotionReferenceError, MAX_MOTION_REFERENCES } from '../utils/motionReferences';
+import { captureComposer, fromApiInputDrafts, inputGroupOf, switchComposer, toApiInputDrafts, type ComposerDrafts } from '../utils/composerDrafts';
 
 
 export interface GenerationSettingsDraft {
@@ -92,6 +93,9 @@ export interface AppState extends GenerationSlice {
 
   // 目标方式放不下的参考图（如文生图、单图视频）：切回可容纳的方式时自动回到输入栏
   parkedReferences: ParkedReferences;
+
+  // 生图 / 生视频各一套输入栏：另一类的描述、图片与暂存图保存在这里，切回时恢复
+  inputDrafts: ComposerDrafts;
 
   // 各生成方式记住的生成设置（切换方式时输入栏不变，仅设置按方式恢复）
   workflowSettingsStash: Record<string, {
@@ -173,11 +177,18 @@ export const buildWorkflowTransition = (state: AppState, workflow: string): Part
   workflow = resolveAvailableWorkflow(workflow, state.availableWorkflows);
   const sourceMethod = getWorkflowMethodKey(state.currentWorkflow, state.availableWorkflows);
   const targetMethod = getWorkflowMethodKey(workflow, state.availableWorkflows);
-  // 切换生成方式不改写输入栏：文字原样保留，参考图能放下就带走，放不下的先暂存。
-  const composer = [state.referenceImage, state.referenceImage2, state.referenceImage3];
+  // 生图与生视频各用一套输入栏：跨类切换时存下当前输入，换回目标类上次的输入。
+  // 同一类里切换不改写输入栏：文字原样保留，参考图能放下就带走，放不下的先暂存。
+  const currentMeta = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
+  const requestedMeta = state.availableWorkflows.find(item => item.key === workflow);
+  const switched = currentMeta && requestedMeta
+    ? switchComposer(captureComposer(state), state.inputDrafts, inputGroupOf(currentMeta), inputGroupOf(requestedMeta))
+    : { composer: captureComposer(state), drafts: state.inputDrafts };
+  const source = switched.composer;
+  const composer = [source.referenceImage, source.referenceImage2, source.referenceImage3];
   const carryInto = (key: string) => carryReferenceImages(
     state.availableWorkflows.find(item => item.key === key),
-    composer, state.referenceImageEnd, state.parkedReferences);
+    composer, source.referenceImageEnd, source.parkedReferences);
   workflow = resolveInputWorkflow(workflow, state.availableWorkflows, carryInto(workflow).images);
   const workflowMeta = state.availableWorkflows.find(item => item.key === workflow);
   if (!workflowMeta) return { currentWorkflow: workflow };
@@ -187,12 +198,15 @@ export const buildWorkflowTransition = (state: AppState, workflow: string): Part
     ...resolveWorkflowPromptPreset(workflowMeta, state.availablePromptPresets, state.promptPresetChoices, state.promptPreset),
     currentWorkflow: workflow,
     useOriginalSize: true,
+    prompt: source.prompt,
     referenceImage: carried.images[0],
-    motionPrompt: carried.images[0] === state.referenceImage ? state.motionPrompt : null,
+    motionPrompt: carried.images[0] === source.referenceImage ? source.motionPrompt : null,
     referenceImage2: carried.images[1],
     referenceImage3: carried.images[2],
     referenceImageEnd: carried.endImage,
+    motionReferenceImages: source.motionReferenceImages,
     parkedReferences: carried.parked,
+    inputDrafts: switched.drafts,
   };
   // 提示词原样保留：多图方式容量相同，带走的图片编号不变，暂存的图片回来时编号也回到原位。
   const parameterNames = new Set(workflowMeta.parameters.map(param => param.name));
@@ -309,6 +323,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
   motionPrompt: null,
   workflowSettingsStash: {},
   parkedReferences: NO_PARKED_REFERENCES,
+  inputDrafts: {},
   chatHistory: [],
   hasEarlierMessages: false,
   isLoadingEarlierMessages: false,
@@ -981,6 +996,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       chatHistory: [],
       motionReferenceImages: [],
       motionPrompt: null,
+      parkedReferences: NO_PARKED_REFERENCES,
+      inputDrafts: {},
       hasEarlierMessages: false,
       loading: false,
       error: null,
@@ -1306,6 +1323,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           promptPresetChoices: {},
           workflowSettingsStash: {},
           parkedReferences: NO_PARKED_REFERENCES,
+          inputDrafts: {},
         });
         get().syncPromptPreset();
         
@@ -1339,6 +1357,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
         promptPresetChoices: {},
         workflowSettingsStash: {},
         parkedReferences: NO_PARKED_REFERENCES,
+        inputDrafts: {},
       });
       get().syncPromptPreset();
       
@@ -1356,7 +1375,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       if (otherSessions.length > 0) {
         await state.switchSession(otherSessions[0].id);
       } else {
-        set({ currentSessionId: null, chatHistory: [], hasEarlierMessages: false, motionReferenceImages: [], motionPrompt: null });
+        set({ currentSessionId: null, chatHistory: [], hasEarlierMessages: false, motionReferenceImages: [], motionPrompt: null,
+          parkedReferences: NO_PARKED_REFERENCES, inputDrafts: {} });
       }
     }
     
@@ -1502,7 +1522,13 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     const state = get();
     if (!state.currentSessionId) return;
     const sessionId = state.currentSessionId;
-    
+    const activeMeta = state.availableWorkflows.find(workflow => workflow.key === state.currentWorkflow);
+    const motionPrompt = (() => {
+      const snapshot = resolveMotionPrompt(state.motionPrompt, state.chatHistory,
+        motionPromptSource(state.referenceImage, state.motionReferenceImages, state.prompt, state.promptPreset));
+      return snapshot?.prompt.trim() ? snapshot : null;
+    })();
+
     const config = {
       workflow: state.currentWorkflow,
       prompt: state.prompt,
@@ -1518,17 +1544,14 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       reference_image_3: state.referenceImage3,
       reference_image_end: state.referenceImageEnd,
       motion_reference_images: [...state.motionReferenceImages],
-      motion_prompt: (() => {
-        const snapshot = resolveMotionPrompt(state.motionPrompt, state.chatHistory,
-          motionPromptSource(state.referenceImage, state.motionReferenceImages, state.prompt, state.promptPreset));
-        return snapshot?.prompt.trim() ? snapshot : null;
-      })(),
-      workflow_options: getWorkflowOptions(
-        state.availableWorkflows.find(workflow => workflow.key === state.currentWorkflow),
-        state.selectOptions,
-      ),
+      motion_prompt: motionPrompt,
+      workflow_options: getWorkflowOptions(activeMeta, state.selectOptions),
       prompt_preset: state.promptPreset,
       prompt_preset_choices: state.promptPresetChoices,
+      // 两套输入一起保存；元数据未就绪时不发送，避免把当前输入归错类别
+      input_drafts: activeMeta
+        ? toApiInputDrafts(state.inputDrafts, inputGroupOf(activeMeta), { ...captureComposer(state), motionPrompt })
+        : undefined,
     };
     
     const persist = () => {
@@ -1586,8 +1609,12 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       try {
         const config = await apiService.getSessionConfig(sessionId);
         if (get().currentSessionId !== sessionId || sequence !== sessionConfigLoadSequence) return;
+        const selection = restoreWorkflowSelection(config.workflow, config.lora_prompt, get().availableWorkflows);
+        // 当前这一类以普通字段为准，镜像里只取暂存图；另一类的草稿切换时才恢复。
+        const inputDrafts = fromApiInputDrafts(config.input_drafts);
+        const activeMeta = get().availableWorkflows.find(item => item.key === selection.currentWorkflow);
         set({
-          ...restoreWorkflowSelection(config.workflow, config.lora_prompt, get().availableWorkflows),
+          ...selection,
           prompt: config.prompt ?? DEFAULT_CONFIG.PROMPT,
           strength: config.strength ?? DEFAULT_CONFIG.STRENGTH,
           count: config.count ?? DEFAULT_CONFIG.COUNT,
@@ -1605,7 +1632,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           promptPreset: config.prompt_preset ?? null,
           promptPresetChoices: restorePromptPresetChoices(config.workflow, config.prompt_preset, config.prompt_preset_choices),
           workflowSettingsStash: {},
-          parkedReferences: NO_PARKED_REFERENCES,
+          parkedReferences: (activeMeta && inputDrafts[inputGroupOf(activeMeta)]?.parkedReferences) || NO_PARKED_REFERENCES,
+          inputDrafts,
         });
         get().syncInputWorkflow();
       } catch (error) {
@@ -1633,6 +1661,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           promptPresetChoices: {},
           workflowSettingsStash: {},
           parkedReferences: NO_PARKED_REFERENCES,
+          inputDrafts: {},
         });
       }
     } else {
@@ -1660,6 +1689,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           promptPresetChoices: restorePromptPresetChoices(config.workflow, config.promptPreset, config.promptPresetChoices),
           workflowSettingsStash: {},
           parkedReferences: NO_PARKED_REFERENCES,
+          inputDrafts: {},
         });
         get().syncInputWorkflow();
       } else {

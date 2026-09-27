@@ -60,7 +60,8 @@ flowchart LR
 - `features/generation/events.ts` 是可脱离 React 测试的事件处理器，依赖窄状态接口，过滤旧任务和无归属事件。
 - `features/generation/slice.ts` 集中管理开始、结束、停止和结果补拉。revision 防止迟到的旧请求覆盖新任务状态。
 - 聊天消息类型统一使用 `types/models.ts`；旧 `types/store.ts` 转为活动 store 类型的兼容导出。
-- `buildWorkflowTransition` 只调整与生成方式相关的参数：切换方式不改写输入栏的提示词、参考图和首尾帧。目标方式放不下的参考图按 `utils/workflowOptions.ts` 的 `carryReferenceImages` 暂存到 `parkedReferences`，换回可容纳的方式时按原顺序回到输入栏；LoRA 和尺寸仍按方式记忆在 `workflowSettingsStash`。
+- 生图与生视频（按元数据 `output_type` 区分）各用一套输入栏。跨类切换时，`buildWorkflowTransition` 用 `utils/composerDrafts.ts` 把当前的描述、参考图、首尾帧、动作图、看图分析快照和暂存图存进 `inputDrafts`，换回目标类上次的输入（首次为空）。两套输入连同当前一类的镜像一起保存在会话 `config_input_drafts`，刷新或换设备后都能恢复；草稿里的图片与输入栏图片一样校验归属、不被清理，删除会话时一并删除。
+- `buildWorkflowTransition` 在同一类里只调整与生成方式相关的参数：切换方式不改写输入栏的提示词、参考图和首尾帧。目标方式放不下的参考图按 `utils/workflowOptions.ts` 的 `carryReferenceImages` 暂存到 `parkedReferences`，换回可容纳的方式时按原顺序回到输入栏；LoRA 和尺寸仍按方式记忆在 `workflowSettingsStash`。
 - 帧编辑、撤销重做和导出交互保持原有实现。
 
 ## 设计原则的落点

@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons';
 import { apiService } from '../api/services';
 import { useAppStore } from '../stores/appStore';
+import { inputGroupOf } from '../utils/composerDrafts';
 import { getImageMentionError, getPresetWorkflowBlocker, supportsImageMentions } from '../utils/imageMentions';
 import { readExpansionDraft, writeExpansionDraft } from '../utils/promptExpansionDrafts';
 import './PromptExpansionModal.css';
@@ -73,9 +74,12 @@ function PromptExpansionPanel({
   onClose: () => void;
 }) {
   const sessionId = useAppStore(state => state.currentSessionId) ?? 'new';
+  const workflowMeta = useAppStore(state => state.availableWorkflows.find(item => item.key === workflowId));
+  // 生图与生视频的输入各自独立，扩写草稿也分开保存
+  const group = inputGroupOf(workflowMeta);
   const sourceId = useId();
   // 已保存的原始描述不会被输入框（常为已应用的扩写结果）覆盖，需要时手动点按钮替换
-  const [savedDraft] = useState(() => readExpansionDraft(sessionId));
+  const [savedDraft] = useState(() => readExpansionDraft(sessionId, group));
   const [description, setDescription] = useState(savedDraft?.source ?? inputPrompt);
   const [generatedPrompt, setGeneratedPrompt] = useState(savedDraft?.result ?? '');
   const [loading, setLoading] = useState(false);
@@ -84,8 +88,8 @@ function PromptExpansionPanel({
   const canImportInput = inputPrompt.trim() !== '' && inputPrompt.trim() !== description.trim();
 
   useEffect(() => {
-    if (persisting.current) writeExpansionDraft(sessionId, description, generatedPrompt);
-  }, [sessionId, description, generatedPrompt]);
+    if (persisting.current) writeExpansionDraft(sessionId, group, description, generatedPrompt);
+  }, [sessionId, group, description, generatedPrompt]);
 
   const editDescription = (value: string) => {
     persisting.current = true;
@@ -97,7 +101,6 @@ function PromptExpansionPanel({
     setGeneratedPrompt(value);
   };
   const promptPreset = useAppStore(state => state.promptPreset);
-  const workflowMeta = useAppStore(state => state.availableWorkflows.find(item => item.key === workflowId));
   // 适用的预设只作为只读上下文：扩写只改写描述，生成时后端再拼接一次预设
   const contextPreset = promptPreset && !getPresetWorkflowBlocker(promptPreset, workflowMeta) ? promptPreset : null;
 

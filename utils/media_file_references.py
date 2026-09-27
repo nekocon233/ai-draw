@@ -22,6 +22,23 @@ USER_SCOPED_ROOTS = {
 }
 
 
+INPUT_DRAFT_IMAGE_FIELDS = ('reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end', 'parked_end_image')
+INPUT_DRAFT_IMAGE_LISTS = ('motion_reference_images', 'parked_images')
+
+
+def input_draft_media_paths(drafts) -> list[str]:
+    """All images kept in a session's per-output-type composer drafts, including parked ones."""
+    paths = []
+    for draft in (drafts or {}).values() if isinstance(drafts, dict) else ():
+        if not isinstance(draft, dict):
+            continue
+        paths.extend(draft.get(field) for field in INPUT_DRAFT_IMAGE_FIELDS)
+        for field in INPUT_DRAFT_IMAGE_LISTS:
+            values = draft.get(field)
+            paths.extend(values if isinstance(values, list) else ())
+    return [path for path in paths if isinstance(path, str) and path]
+
+
 def _relative_storage_path(file_path: str) -> str:
     parsed = urlparse(file_path)
     path = unquote(parsed.path) if parsed.scheme in ('http', 'https') else file_path
@@ -98,6 +115,7 @@ def delete_unreferenced_media(db: Session, file_paths: Iterable[str]) -> None:
                 ChatSession.config_reference_image_3.in_(variants),
                 ChatSession.config_reference_image_end.in_(variants),
                 *(cast(ChatSession.config_motion_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
+                *(cast(ChatSession.config_input_drafts, Text).contains(json.dumps(value), autoescape=True) for value in variants),
             )).first()
         )
         if not referenced:

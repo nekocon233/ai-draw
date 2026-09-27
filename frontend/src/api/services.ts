@@ -247,6 +247,7 @@ export const apiService = {
     motion_reference_images?: string[] | null;
     prompt_preset?: PromptPreset | null;
     prompt_preset_choices?: PromptPresetChoices | null;
+    input_drafts?: import('../utils/composerDrafts').ApiInputDrafts | null;
   }> =>
     client.get(`/chat/sessions/${sessionId}/config`),
   
@@ -269,6 +270,7 @@ export const apiService = {
     workflow_options?: Record<string, WorkflowParameterValue>;
     prompt_preset?: PromptPreset | null;
     prompt_preset_choices?: PromptPresetChoices;
+    input_drafts?: import('../utils/composerDrafts').ApiInputDrafts;
   }): Promise<{ message: string }> =>
     client.put(`/chat/sessions/${sessionId}/config`, config),
   

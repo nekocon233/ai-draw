@@ -96,7 +96,8 @@ class ChatSession(Base):
     config_prompt_preset_choices = Column(JSON, nullable=True)              # 工作流 -> 快照；null 表示手动取消
     config_motion_reference_images = Column(JSON, nullable=True)           # 有序动作参考图
     config_motion_prompt = Column(JSON, nullable=True)                     # 看图分析快照，原描述独立保留
-    
+    config_input_drafts = Column(JSON, nullable=True)                      # 生图 / 生视频各自的输入栏内容
+
     # 关系
     user = relationship("User", back_populates="sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")

@@ -106,6 +106,35 @@ class GenerationIntegrationTests(unittest.TestCase):
             self.assertEqual(get_session_config('session-a', user, db)['motion_reference_images'], [])
         self.storage.delete_file.assert_called_once_with(images[0])
 
+    def test_input_drafts_keep_each_output_type_and_protect_its_media(self):
+        from fastapi import HTTPException
+        from server.api.session import InputDraft, SessionConfigRequest, delete_session, get_session_config, update_session_config
+        user = SimpleNamespace(id=1, username='owner')
+        sketch, start, parked = '/uploads/reference/1/sketch.png', '/uploads/reference/1/start.png', '/uploads/reference/1/end.png'
+        with self.sessions() as db:
+            update_session_config('session-a', SessionConfigRequest(prompt='画一个女孩', reference_image=sketch), user, db)
+            # Switching to video moves the image composer into its draft within the same request.
+            update_session_config('session-a', SessionConfigRequest(prompt='她转身挥手', reference_image=start, input_drafts={
+                'image': InputDraft(prompt='画一个女孩', reference_image=sketch),
+                'video': InputDraft(prompt='她转身挥手', reference_image=start, parked_end_image=parked),
+            }), user, db)
+            self.storage.delete_file.assert_not_called()
+            drafts = get_session_config('session-a', user, db)['input_drafts']
+            self.assertEqual((drafts['image']['prompt'], drafts['image']['reference_image']), ('画一个女孩', sketch))
+            self.assertEqual(drafts['video']['parked_end_image'], parked)
+            with self.assertRaises(HTTPException):
+                update_session_config('session-a', SessionConfigRequest(
+                    input_drafts={'image': InputDraft(reference_image='/uploads/reference/2/foreign.png')}), user, db)
+            # Dropping the image draft releases only its now-unreferenced file.
+            update_session_config('session-a', SessionConfigRequest(input_drafts={
+                'video': InputDraft(prompt='她转身挥手', reference_image=start, parked_end_image=parked),
+            }), user, db)
+            self.storage.delete_file.assert_called_once_with(sketch)
+            self.storage.delete_file.reset_mock()
+            delete_session('session-a', user, db)
+        self.assertEqual({call.args[0] for call in self.storage.delete_file.call_args_list},
+                         {start, parked, '/uploads/generated/1/old.png'})
+
     def test_motion_prompt_snapshot_persists_and_input_changes_invalidate_it(self):
         from server.api.session import SessionConfigRequest, get_session_config, update_session_config, _serialize_message
         from utils.motion_prompt import motion_prompt_input_hash
