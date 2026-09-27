@@ -403,14 +403,7 @@
 
   .chat-input-buttons {
     gap: 4px;
-    flex-wrap: wrap;
-  }
-
-  /* 按钮行左侧的按钮组自动换行 */
-  .chat-input-buttons > div:first-child {
-    flex-wrap: wrap;
-    gap: 4px;
-    row-gap: 6px;
+    flex-wrap: nowrap;
   }
 
   /* 帧卡片在手机上缩小一点 */
@@ -841,20 +834,32 @@
     padding-bottom: 2px;
   }
 
+  /* 工具栏始终一行：发送按钮固定在右侧，工具放不下时横向滑动而不换行 */
   .chat-input-buttons {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 44px;
-    align-items: end;
+    align-items: center;
     gap: 8px;
   }
 
   .chat-input-tools {
     gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* 给焦点框和阴影留出位置，避免被滚动区域裁掉 */
+    margin: -3px;
+    padding: 3px;
+  }
+
+  .chat-input-tools::-webkit-scrollbar {
+    display: none;
   }
 
   .chat-input-tools .workflow-select {
-    flex: 1 1 180px;
-    min-width: 140px !important;
+    flex: 0 0 auto;
+    min-width: 0 !important;
     max-width: none !important;
   }
 
@@ -891,6 +896,58 @@
   .keyframe-frame-card-remove {
     width: 32px;
     height: 32px;
+  }
+}
+
+/* 手机：参考图、姿势图只显示图标，工作流只显示类别名，工具栏在一行内放下 */
+@media (max-width: 600px) {
+  .chat-input-buttons {
+    grid-template-columns: minmax(0, 1fr) 40px;
+    gap: 6px;
+  }
+
+  .chat-input-icon-button,
+  .chat-input-attachment-button {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+  }
+
+  .chat-send-button {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  .chat-input-attachment-button {
+    padding: 0;
+    border-radius: 50%;
+    font-size: 18px;
+  }
+
+  .chat-input-attachment-button > span:not(.anticon) {
+    display: none;
+  }
+
+  .workflow-select.ant-select {
+    padding: 4px 8px;
+  }
+
+  .workflow-select-label-icon {
+    display: none;
+  }
+}
+
+/* 更窄的屏幕：工作流只显示类别图标 */
+@media (max-width: 379px) {
+  .workflow-select-label-icon {
+    display: inline-flex;
+  }
+
+  .workflow-select-label-text {
+    display: none;
   }
 }
 .generation-stage-progress {

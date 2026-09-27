@@ -26,6 +26,7 @@ import PromptPresetQuickSelect from './PromptPresetQuickSelect';
 import MotionReferenceImages from './MotionReferenceImages';
 import { motionPromptSource, motionPromptSourceKey, rebindMotionPrompt, resolveMotionPrompt } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
+import { placeholderAutoSize } from '../utils/placeholderAutoSize';
 import './ChatInput.css';
 
 const SettingsModal = lazy(() => import('./SettingsModal'));
@@ -190,6 +191,7 @@ export default function ChatInput() {
   const presetIssue = promptPreset
     ? getPresetBlocker(promptPreset, workflowMeta, [referenceImage, referenceImage2, referenceImage3], referenceImageEnd, motionReferenceImages) : null;
   const presetPlaceholder = promptPreset ? (promptPreset.hint || '补充具体要求…') : undefined;
+  const framePromptPlaceholder = presetPlaceholder ?? '描述镜头、动作、对白、音效与配乐...';
 
   // 下拉分组：同 category 的工作流折叠为一项。
   const groupedOptions = (() => {
@@ -787,10 +789,10 @@ export default function ChatInput() {
                   ref={textAreaRef}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={presetPlaceholder ?? '描述镜头、动作、对白、音效与配乐...'}
+                  placeholder={framePromptPlaceholder}
                   aria-label="音视频描述"
                   className="chat-textarea"
-                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  autoSize={placeholderAutoSize({ minRows: 2, maxRows: 4 }, framePromptPlaceholder)}
                   onPressEnter={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();

@@ -2,6 +2,7 @@ import { forwardRef, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Input, Popover, theme } from 'antd';
 import type { TextAreaProps, TextAreaRef } from 'antd/es/input/TextArea';
 import { findImageMentionQuery, getImageMentionError, insertImageMention } from '../utils/imageMentions';
+import { placeholderAutoSize } from '../utils/placeholderAutoSize';
 import './ImageMentionInput.css';
 
 interface ImageMentionInputProps extends Omit<TextAreaProps, 'value' | 'onChange'> {
@@ -86,6 +87,7 @@ const ImageMentionInput = forwardRef<TextAreaRef, ImageMentionInputProps>(functi
         <div className="image-mention-anchor">
         <Input.TextArea
           {...props}
+          autoSize={placeholderAutoSize(props.autoSize, props.placeholder)}
           ref={node => {
             inputRef.current = node;
             if (typeof ref === 'function') ref(node);

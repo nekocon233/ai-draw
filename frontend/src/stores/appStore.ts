@@ -97,6 +97,9 @@ export interface AppState extends GenerationSlice {
   // 生图 / 生视频各一套输入栏：另一类的描述、图片与暂存图保存在这里，切回时恢复
   inputDrafts: ComposerDrafts;
 
+  // 用户发送一轮后递增：结果区据此滚到底部，不论之前是否停在底部
+  scrollToLatestRequest: number;
+
   // 各生成方式记住的生成设置（切换方式时输入栏不变，仅设置按方式恢复）
   workflowSettingsStash: Record<string, {
     loraPrompt: string;   // 工作流独立 LoRA prompt
@@ -324,6 +327,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
   workflowSettingsStash: {},
   parkedReferences: NO_PARKED_REFERENCES,
   inputDrafts: {},
+  scrollToLatestRequest: 0,
   chatHistory: [],
   hasEarlierMessages: false,
   isLoadingEarlierMessages: false,
@@ -622,6 +626,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       return { 
         chatHistory: newHistory,
         sessions: updatedSessions,
+        scrollToLatestRequest: state.scrollToLatestRequest + 1,
       };
     });
     

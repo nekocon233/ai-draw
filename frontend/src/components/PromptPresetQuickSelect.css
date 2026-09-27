@@ -38,6 +38,13 @@
   min-width: 0;
 }
 
+/* 主色接近黑色，默认选中底色会盖住文字；与工作流下拉的选中样式保持一致 */
+.prompt-preset-quick-menu .ant-dropdown-menu-item-selected,
+.prompt-preset-quick-menu .ant-dropdown-menu-item-selected:hover {
+  background: color-mix(in srgb, var(--control-accent) 9%, var(--bg-primary)) !important;
+  color: var(--text-primary) !important;
+}
+
 .prompt-preset-quick-option {
   display: flex;
   flex-direction: column;
@@ -76,5 +83,12 @@
     min-width: 34px;
     height: 34px;
     min-height: 34px;
+  }
+}
+
+/* 手机上按钮靠右，菜单会被推到屏幕边缘；留出右侧间距 */
+@media (max-width: 600px) {
+  .prompt-preset-quick-menu {
+    margin-inline-end: 12px !important;
   }
 }

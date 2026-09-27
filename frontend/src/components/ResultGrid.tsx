@@ -35,7 +35,7 @@ function normalizeEditReferences(content: string, images: EditReferences, mentio
 }
 
 export default function ResultGrid() {
-  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia } = useAppStore(useShallow(state => ({
+  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia, scrollToLatestRequest } = useAppStore(useShallow(state => ({
     chatHistory: state.chatHistory,
     currentSessionId: state.currentSessionId,
     currentWorkflow: state.currentWorkflow,
@@ -48,6 +48,7 @@ export default function ResultGrid() {
     deleteChatMessage: state.deleteChatMessage,
     editAndRegenerateMessage: state.editAndRegenerateMessage,
     appendChatMedia: state.appendChatMedia,
+    scrollToLatestRequest: state.scrollToLatestRequest,
   })));
   const activeWorkflow = availableWorkflows.find(item => item.key === currentWorkflow);
   const acceptsReferenceImage = activeWorkflow?.requires_image || activeWorkflow?.requires_end_image || activeWorkflow?.supports_optional_keyframes || activeWorkflow?.supports_multi_image;
@@ -72,6 +73,8 @@ export default function ResultGrid() {
   const previousMediaCountRef = useRef(0);
   const mediaBaselinePendingRef = useRef(true);
   const isNearBottomRef = useRef(true);
+  // 挂载前的发送已由会话首次加载滚到底，只响应挂载后的新发送
+  const handledScrollRequestRef = useRef(scrollToLatestRequest);
   const historyMatchesCurrentSession = Boolean(
     currentSessionId
     && chatHistory.length > 0
@@ -405,6 +408,17 @@ export default function ResultGrid() {
     }, delay));
   }, [chatHistory, currentSessionId, scrollToBottom]);
 
+  // 用户自己发送一轮后一律滚到底部（即使之前往上翻过）；参考图缩略图和占位卡片渲染后再跟随两次
+  useEffect(() => {
+    if (scrollToLatestRequest === handledScrollRequestRef.current) return;
+    handledScrollRequestRef.current = scrollToLatestRequest;
+    const sessionAtSchedule = useAppStore.getState().currentSessionId;
+    const timers = [50, 300, 800].map(delay => window.setTimeout(() => {
+      if (useAppStore.getState().currentSessionId === sessionAtSchedule) scrollToBottom('smooth');
+    }, delay));
+    return () => timers.forEach(timer => window.clearTimeout(timer));
+  }, [scrollToLatestRequest, scrollToBottom]);
+
   useEffect(() => {
     const container = getScrollContainer();
     if (!container) return;
@@ -420,7 +434,16 @@ export default function ResultGrid() {
       });
     };
 
-    const resizeObserver = new ResizeObserver(updateScrollButton);
+    // 输入框变高会压缩结果区：原本停在底部时保持贴底，最新内容不被挡住，之后的新结果也照常自动滚动
+    let observedHeight: number | null = null;
+    const resizeObserver = new ResizeObserver(() => {
+      const height = container.clientHeight;
+      if (observedHeight !== null && height !== observedHeight && isNearBottomRef.current && !isRestoringRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+      observedHeight = height;
+      updateScrollButton();
+    });
     resizeObserver.observe(container);
     container.addEventListener('scroll', updateScrollButton, { passive: true });
     window.addEventListener('resize', updateScrollButton);
