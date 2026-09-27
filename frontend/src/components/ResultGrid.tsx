@@ -676,7 +676,8 @@ export default function ResultGrid() {
 
                       {/* 提示词文本编辑 */}
                       {editWorkflowMeta?.supports_motion_reference && <MotionReferenceImages key={`motion-images-${currentSessionId}-${message.id}`}
-                        images={editMotionImages} onChange={images => { setEditMotionImages(images); setEditMotionPrompt(null); }} onUploadingChange={setEditMotionUploading} />}
+                        images={editMotionImages} onChange={images => { setEditMotionImages(images); setEditMotionPrompt(null); }} onUploadingChange={setEditMotionUploading}
+                        shotMode={editPreset?.motion_reference_mode === 'shot'} />}
                       {editWorkflowMeta?.supports_motion_reference && <MotionPromptPanel key={`motion-prompt-${currentSessionId}-${message.id}`}
                         source={motionPromptSource(editRefImages.img1, editMotionImages, editContent, editPreset)} snapshot={editMotionPrompt}
                         onChange={setEditMotionPrompt} onBusyChange={setEditMotionPreviewing} disabled={editMotionUploading} />}

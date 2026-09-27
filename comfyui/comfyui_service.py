@@ -242,12 +242,13 @@ class ComfyUIService:
         seed=None,
         duration: float = 5,
         aspect_ratio: str = "auto",
+        audio: bool = False,
     ):
-        """使用 H3-Base-FL2VA 生成带原生双声道的视频。"""
+        """使用 H3-Base-FL2VA 生成视频；audio 为 True 时保留原生双声道音轨。"""
         if seed is None:
             seed = random.randrange(0, 2**63)
 
-        # 可选关键帧会删除工作流节点，每次请求必须使用新副本。
+        # 可选关键帧和音轨会删除工作流节点，每次请求必须使用新副本。
         fresh_workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
         result = await self.request.generate_minimax_h3(
             fresh_workflow,
@@ -257,17 +258,22 @@ class ComfyUIService:
             end_image_base64=end_image_base64,
             duration=duration,
             aspect_ratio=aspect_ratio,
+            audio=audio,
         )
         if not result.is_success or not result.data:
             raise RuntimeError(result.error or "MiniMax H3 未返回有效视频")
-        print("[ComfyUIService] MiniMax H3 音视频生成成功")
+        print(f"[ComfyUIService] MiniMax H3 {'音视频' if audio else '无声视频'}生成成功")
         finish_callback(result.data)
 
-    async def generate_minimax_h3_ref(self, finish_callback, prompt_text, images, duration=5, aspect_ratio="auto", seed=None):
+    async def generate_minimax_h3_ref(
+        self, finish_callback, prompt_text, images, duration=5, aspect_ratio="auto", seed=None, audio=False,
+        canvas_image_index=0,
+    ):
         workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
         result = await self.request.generate_minimax_h3_ref(
             workflow, prompt_text, random.randrange(0, 2**63) if seed is None else seed,
-            images, duration=duration, aspect_ratio=aspect_ratio,
+            images, duration=duration, aspect_ratio=aspect_ratio, audio=audio,
+            canvas_image_index=canvas_image_index,
         )
         if not result.is_success or not result.data:
             raise RuntimeError(result.error or "MiniMax H3 动作参考未返回有效视频")

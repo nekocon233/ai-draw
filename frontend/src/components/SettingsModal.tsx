@@ -202,7 +202,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             key={param.name}
             label={param.label}
             name={['selectOptions', param.name]}
-            extra={param.name === 'h3_aspect_ratio' ? '自动时跟随关键帧比例；纯文本生成使用 16:9' : undefined}
+            extra={param.name === 'h3_aspect_ratio' && !workflowMeta?.supports_motion_reference ? '自动时跟随关键帧比例；纯文本生成使用 16:9' : undefined}
           >
             <Select
               options={(param.options || []).map(v => ({

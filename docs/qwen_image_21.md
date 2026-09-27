@@ -437,3 +437,54 @@ ssh -N -L 18675:127.0.0.1:8675 nekocon-server
     - 线上历史标签显示 `LoRA: Ameniwa:0.8`。
   - 迁移前已经打开的网页，内存里仍是旧标识，需要刷新后再生成。
 - 正式任务 `AmeniwaQwen21V3`（`5eea955a-dba5-4140-b5a2-3e15dcbfc24a`）于 2026-09-23 11:40 UTC 开始。训练期间 ComfyUI 停止，应用生图服务暂停。结束后由监视容器 `ai-draw-qwen21-v3-watch`（`/opt/ai-toolkit/config/watch-ameniwa-v3.py`）确认 GPU 空闲，再启动 ComfyUI、恢复服务；状态写在输出目录的 `training-service-watch.json`。这个监视容器需要以 root 运行，并挂载宿主机的 `/usr/bin/docker`。
+
+### 2026-09-27 sen 画风数据集准备
+
+- 来源：作者授权用户自行下载的 X 账号 `@morimorihkmi` 的媒体图片。用户提供登录 cookies，用独立虚拟环境中的 gallery-dl 1.32.13（`/opt/tools/gallery-dl`）下载：
+  - 只下载图片，不含视频和转推；取原图（`name=orig`），请求间隔 2–4 秒；
+  - 共 39 张，存放在 `/opt/ai-toolkit/datasets/sen_raw/`，附推文元数据 JSON 和下载记录；
+  - 下载结束后，cookies 文件已粉碎删除。
+- 用户人工删除 2 张，保留 37 张（25 JPG、12 PNG），复制到源目录 `/opt/ai-toolkit/datasets/sen/`；`sen_raw` 保持不变。
+- 英文标签：
+  - 在 ComfyUI 容器内复用 comfyui-see-through 的 WD v3 打标器（`SmilingWolf/wd-eva02-large-tagger-v3`，缓存于 `/opt/comfyui/storage-models/hf-hub`），用 CPU 推理；
+  - 打标前先铺白底并补成正方形；通用标签阈值 0.35，角色标签阈值 0.75，格式与 Ameniwa 的 Danbooru 标签一致；
+  - 每张 22–71 个标签。`watermark`（6 张）、`signature`（2 张）、`artist_name`、`english_text` 等标签原样保留；
+  - 多人或重复排布的图片上，标签不够准确（例如三人合照也会打上 `1girl`）。
+- 划分：`prepare_qwen_image_21_training.py --holdout 5` 输出到 `/opt/ai-toolkit/datasets/sen_split/`。随机种子 20260921，训练 32 张、验证 5 张，记录了 74 个文件的 SHA-256。
+- 中文描述：
+  - 在后端容器内运行 `prepare_qwen_image_21_bilingual.py`（gpt-6-astra，2 路并发），输出到 `/opt/ai-toolkit/datasets/sen_qwen21/`；
+  - 标注格式为英文标签、空行、中文段落；中文 144–174 字，没有提及签名、水印或画师；
+  - 两个容器内的临时文件都已清理。
+- 训练配置：`configs/training/sen_qwen_image_21.yaml`，任务名 `SenQwen21`，参数和预览提示词与 AmeniwaQwen21Bilingual 相同，便于对比。
+  - 尚未开始训练，等用户确认后再启动；
+  - 训练约占用 GPU 2.5 小时，期间需要暂停生图；
+  - 计划的 LoRA 安装名为 `sen`。
+- 训练结果（2026-09-26）：
+  - 任务 `SenQwen21`（`9593b3a4-089d-4096-a26f-06b47f73a9f8`）通过 AI Toolkit 网页接口创建并排队；建任务前已备份任务库，备份为 `/opt/ai-toolkit/config/aitk-ui-before-sen-*.sqlite`。
+  - 首次启动时报 `No CUDA GPUs are available`：`ai-toolkit` 容器自 09-23 起一直运行，期间丢失了显卡访问，容器内 `nvidia-smi` 报 `Failed to initialize NVML`。重启该容器后恢复，下次训练前应先检查容器内的 GPU。
+  - 训练期间停止了 ComfyUI；监视容器 `ai-draw-sen-watch`（`/opt/ai-toolkit/config/watch-sen.py`）在任务结束后启动 ComfyUI，并在 23:09 UTC 恢复生图服务。
+  - 20:40–23:08 UTC 完成 4000 步，约 2.5 小时，平均每步约 2 秒；显存约 11.3 GB。20 个检查点全部保留。
+  - 训练预览对比图：`/opt/ai-toolkit/datasets/sen_qwen21_eval/training_samples_2000_4000.jpg`。
+    - 800 步起，二次元类提示词出现该画风；2000 步起，照片类提示词也改为插画；2800 步起，5 条预览全部稳定为该画风。
+    - 3200 步起，对“黑色双马尾校服”等具体内容的遵循明显改善。
+    - 各阶段都有训练集内容外溢：红色服装、红色方盒或背包反复出现在无关提示词中，也常出现手写文字和涂鸦装饰。
+  - 候选检查点为 3200、3600、4000 步，待用户选择后再安装为 `sen`。
+- 2026-09-27 更换 AI Toolkit 网页密码（`/opt/ai-toolkit/.env` 的 `AI_TOOLKIT_AUTH`）后，按新环境变量重建了容器。换密码前的 `.env` 和 compose 文件备份在同目录，后缀为 `.bak-20260927T072209Z`。
+  - 浏览器里还存着旧密码时，任务页会显示 “Invalid token. Please try again.”，需要重新输入新密码。
+  - 重建容器后，`SenQwen21` 在任务库里倒退成“运行中、第 3740 步”，但并没有训练进程在跑。
+    - 原因：`aitk_db.db` 使用 SQLite WAL 模式，compose 只挂载了主库文件，`-wal`／`-shm` 留在容器内部。重建容器后，还没合并进主库的记录就丢了。
+    - 处理：先把当时的任务库备份为 `/opt/ai-toolkit/config/aitk-ui-before-sen-state-fix-*.sqlite`，再在容器内把该任务改回 `completed`、第 4000 步，并执行 `PRAGMA wal_checkpoint(TRUNCATE)`；worker 随后自动停止了 GPU 0 的队列。
+  - 今后重启或重建 `ai-toolkit` 容器前，先执行下面的命令，把 WAL 合并进宿主机上的主库：
+    `docker exec ai-toolkit python3 -c "import sqlite3; print(sqlite3.connect('/app/ai-toolkit/aitk_db.db').execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone())"`
+- 同日，AI Toolkit 任务页的 Samples 标签报 “Application error: a client-side exception”。
+  - 原因：网页端组件读取 `sample.samples.length`，而 `SenQwen21` 和 `AmeniwaQwen21Bilingual` 存的是命令行旧格式 `sample.prompts`，缺少 `samples` 导致页面崩溃。训练本身两种格式都支持。
+  - 处理：先备份任务库为 `/opt/ai-toolkit/config/aitk-ui-before-samples-format-*.sqlite`，再把两个任务的预览配置改为 `samples: [{prompt: …}]`，提示词内容和顺序不变，并合并了 WAL。浏览器复查两个任务的 Samples 标签均正常显示。
+  - `configs/training/sen_qwen_image_21.yaml` 已同步改为 `samples` 格式。以后通过网页接口建任务时，应使用这种格式。
+- 上线（2026-09-27）：用户选择 4000 步。
+  - 最终权重 `SenQwen21.safetensors` 的元数据 `training_info` 为 step 4000、epoch 43。
+  - 经 `scripts/install_qwen_image_21_lora.py` 校验：384 个张量，192 个上投影非零。安装为 ComfyUI 的 `loras/sen.safetensors`，SHA-256 `751f71a57232c14cc262cc62e1c796b7d5a9675c70b25cbef80e0b668a977f39`，与训练输出的原件一致。
+  - `lora_models` 追加 `{name: "sen.safetensors", label: "sen"}`，Qwen 的文字和编辑两个执行图共用；Ameniwa 仍排在第一位，静态模板里的默认 LoRA 不变。`tests/test_generation_pipeline.py` 已同步，160 项后端测试通过，已部署。
+  - 部署后，按 `/api/service/loras` 的同一逻辑核对，两个 Qwen 工作流都返回 Ameniwa 和 sen。
+  - 用生产 provider 做了一次文生图（`<lora:sen:0.8>`，1024×1024），ComfyUI 历史中 LoRA 节点为 `sen.safetensors`，强度 0.8，用时 55 秒；输出存为 `/opt/ai-toolkit/datasets/sen_qwen21_eval/production_t2i_sen_0.8.png`。
+    - 画风生效：粗手绘墨线、明亮平涂；内容遵循提示词。
+    - 背景出现类似水印的乱码文字和手写涂鸦，与训练集中的水印和手写字有关。

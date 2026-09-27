@@ -11,9 +11,11 @@ interface Props {
   onCapture?: () => void;
   onUploadingChange?: (uploading: boolean) => void;
   disabled?: boolean;
+  /** 「参考镜头动作」预设：参考图同时决定镜头与构图，而不只是姿势 */
+  shotMode?: boolean;
 }
 
-export default function MotionReferenceImages({ images, onChange, onCapture, onUploadingChange, disabled = false }: Props) {
+export default function MotionReferenceImages({ images, onChange, onCapture, onUploadingChange, disabled = false, shotMode = false }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const latest = useRef(images);
   const alive = useRef(true);
@@ -67,8 +69,8 @@ export default function MotionReferenceImages({ images, onChange, onCapture, onU
         } catch { /* Ignore non-image drag data. */ }
       }}>
       <div className="motion-reference-heading">
-        <span>动作参考 · {images.length}/{MAX_MOTION_REFERENCES}</span>
-        <span className="motion-reference-hint">按顺序完成姿势，自动衔接中间动作</span>
+        <span>{shotMode ? '镜头与动作参考' : '动作参考'} · {images.length}/{MAX_MOTION_REFERENCES}</span>
+        <span className="motion-reference-hint">{shotMode ? '按顺序跟随镜头、构图与动作，自动衔接' : '按顺序完成姿势，自动衔接中间动作'}</span>
       </div>
       <div className="motion-reference-list">
         {images.map((image, index) => (
@@ -93,7 +95,11 @@ export default function MotionReferenceImages({ images, onChange, onCapture, onU
           onClick={() => input.current?.click()}>添加动作图</Button>
         {onCapture && <Button size="small" icon={<UserOutlined />} disabled={disabled || uploading || images.length >= MAX_MOTION_REFERENCES}
           onClick={onCapture}>摆姿势并截图</Button>}
-        <span className="motion-reference-hint">可多选、粘贴或拖入白模姿势图；只参考动作，时间和姿态可能有偏差。</span>
+        <span className="motion-reference-hint">
+          {shotMode
+            ? '可多选、粘贴或拖入参考图；主体只取外观，镜头、构图和动作以参考图为准，时间和姿态可能有偏差。'
+            : '可多选、粘贴或拖入白模姿势图；只参考动作，时间和姿态可能有偏差。'}
+        </span>
       </div>
     </section>
   );

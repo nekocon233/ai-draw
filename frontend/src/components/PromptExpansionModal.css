@@ -12,11 +12,13 @@
   margin-bottom: 10px;
 }
 
+/* 只纵向滚动：按钮点击波纹比按钮外扩 1px，贴右的「开始扩写」会让横向溢出出现滚动条 */
 .prompt-expansion-modal .ant-modal-body {
   min-height: 0;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -81,6 +83,18 @@
 .prompt-expansion-field .ant-input,
 .prompt-expansion-field .ant-input-affix-wrapper {
   border-radius: 9px;
+}
+
+.prompt-expansion-field-head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prompt-expansion-field-head .ant-btn {
+  font-size: 12px;
 }
 
 .prompt-expansion-generate-row {

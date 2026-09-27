@@ -104,10 +104,11 @@ def build_provider_registry(comfyui) -> ProviderRegistry:
         comfyui.switch_workflow(workflow)
 
     def h3_options(request):
-        duration, aspect_ratio = validate_minimax_h3_options(request.parameters.workflow_options)
+        duration, aspect_ratio, audio = validate_minimax_h3_options(request.parameters.workflow_options)
         return {
             "prompt_text": request.parameters.prompt, "start_image_base64": request.images[0],
             "end_image_base64": request.end_image, "duration": duration, "aspect_ratio": aspect_ratio,
+            "audio": audio,
         }
 
     registry.register(

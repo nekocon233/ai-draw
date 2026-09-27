@@ -68,10 +68,14 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
         end_image_base64=None,
         duration: float = 5,
         aspect_ratio: str = "auto",
+        audio: bool = False,
     ) -> ComfyUIRequestResult:
-        """MiniMax H3 文本/可选首尾帧音视频生成请求。"""
+        """MiniMax H3 文本/可选首尾帧视频生成请求；audio 为 False 时输出无声视频。"""
 
-    async def generate_minimax_h3_ref(self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto") -> ComfyUIRequestResult:
+    async def generate_minimax_h3_ref(
+        self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto", audio=False, canvas_image_index=0,
+    ) -> ComfyUIRequestResult:
+        """canvas_image_index 指定自动画幅所依据的输入图片（0 为主体图）。"""
         raise NotImplementedError("此 ComfyUI 后端不支持 H3 动作参考")
 
     @abstractmethod

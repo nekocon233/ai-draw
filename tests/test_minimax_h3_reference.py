@@ -50,7 +50,11 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('<Picture 2>, then <Picture 3>', options['prompt_text'])
         self.assertIn('先举剑再收势', options['prompt_text'])
         self.assertIn('do not transfer their gray material', options['prompt_text'])
+        self.assertFalse(options['audio'])
         self.assertEqual(result.kind, 'video')
+        params = GenerationParameters('先举剑再收势', workflow='minimax_h3_ref', workflow_options={'h3_audio': 'native'})
+        await MiniMaxH3ReferenceProvider(service).generate(ProviderInput(params, ('character', None, None), motion_images=('up',)))
+        self.assertTrue(service.generate_minimax_h3_ref.call_args.kwargs['audio'])
 
     async def test_request_uploads_real_images_and_removes_unused_inputs(self):
         root = Path(__file__).resolve().parents[1]
@@ -85,4 +89,19 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('first_frame', conditioning)
             self.assertNotIn('last_frame', conditioning)
             self.assertEqual(len([node for node in graph.values() if node['class_type'] == 'LoadImage']), count)
+            # Silent by default: the audio decode is dropped and the video is muxed without a track.
+            self.assertNotIn('14', graph)
+            self.assertNotIn('audio', graph['15']['inputs'])
+        graph = Graph(json.loads(path.read_text()))
+        result = await request.generate_minimax_h3_ref(graph, 'motion', 42, images[:2], audio=True)
+        self.assertTrue(result.is_success, result.error)
+        self.assertEqual(graph['15']['inputs']['audio'], ['14', 0])
+        self.assertEqual(graph['14']['class_type'], 'VAEDecodeAudio')
+        # Reference-shot mode sizes the automatic canvas from the first reference, not the portrait subject.
+        graph = Graph(json.loads(path.read_text()))
+        result = await request.generate_minimax_h3_ref(graph, 'motion', 42, images[:2], canvas_image_index=1)
+        self.assertTrue(result.is_success, result.error)
+        self.assertEqual((graph['7']['inputs']['width'], graph['7']['inputs']['height']), (1152, 768))
+        with self.assertRaisesRegex(ValueError, '画幅'):
+            await request.generate_minimax_h3_ref(Graph(json.loads(path.read_text())), 'motion', 42, images[:2], canvas_image_index=2)
         self.assertTrue(all(not Path(path).exists() for path in temporary_paths))

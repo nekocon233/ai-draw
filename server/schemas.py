@@ -35,6 +35,8 @@ class PromptPreset(BaseModel):
     prompt: str
     output_type: Literal["image", "video"] = "image"
     requires_motion_reference: bool = False
+    # pose：主体图提供场景与固定镜头，参考图只给姿势；shot：主体图只给外观，镜头与动作跟随参考图
+    motion_reference_mode: Literal["pose", "shot"] = "pose"
     workflow_ids: Optional[List[str]] = None  # None keeps historical snapshots compatible.
     hint: str = ""  # 选中后作为输入框占位提示
     images: List[PromptPresetImage] = Field(default_factory=list)
@@ -68,6 +70,7 @@ class AnalyzeMotionPromptRequest(BaseModel):
     reference_image: str = Field(min_length=1)
     motion_reference_images: List[str] = Field(min_length=1, max_length=8)
     description: str = Field(default="", max_length=16000)
+    motion_reference_mode: Literal["pose", "shot"] = "pose"
 
 class GenerateMediaRequest(BaseModel):
     """生成图像请求"""

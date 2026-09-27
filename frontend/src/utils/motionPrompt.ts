@@ -1,20 +1,29 @@
-import type { MotionPromptSnapshot, PromptPreset } from '../types/api';
+import type { MotionPromptSnapshot, MotionReferenceMode, PromptPreset } from '../types/api';
 import type { ChatMessage } from '../types/models';
 
+// Mirrors utils/motion_prompt.py; the pose policy is unchanged so fixed-scene snapshots stay valid.
 export const MOTION_PROMPT_POLICY = 'reference-actions-primary-v1';
+export const SHOT_MOTION_PROMPT_POLICY = 'reference-shot-v1';
 
 export interface MotionPromptSource {
   reference_image: string;
   motion_reference_images: string[];
   description: string;
+  motion_reference_mode: MotionReferenceMode;
 }
 
 export function motionPromptSource(character: string | null | undefined, poses: readonly string[], description: string, preset?: PromptPreset | null): MotionPromptSource {
-  return { reference_image: character ?? '', motion_reference_images: [...poses], description: (preset?.prompt.trim() ?? '') + description.trim() };
+  return {
+    reference_image: character ?? '',
+    motion_reference_images: [...poses],
+    description: (preset?.prompt.trim() ?? '') + description.trim(),
+    motion_reference_mode: preset?.motion_reference_mode === 'shot' ? 'shot' : 'pose',
+  };
 }
 
 export function motionPromptSourceKey(source: MotionPromptSource): string {
-  return JSON.stringify([1, MOTION_PROMPT_POLICY, source.reference_image, source.motion_reference_images, source.description.trim()]);
+  const policy = source.motion_reference_mode === 'shot' ? SHOT_MOTION_PROMPT_POLICY : MOTION_PROMPT_POLICY;
+  return JSON.stringify([1, policy, source.reference_image, source.motion_reference_images, source.description.trim()]);
 }
 
 /** Applying the generated text changes the description, so bind the same analysis to that new draft. */

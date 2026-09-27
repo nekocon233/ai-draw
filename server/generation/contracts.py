@@ -35,6 +35,8 @@ class GenerationParameters:
     prompt_preset: Optional[dict] = None
     motion_reference_images: Optional[tuple[str, ...]] = None
     motion_prompt: Optional[dict] = None
+    # Provider view of the preset's image roles, derived by for_provider() and never persisted.
+    motion_reference_mode: str = "pose"
 
     def __post_init__(self):
         if self.motion_prompt is not None:
@@ -48,7 +50,10 @@ class GenerationParameters:
         preset = snapshot.get("prompt", "").strip()
         if not preset:
             return self
-        return replace(self, prompt=preset + self.prompt.strip(), prompt_preset=None)
+        return replace(
+            self, prompt=preset + self.prompt.strip(), prompt_preset=None,
+            motion_reference_mode="shot" if snapshot.get("motion_reference_mode") == "shot" else "pose",
+        )
 
     def source_updates(self) -> dict:
         fields = (

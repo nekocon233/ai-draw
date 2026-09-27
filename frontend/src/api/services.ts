@@ -328,7 +328,7 @@ export const apiService = {
     client.post('/prompt/generate', data),
 
   // LLM 以图生词（分析单张图片风格/元素/动作/镜头 → 文生图提示词）
-  analyzeMotionPrompt: (data: { reference_image: string; motion_reference_images: string[]; description: string }, signal?: AbortSignal): Promise<import('../types/api').MotionPromptSnapshot> =>
+  analyzeMotionPrompt: (data: import('../utils/motionPrompt').MotionPromptSource, signal?: AbortSignal): Promise<import('../types/api').MotionPromptSnapshot> =>
     client.post('/prompt/analyze-motion', data, { signal }),
 
   analyzeImageForPrompt: (data: AnalyzeImageForPromptRequest): Promise<AnalyzeImageForPromptResponse> =>

@@ -93,8 +93,9 @@ export function getPresetBlocker(
   const blocker = getPresetWorkflowBlocker(preset, metadata);
   if (blocker) return blocker;
   for (let index = 1; index <= getPresetReferenceCount(preset); index++) {
+    // Motion presets name their subject image, e.g. 原始画面 or 主体图.
     if (!references[index - 1]) return preset.output_type === 'video' && index === 1
-      ? (preset.requires_motion_reference ? '请先添加原始画面' : '请先添加开始帧') : `请先添加参考图 ${index}`;
+      ? (preset.requires_motion_reference ? `请先添加${preset.images[0]?.label || '原始画面'}` : '请先添加开始帧') : `请先添加参考图 ${index}`;
   }
   if (preset.images.some(image => image.slot === 'end') && !endReference) return '请先添加结束帧';
   if (preset.requires_motion_reference && !motionReferences.some(image => image?.trim())) return '请先添加动作参考图';

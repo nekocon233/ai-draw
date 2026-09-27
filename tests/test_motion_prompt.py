@@ -66,6 +66,50 @@ class MotionPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(matching_motion_prompt(snapshot, 'different', ['a','b'], '慢慢', {'prompt':'固定镜头。'}))
         self.assertIsNone(matching_motion_prompt(snapshot, 'character', ['a','b'], '快速', {'prompt':'固定镜头。'}))
 
+    def test_shot_mode_has_its_own_policy_and_keeps_pose_hashes_stable(self):
+        pose = json.dumps([1,'reference-actions-primary-v1','character',['pose'],'extra'],ensure_ascii=False,separators=(',',':'))
+        self.assertEqual(motion_prompt_input_hash('character',['pose'],'extra'),hashlib.sha256(pose.encode()).hexdigest())
+        shot = motion_prompt_input_hash('character',['pose'],'extra','shot')
+        self.assertNotEqual(shot,motion_prompt_input_hash('character',['pose'],'extra'))
+        snapshot = {'version':1,'input_hash':shot,'prompt':'参考镜头'}
+        self.assertEqual(matching_motion_prompt(snapshot,'character',['pose'],'',{'prompt':'extra','motion_reference_mode':'shot'}),snapshot)
+        self.assertIsNone(matching_motion_prompt(snapshot,'character',['pose'],'',{'prompt':'extra'}))
+
+    def test_shot_analysis_uses_the_subject_only_for_appearance(self):
+        with patch('utils.motion_prompt.LanguageModel') as llm:
+            llm.return_value.complete.return_value = '主体保持外观，参考1低机位全景，参考2推近。'
+            signature = motion_prompt_input_hash('subject', ['shot-a', 'shot-b'], '雨夜街道', 'shot')
+            result = analyze_motion_images('subject', ['shot-a', 'shot-b'], '雨夜街道', signature, 'shot')
+            args, kwargs = llm.return_value.complete.call_args
+            self.assertEqual(kwargs['images'], ['subject', 'shot-a', 'shot-b'])
+            self.assertIn('第一张输入是主体图', args[0])
+            self.assertIn('雨夜街道', args[0])
+            self.assertIn('不沿用主体图的背景、镜头、取景、构图和姿势', kwargs['system'])
+            self.assertIn('一律替换为主体', kwargs['system'])
+            self.assertNotIn('唯一基准', kwargs['system'])
+            self.assertTrue(current_motion_prompt(result, signature))
+
+    async def test_shot_preset_analysis_is_bound_to_its_mode(self):
+        params = GenerationParameters('雨夜', workflow='minimax_h3_ref', reference_image='subject', motion_reference_images=['a'],
+                                      prompt_preset={'prompt':'参考镜头。','motion_reference_mode':'shot'})
+        pose_signature = motion_prompt_input_hash('subject', ['a'], '参考镜头。雨夜')
+        params = replace(params, motion_prompt={'version':1,'input_hash':pose_signature,'prompt':'固定镜头的旧分析'})
+        provider = MiniMaxH3ReferenceProvider(SimpleNamespace())
+        progress = Mock()
+        with patch('server.generation.minimax_h3_ref.analyze_motion_images', return_value={'version':1,'input_hash':'b'*64,'prompt':'镜头'}) as analyze:
+            await provider.enrich(ProviderInput(params, ('subject-bytes',None,None), motion_images=('a-bytes',)), progress)
+        self.assertEqual(analyze.call_args.args[2:], ('参考镜头。雨夜', motion_prompt_input_hash('subject', ['a'], '参考镜头。雨夜', 'shot'), 'shot'))
+        progress.assert_called_once_with('正在分析参考镜头与动作...')
+
+    def test_shot_prompt_follows_reference_framing_instead_of_fixed_scene(self):
+        prompt = motion_reference_prompt('雨夜街道', 2, '参考1低机位，参考2推近', 'shot')
+        for text in ('only defines the appearance of <Subject 1>', 'composition anchors', 'partially_preserved',
+                     'The keyframes correspond to <Picture 2>, then <Picture 3>', 'without cuts', '参考1低机位，参考2推近', '雨夜街道'):
+            self.assertIn(text, prompt)
+        for text in ('sole visual baseline', 'locked-off', "Begin from the character's original pose"):
+            self.assertNotIn(text, prompt)
+        self.assertEqual(motion_reference_prompt('x', 1, 'y'), motion_reference_prompt('x', 1, 'y', 'pose'))
+
     def test_fixed_constraints_survive_conflicting_camera_suggestions(self):
         prompt = motion_reference_prompt('推近镜头并更换背景', 2, '原图角色先抬手再放下')
         for text in ('sole visual baseline', 'background, objects, layout, lighting', 'crop, aspect ratio',
@@ -126,7 +170,7 @@ class MotionPromptAPITests(unittest.TestCase):
         sessions = sessionmaker(bind=self.engine)
         def database():
             with sessions() as db: yield db
-        async def analyze(character, poses, description, signature, user_id):
+        async def analyze(character, poses, description, signature, user_id, mode='pose'):
             return {'version':1,'input_hash':signature,'prompt':'保持原图，只依次改变姿势。'}
         self.service = SimpleNamespace(analyze_motion_prompt=AsyncMock(side_effect=analyze))
         app = FastAPI(); app.include_router(router,prefix='/api')
@@ -146,6 +190,14 @@ class MotionPromptAPITests(unittest.TestCase):
         self.assertEqual(len(self.service.analyze_motion_prompt.call_args.args[1]),8)
         for images in ([],[self.image]*9):
             self.assertEqual(self.client.post('/api/prompt/analyze-motion',json={**body,'motion_reference_images':images}).status_code,422)
+
+    def test_shot_mode_is_forwarded_and_bound_to_the_returned_hash(self):
+        body = {'reference_image':self.image,'motion_reference_images':[self.image],'description':'雨夜','motion_reference_mode':'shot'}
+        response = self.client.post('/api/prompt/analyze-motion',json=body)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['input_hash'],motion_prompt_input_hash(self.image,[self.image],'雨夜','shot'))
+        self.assertEqual(self.service.analyze_motion_prompt.call_args.args[5],'shot')
+        self.assertEqual(self.client.post('/api/prompt/analyze-motion',json={**body,'motion_reference_mode':'scene'}).status_code,422)
 
     def test_authentication_and_foreign_image_checks_precede_vision_call(self):
         body = {'reference_image':self.image,'motion_reference_images':['/uploads/reference/2/private.png']}

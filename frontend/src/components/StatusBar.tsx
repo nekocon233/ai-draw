@@ -5,6 +5,7 @@ import { useAppStore } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import LoginModal from './LoginModal';
 import { isLoggedIn as checkLoggedIn, getUsername, clearAccessToken } from '../utils/helpers';
+import { clearExpansionDrafts } from '../utils/promptExpansionDrafts';
 
 export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
@@ -13,6 +14,7 @@ export function AccountMenu({ collapsed = false }: { collapsed?: boolean }) {
 
   const handleLogout = () => {
     clearAccessToken();
+    clearExpansionDrafts(); // 扩写草稿含创作内容，退出登录时一并清除
     setUsername('');
     window.location.reload(); // 刷新页面清空状态
   };

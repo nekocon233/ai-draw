@@ -9,7 +9,7 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 ## 主要功能
 
 - 文生图、单图/多参考图编辑和图生图。
-- MiniMax H3 首尾帧与动作参考音视频生成。
+- MiniMax H3 首尾帧与动作参考视频生成，默认无声，可在生成设置中开启原生双声道音频。
 - 按工作流扩写提示词，支持动作参考分析和加号菜单中的提示词预设（参考姿势、参考图成品化）。
 - 聊天式创作流程，支持会话置顶、标题总结、历史分页、编辑后重新生成和删除对话轮次。
 - 图片背景移除、2x/4x 放大和批量放大。
@@ -26,8 +26,8 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 | `qwen_image_21_t2i` | ComfyUI / Qwen-Image-2.1 | 文本，可选专用 LoRA | RGBA PNG |
 | `qwen_image_21_i2i` | ComfyUI / Qwen-Image-2.1 | 文本、1-3 张参考图，可选专用 LoRA | RGBA PNG |
 | `gpt_image` | OpenAI 兼容 API | 文本，可选 1-3 张参考图 | 图片 |
-| `minimax_h3` | ComfyUI / MiniMax H3 | 文本，可选首尾关键帧 | 音视频 |
-| `minimax_h3_ref` | ComfyUI / MiniMax H3 Ref2VA | 角色图 + 1–8 张有序动作参考图 | 音视频 |
+| `minimax_h3` | ComfyUI / MiniMax H3 | 文本，可选首尾关键帧 | 视频（默认无声，可选音频） |
+| `minimax_h3_ref` | ComfyUI / MiniMax H3 Ref2VA | 角色图 + 1–8 张有序动作参考图 | 视频（默认无声，可选音频） |
 
 动作参考视频的使用、模型安装和数据迁移见 [MiniMax H3 动作参考](docs/minimax_h3_reference.md)。
 

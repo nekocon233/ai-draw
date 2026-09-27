@@ -41,6 +41,9 @@ def validate_prompt_preset(parameters: GenerationParameters, metadata: dict) -> 
     for index in range(reference_count):
         if not references[index]:
             label = ("原始画面" if needs_motion else "开始帧") if output_type == "video" and index == 0 else f"参考图 {index + 1}"
+            if needs_motion and index == 0:
+                # Motion presets name their subject image, e.g. 原始画面 or 主体图.
+                label = ((preset.get("images") or [{}])[0].get("label") or label)
             raise ValueError(f"预设需要提供{label}")
     if needs_end and not parameters.reference_image_end:
         raise ValueError("预设需要提供结束帧")

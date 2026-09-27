@@ -92,6 +92,27 @@ PROMPT_PRESETS = (
         hint="仅补充节奏、停顿、音效等额外内容；动作按参考图生成，可留空",
         images=[PromptPresetImage(label="原始画面", role="主体外观、场景与固定镜头；动作由独立的动作参考图提供", slot=1)],
     ),
+    # The subject image supplies only appearance; the shot mode also switches the server-side rules.
+    PromptPreset(
+        id="video_reference_shot",
+        title="参考镜头动作",
+        description="主体图只提供人物或元素，镜头、构图、动作与姿势跟随参考图",
+        output_type="video",
+        requires_motion_reference=True,
+        motion_reference_mode="shot",
+        workflow_ids=["minimax_h3_ref"],
+        prompt=(
+            "主体图只用于确定人物或元素的身份与外观，包括脸、发型、服装、配色、体型比例和画风，"
+            "不沿用主体图的背景、镜头、取景、构图和姿势。"
+            "镜头位置、角度、距离、景别与构图，主体在画面中的位置和大小，以及动作、姿态和先后顺序都以参考图为准，"
+            "多张参考图按提供顺序依次完成，并以连续镜头平滑衔接。"
+            "参考图中的人物或主要元素替换为主体，不保留其原有身份、外貌和服装，也不引入白模材质、网格或软件界面。"
+            "场景和背景同样以参考图为准；参考图没有实际场景时，按补充描述或保持简洁背景。"
+            "用户手动补充的文字只描述场景、节奏、停顿、音效等额外内容，不得改变参考图给出的镜头和动作。"
+        ),
+        hint="可补充场景、节奏、停顿、音效等细节；镜头与动作按参考图生成，可留空",
+        images=[PromptPresetImage(label="主体图", role="只提供人物或元素的外观；不沿用背景、镜头、构图和姿势", slot=1)],
+    ),
     PromptPreset(
         id="video_transition",
         title="首尾帧过渡",
@@ -168,9 +189,10 @@ async def analyze_motion_for_prompt(
         ])
     except (ValueError, InvalidImageError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    signature = motion_prompt_input_hash(request.reference_image, request.motion_reference_images, request.description)
+    mode = request.motion_reference_mode
+    signature = motion_prompt_input_hash(request.reference_image, request.motion_reference_images, request.description, mode)
     try:
-        snapshot = await service.analyze_motion_prompt(images[0], images[1:], request.description, signature, current_user.id)
+        snapshot = await service.analyze_motion_prompt(images[0], images[1:], request.description, signature, current_user.id, mode)
         return MotionPromptSnapshot(**snapshot)
     except Exception as error:
         raise HTTPException(status_code=502, detail=f"动作参考图分析失败：{error}") from error

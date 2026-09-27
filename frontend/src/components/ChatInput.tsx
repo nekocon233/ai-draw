@@ -854,7 +854,8 @@ export default function ChatInput() {
         )}
 
         {isMotionReference && <MotionReferenceImages key={`motion-images-${currentSessionId ?? 'new'}`} images={motionReferenceImages}
-          onChange={setMotionReferenceImages} onCapture={openPoseReference} onUploadingChange={setUploadingMotion} disabled={isSubmitting} />}
+          onChange={setMotionReferenceImages} onCapture={openPoseReference} onUploadingChange={setUploadingMotion} disabled={isSubmitting}
+          shotMode={promptPreset?.motion_reference_mode === 'shot'} />}
 
         {isGenerating && generationProgress && (
           <div className="generation-stage-progress" role="status">{generationProgress}</div>
@@ -1059,7 +1060,7 @@ export default function ChatInput() {
             onClose={() => setPromptExpansionOpen(false)}
             onApply={handleApplyPrompt}
             workflowId={currentWorkflow}
-            initialPrompt={prompt}
+            inputPrompt={prompt}
           />
         )}
       </Suspense>

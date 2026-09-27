@@ -404,12 +404,16 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             except OSError:
                 pass
 
-    async def generate_minimax_h3_ref(self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto"):
+    async def generate_minimax_h3_ref(
+        self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto", audio=False, canvas_image_index=0,
+    ):
         if not 2 <= len(images) <= 9 or any(not image for image in images):
             raise ValueError("动作参考需要一张角色图与 1 到 8 张姿势图")
+        if not 0 <= canvas_image_index < len(images):
+            raise ValueError("自动画幅依据的图片不存在")
         return await self.generate_minimax_h3(
             workflow, prompt_text, seed, duration=duration, aspect_ratio=aspect_ratio,
-            reference_images=images,
+            reference_images=images, audio=audio, canvas_image_index=canvas_image_index,
         )
 
     async def generate_minimax_h3(
@@ -422,13 +426,16 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         duration: float = 5,
         aspect_ratio: str = "auto",
         reference_images=None,
+        audio: bool = False,
+        canvas_image_index: int = 0,
     ):
-        """执行 H3 文生、单关键帧或首尾帧音视频工作流。"""
+        """执行 H3 文生、单关键帧、首尾帧或动作参考视频工作流，按需保留音轨。"""
         temp_paths = []
         try:
             source_sizes = []
             if aspect_ratio == "auto":
-                for image_base64 in (reference_images[:1] if reference_images else (start_image_base64, end_image_base64)):
+                canvas_images = reference_images[canvas_image_index:canvas_image_index + 1] if reference_images else (start_image_base64, end_image_base64)
+                for image_base64 in canvas_images:
                     if not image_base64:
                         continue
                     with Image.open(BytesIO(base64.b64decode(image_base64))) as image:
@@ -443,6 +450,9 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
                 missing_titles.append("main_image_start")
             if not end_image_base64:
                 missing_titles.append("main_image_end")
+            if not audio:
+                # H3 总会联合采样音频；不解码也不合成音轨即得到画面相同的无声视频
+                missing_titles.append("h3_decode_audio")
             remove_nodes_by_title(workflow, missing_titles)
 
             async def upload_keyframe(image_base64: str, title: str, filename: str) -> None:

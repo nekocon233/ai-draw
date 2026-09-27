@@ -111,4 +111,8 @@ test('fixed-camera motion presets require a motion-capable workflow and actual p
   assert.equal(getPresetBlocker(preset,motion,['character'],undefined,[]),'请先添加动作参考图');
   assert.equal(getPresetBlocker(preset,motion,['character'],undefined,['pose']),null);
   assert.equal(getPresetBlocker({...preset,requires_motion_reference:undefined},video,['character']),null);
+  // Reference-shot presets name their subject image; legacy snapshots without a label keep the old wording.
+  const shot = {...preset,images:[{label:'主体图',role:'只提供外观',slot:1 as const}]};
+  assert.equal(getPresetBlocker(shot,motion,[]),'请先添加主体图');
+  assert.equal(getPresetBlocker({...preset,images:[{label:'',role:'',slot:1 as const}]},motion,[]),'请先添加原始画面');
 });

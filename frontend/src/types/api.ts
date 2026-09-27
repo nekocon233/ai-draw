@@ -23,6 +23,8 @@ export interface GeneratePromptResponse {
 }
 
 // 服务端维护的提示词预设
+export type MotionReferenceMode = 'pose' | 'shot';
+
 export interface PromptPresetImage {
   label: string;
   role: string;
@@ -36,6 +38,8 @@ export interface PromptPreset {
   prompt: string;
   output_type?: 'image' | 'video'; // Historical snapshots default to image presets.
   requires_motion_reference?: boolean;
+  /** pose：原图场景与固定镜头；shot：主体图只取外观，镜头与动作跟随参考图。缺省为 pose。 */
+  motion_reference_mode?: MotionReferenceMode;
   workflow_ids?: string[] | null;
   hint: string;  // 选中后作为输入框占位提示
   images: PromptPresetImage[];

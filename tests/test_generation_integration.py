@@ -193,7 +193,8 @@ class GenerationIntegrationTests(unittest.TestCase):
         with self.sessions() as db:
             source = db.query(ChatMessage).filter_by(message_id="message-a").one()
             self.assertEqual(source.content, "new prompt")
-            self.assertEqual(source.prompt_preset, {**preset, "output_type": "image", "requires_motion_reference": False, "workflow_ids": None, "hint": "", "images": []})
+            self.assertEqual(source.prompt_preset, {**preset, "output_type": "image", "requires_motion_reference": False,
+                                                    "motion_reference_mode": "pose", "workflow_ids": None, "hint": "", "images": []})
         self.user_id = 2
         self.assertIsNone(self.client.get("/api/media/last-task").json()["last_task"])
 

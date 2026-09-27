@@ -10,6 +10,8 @@ MINIMAX_H3_RESOLUTIONS = {
     "9:16": (768, 1344),
 }
 
+MINIMAX_H3_AUDIO_MODES = ("silent", "native")
+
 MINIMAX_H3_CANVAS_MULTIPLE = 32
 MINIMAX_H3_BASE_SHORT_EDGE = 768
 MINIMAX_H3_MAX_PIXELS = 768 * 1344
@@ -75,17 +77,21 @@ def get_minimax_h3_frame_count(duration: float) -> int:
     return frame_count
 
 
-def validate_minimax_h3_options(options: dict | None) -> tuple[float, str]:
+def validate_minimax_h3_options(options: dict | None) -> tuple[float, str, bool]:
+    """返回时长、画幅和是否保留音轨；未设置声音（含旧消息）时默认无声。"""
     options = options or {}
-    allowed = {"h3_duration", "h3_aspect_ratio"}
+    allowed = {"h3_duration", "h3_aspect_ratio", "h3_audio"}
     unknown = set(options) - allowed
     if unknown:
         raise ValueError(f"MiniMax H3 包含未知参数: {', '.join(sorted(unknown))}")
     duration = float(options.get("h3_duration", 5))
     aspect_ratio = str(options.get("h3_aspect_ratio", "auto"))
+    audio = str(options.get("h3_audio", "silent"))
+    if audio not in MINIMAX_H3_AUDIO_MODES:
+        raise ValueError(f"MiniMax H3 不支持声音选项: {audio}")
     get_minimax_h3_frame_count(duration)
     get_minimax_h3_resolution(aspect_ratio)
-    return duration, aspect_ratio
+    return duration, aspect_ratio, audio == "native"
 
 
 def remove_nodes_by_title(workflow, titles: list[str]) -> None:

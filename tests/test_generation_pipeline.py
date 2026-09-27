@@ -54,7 +54,7 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
                 catalog.validate(GenerationParameters("x", workflow=retired))
         self.assertTrue(all(item["max_count"] == 1 for item in catalog.list() if item["output_type"] == "video"))
         for workflow in ("qwen_image_21_t2i", "qwen_image_21_i2i"):
-            self.assertEqual(catalog.describe(workflow)["lora_labels"], {"Ameniwa": "Ameniwa"})
+            self.assertEqual(catalog.describe(workflow)["lora_labels"], {"Ameniwa": "Ameniwa", "sen": "sen"})
         self.assertEqual(catalog.describe("gpt_image")["lora_labels"], {})
         params = GenerationParameters("audio and video", workflow="minimax_h3", workflow_options={"h3_duration": "10"})
         await registry.get("comfyui_minimax_h3").provider.generate(ProviderInput(params, ("start", None, None), "end"))
@@ -62,6 +62,16 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options["duration"], 10)
         self.assertEqual(options["aspect_ratio"], "auto")
         self.assertEqual(options["start_image_base64"], "start")
+        self.assertFalse(options["audio"])
+        params = GenerationParameters("audio and video", workflow="minimax_h3", workflow_options={"h3_audio": "native"})
+        catalog.validate(params)
+        await registry.get("comfyui_minimax_h3").provider.generate(ProviderInput(params, (None, None, None)))
+        self.assertTrue(comfyui.generate_minimax_h3.call_args.kwargs["audio"])
+        for workflow in ("minimax_h3", "minimax_h3_ref"):
+            audio = next(item for item in metadata[workflow]["parameters"] if item["name"] == "h3_audio")
+            self.assertEqual((audio["default"], audio["options"]), ("silent", ["silent", "native"]))
+        with self.assertRaisesRegex(ValueError, "声音"):
+            catalog.validate(GenerationParameters("x", workflow="minimax_h3", workflow_options={"h3_audio": "loud"}))
         with self.assertRaises(ValueError):
             catalog.validate(GenerationParameters("x", workflow="minimax_h3", count=2))
         with self.assertRaises(ValueError):

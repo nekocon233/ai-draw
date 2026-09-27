@@ -35,15 +35,31 @@ class MiniMaxH3Tests(unittest.TestCase):
             get_minimax_h3_frame_count(15.1)
 
     def test_options_reject_unknown_or_invalid_values(self):
-        self.assertEqual(validate_minimax_h3_options(None), (5.0, "auto"))
+        # Missing audio (including historical messages) means a silent video.
+        self.assertEqual(validate_minimax_h3_options(None), (5.0, "auto", False))
         self.assertEqual(
             validate_minimax_h3_options({"h3_duration": "10", "h3_aspect_ratio": "9:16"}),
-            (10.0, "9:16"),
+            (10.0, "9:16", False),
         )
+        self.assertEqual(validate_minimax_h3_options({"h3_audio": "silent"}), (5.0, "auto", False))
+        self.assertEqual(validate_minimax_h3_options({"h3_audio": "native"}), (5.0, "auto", True))
         with self.assertRaisesRegex(ValueError, "未知参数"):
             validate_minimax_h3_options({"duration": "5"})
         with self.assertRaisesRegex(ValueError, "不支持画幅"):
             validate_minimax_h3_options({"h3_aspect_ratio": "2:1"})
+        for value in ("on", True, ""):
+            with self.subTest(audio=value), self.assertRaisesRegex(ValueError, "声音"):
+                validate_minimax_h3_options({"h3_audio": value})
+
+    def test_silent_video_drops_only_the_audio_track(self):
+        workflow = deepcopy(self.workflow)
+        remove_nodes_by_title(workflow, ["h3_decode_audio"])
+        titles = {node.get("_meta", {}).get("title"): node for node in workflow.values()}
+        self.assertNotIn("h3_decode_audio", titles)
+        self.assertNotIn("audio", titles["h3_mux_video"]["inputs"])
+        # The sampled latent and video decode stay untouched, so the frames are unchanged.
+        self.assertEqual(titles["h3_mux_video"]["inputs"]["images"], self.workflow["15"]["inputs"]["images"])
+        self.assertEqual(titles["h3_decode_video"], self.workflow["13"])
 
     def test_resolution_presets_match_h3_native_canvas(self):
         self.assertEqual(get_minimax_h3_resolution("16:9"), (1344, 768))

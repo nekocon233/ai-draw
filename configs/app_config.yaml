@@ -38,6 +38,7 @@ workflow_defaults:
       output_type: "image"
       lora_models:
         - {name: "Ameniwa.safetensors", label: "Ameniwa"}
+        - {name: "sen.safetensors", label: "sen"}
       prompt_template: "你是 Qwen-Image-2.1 图像生成提示词专家。将描述扩写为明确的中文自然语言提示词，忠实保留主体、文字、构图和用户指定的画风。不要擅自添加风格词；用户要求透明背景时明确 alpha 透明通道。\n描述：{desc}\n只输出提示词："
       parameters: &qwen_image_21_parameters
         - {name: "prompt", label: "画面描述", type: "text", default: ""}
@@ -83,26 +84,27 @@ workflow_defaults:
     minimax_h3_ref:
       provider: "comfyui_minimax_h3_ref"
       label: "动作参考视频（MiniMax H3）"
-      description: "保留原图人物、背景和固定镜头，自动识别 1–8 张动作图，只改变姿势"
+      description: "主体图加 1–8 张有序参考图：默认固定原图场景与镜头、只改姿势；选「参考镜头动作」时只取主体外观，镜头与动作跟随参考图"
       category: "图生视频"
       method: "MiniMax H3 · 动作参考"
       default_prompt_preset_id: "video_fixed_camera"
       requires_image: true
       supports_motion_reference: true
       max_motion_reference_images: 8
-      reference_image_label: "角色与场景图"
-      reference_image_description: "保留人物、背景、光照、画风、镜头与取景，只按下方动作图改变姿势"
+      reference_image_label: "主体图"
+      reference_image_description: "按所选预设使用：固定镜头动作保留原图场景与镜头，参考镜头动作只取人物或元素外观"
       output_type: "video"
-      # 固定画面要求和参考动作由服务端拼接，扩写只处理用户的补充描述
-      prompt_template: "你是固定画面动作动画的补充描述扩写助手。保持原图人物、画风、背景、光照与固定镜头，以及按动作参考图顺序完成基本动作，这些要求都由系统自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容（包括看图得到的动作）保持原意和顺序，不删减。不得新增、替换或改变参考动作，不引入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
+      # 主体外观、镜头画面要求和参考动作由服务端按预设拼接，扩写只处理用户的补充描述
+      prompt_template: "你是动作参考视频的补充描述扩写助手。主体外观、镜头与画面要求，以及按参考图顺序完成的基本动作，都由系统按所选预设自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容（包括看图得到的镜头与动作）保持原意和顺序，不删减。不得新增、替换或改变参考图给出的镜头和动作，不擅自加入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
       parameters:
         - {name: "prompt", label: "额外补充（可留空）", type: "text", default: ""}
         - {name: "h3_duration", label: "时长（秒）", type: "select", options: ["4", "5", "6", "8", "10", "12", "15"], default: "5"}
-        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "跟随原图（固定画面）"}, default: "auto"}
+        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "自动（固定镜头按原图，参考镜头按首张参考图）"}, default: "auto"}
+        - &h3_audio {name: "h3_audio", label: "声音", type: "select", options: ["silent", "native"], option_labels: {silent: "无声", native: "原生双声道音频"}, default: "silent"}
     minimax_h3:
       provider: "comfyui_minimax_h3"
       label: "MiniMax H3 · 首尾帧"
-      description: "支持文本及可选首尾关键帧，原生生成同步双声道音视频"
+      description: "支持文本及可选首尾关键帧，可选同步生成双声道音频（默认无声）"
       category: "图生视频"
       method: "MiniMax H3 · 首尾帧"
       default_prompt_preset_id: "video_transition"
@@ -125,3 +127,4 @@ workflow_defaults:
           type: "select"
           options: ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
           default: "auto"
+        - *h3_audio
