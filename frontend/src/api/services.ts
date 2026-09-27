@@ -19,6 +19,7 @@ import type {
   LastTaskInfo,
   WorkflowParameterValue,
   LoraModelsResponse,
+  SessionOutlineRound,
 } from '../types/api';
 import type { ChatSession } from '../types/models';
 
@@ -206,6 +207,9 @@ export const apiService = {
 
   getMessageRound: (sessionId: string, assistantMessageId: string): Promise<{ messages: unknown[] }> =>
     client.get(`/chat/sessions/${sessionId}/rounds/${assistantMessageId}`),
+
+  getSessionOutline: (sessionId: string): Promise<{ rounds: SessionOutlineRound[] }> =>
+    client.get(`/chat/sessions/${sessionId}/outline`),
 
   updateMessageContent: (messageId: string, data: {
     content?: string;

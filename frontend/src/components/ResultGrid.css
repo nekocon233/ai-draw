@@ -84,6 +84,21 @@
   border-radius: 24px;
 }
 
+/* 导航条跳转的落点：气泡描边淡出 */
+.chat-message.is-nav-target .chat-message-bubble {
+  animation: round-nav-flash 1.6s ease-out;
+}
+
+@keyframes round-nav-flash {
+  from {
+    box-shadow: 0 0 0 3px var(--control-accent);
+  }
+
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
 .load-earlier-messages {
   display: flex;
   justify-content: center;

@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only, selectinload
 from sqlalchemy import func
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
@@ -110,6 +110,17 @@ def _summary_text(message: ChatMessage) -> str:
     return ' '.join(part for part in parts if part)
 
 
+def _media_url(path: str) -> str:
+    if path.startswith(('data:', '/')):
+        return path
+    return get_file_storage().get_file_url(path)
+
+
+def _media_urls(message: ChatMessage) -> list[str]:
+    images = sorted(message.images, key=lambda item: (item.image_index is None, item.image_index or 0))
+    return [_media_url(image.file_path) for image in images]
+
+
 def _serialize_message(message: ChatMessage) -> dict:
     payload = {
         'id': message.message_id,
@@ -145,20 +156,7 @@ def _serialize_message(message: ChatMessage) -> dict:
         params.update({key: value for key, value in optional_params.items() if value is not None})
         payload['params'] = params
     elif message.type == 'assistant':
-        file_storage = get_file_storage()
-
-        def to_url(path: str) -> str:
-            if path.startswith(('data:', '/')):
-                return path
-            return file_storage.get_file_url(path)
-
-        payload['images'] = [
-            to_url(image.file_path)
-            for image in sorted(
-                message.images,
-                key=lambda item: (item.image_index is None, item.image_index or 0),
-            )
-        ]
+        payload['images'] = _media_urls(message)
     return payload
 
 @router.get("/sessions", response_model=List[SessionResponse])
@@ -528,6 +526,56 @@ def get_message_round(
     if not any(message.message_id == source_message_id and message.type == 'user' for message in messages):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="消息轮次不存在")
     return {'messages': [_serialize_message(message) for message in messages]}
+
+
+OUTLINE_TEXT_LIMIT = 160
+OUTLINE_MEDIA_LIMIT = 4
+
+
+@router.get("/sessions/{session_id}/outline")
+def get_session_outline(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """整个会话的轮次摘要，供结果区导航条预览和定位尚未加载的旧轮次。"""
+    session = db.query(ChatSession.id).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.user_id == current_user.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    # 历史参考图列可能存着 base64，摘要只取需要的列
+    messages = db.query(ChatMessage).options(
+        load_only(
+            ChatMessage.message_id, ChatMessage.type, ChatMessage.content, ChatMessage.workflow,
+            ChatMessage.prompt_preset, ChatMessage.created_at,
+        ),
+        selectinload(ChatMessage.images),
+    ).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.user_id == current_user.id,
+    ).order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc()).all()
+
+    replies = {message.message_id: message for message in messages if message.type == 'assistant'}
+    rounds = []
+    for message in messages:
+        if message.type != 'user':
+            continue
+        reply = replies.get(f'{message.message_id}-reply')
+        media = [url for url in _media_urls(reply) if not url.startswith('data:')] if reply else []
+        preset = message.prompt_preset if isinstance(message.prompt_preset, dict) else {}
+        rounds.append({
+            'id': message.message_id,
+            'timestamp': int(message.created_at.timestamp() * 1000),
+            'content': (message.content or '')[:OUTLINE_TEXT_LIMIT],
+            'preset_title': preset.get('title'),
+            'workflow': message.workflow,
+            'media': media[:OUTLINE_MEDIA_LIMIT],
+            'media_count': len(media),
+        })
+    return {'rounds': rounds}
 
 
 @router.patch("/messages/{message_id}")

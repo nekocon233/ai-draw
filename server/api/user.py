@@ -234,7 +234,7 @@ def get_chat_history(
     if session_id:
         query = query.filter(ChatMessage.session_id == session_id)
     
-    messages = query.order_by(ChatMessage.created_at.desc()).offset(offset).limit(limit + 1).all()
+    messages = query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).offset(offset).limit(limit + 1).all()
     has_more = len(messages) > limit
     messages = messages[:limit]
     

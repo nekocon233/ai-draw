@@ -30,6 +30,9 @@ import { getMotionReferenceError, MAX_MOTION_REFERENCES } from '../utils/motionR
 import { captureComposer, fromApiInputDrafts, inputGroupOf, switchComposer, toApiInputDrafts, type ComposerDrafts } from '../utils/composerDrafts';
 
 
+/** loaded：合并了一页；end：没有更早记录；error：请求失败；stale：会话已切换 */
+export type EarlierMessagesResult = 'loaded' | 'end' | 'error' | 'stale';
+
 export interface GenerationSettingsDraft {
   workflow: string;
   strength: number;
@@ -152,7 +155,7 @@ export interface AppState extends GenerationSlice {
     newPromptPreset?: PromptPreset | null
   ) => Promise<void>;
   clearChatHistory: () => void;
-  loadEarlierMessages: () => Promise<void>;
+  loadEarlierMessages: () => Promise<EarlierMessagesResult>;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
@@ -291,6 +294,8 @@ let sessionConfigLoading = false;
 let promptPresetLoadSequence = 0;
 let sessionConfigSaveTimer: number | undefined;
 const sessionConfigSaveChains = new Map<string, Promise<void>>();
+// 同一会话的并发调用（按钮、会话位置恢复、导航条跳转）共用一次请求
+let earlierMessagesRequest: { sessionId: string; promise: Promise<EarlierMessagesResult> } | null = null;
 
 export const useAppStore = create<AppState>((set, get, store) => ({
   ...createGenerationSlice(set, get, store),
@@ -947,36 +952,48 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     }
   },
   clearChatHistory: () => set({ chatHistory: [], hasEarlierMessages: false }),
-  loadEarlierMessages: async () => {
+  loadEarlierMessages: () => {
     const state = get();
     const sessionId = state.currentSessionId;
-    if (!sessionId || !isLoggedIn() || !state.hasEarlierMessages || state.isLoadingEarlierMessages) return;
+    if (!sessionId || !isLoggedIn()) return Promise.resolve('stale');
+    if (earlierMessagesRequest?.sessionId === sessionId) return earlierMessagesRequest.promise;
+    if (!state.hasEarlierMessages) return Promise.resolve('end');
 
+    const request = { sessionId } as NonNullable<typeof earlierMessagesRequest>;
+    earlierMessagesRequest = request;
     set({ isLoadingEarlierMessages: true });
-    try {
-      const response = await apiService.getChatHistory(50, sessionId, state.chatHistory.length);
-      if (get().currentSessionId !== sessionId) return;
-      const olderMessages: ChatMessage[] = (response.messages as ApiChatMessage[]).map(message => ({
-        id: message.id,
-        session_id: sessionId,
-        type: message.type,
-        content: message.content || '',
-        images: message.images || [],
-        timestamp: message.timestamp,
-        params: message.params || undefined,
-      }));
-      set(current => {
-        const existingIds = new Set(current.chatHistory.map(message => message.id));
-        return {
-          chatHistory: [...olderMessages.filter(message => !existingIds.has(message.id)), ...current.chatHistory],
-          hasEarlierMessages: response.has_more === true,
-        };
-      });
-    } catch (error) {
-      console.error('加载更早记录失败:', error);
-    } finally {
-      set({ isLoadingEarlierMessages: false });
-    }
+    request.promise = (async (): Promise<EarlierMessagesResult> => {
+      try {
+        const response = await apiService.getChatHistory(50, sessionId, get().chatHistory.length);
+        if (get().currentSessionId !== sessionId) return 'stale';
+        const olderMessages: ChatMessage[] = (response.messages as ApiChatMessage[]).map(message => ({
+          id: message.id,
+          session_id: sessionId,
+          type: message.type,
+          content: message.content || '',
+          images: message.images || [],
+          timestamp: message.timestamp,
+          params: message.params || undefined,
+        }));
+        set(current => {
+          const existingIds = new Set(current.chatHistory.map(message => message.id));
+          return {
+            chatHistory: [...olderMessages.filter(message => !existingIds.has(message.id)), ...current.chatHistory],
+            hasEarlierMessages: response.has_more === true,
+          };
+        });
+        return 'loaded';
+      } catch (error) {
+        console.error('加载更早记录失败:', error);
+        return get().currentSessionId === sessionId ? 'error' : 'stale';
+      } finally {
+        if (earlierMessagesRequest === request) {
+          earlierMessagesRequest = null;
+          set({ isLoadingEarlierMessages: false });
+        }
+      }
+    })();
+    return request.promise;
   },
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),

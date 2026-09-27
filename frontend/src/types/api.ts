@@ -106,6 +106,17 @@ export interface GenerateMediaResponse {
   count: number;
 }
 
+// 会话轮次摘要：结果区导航条据此预览和定位尚未加载的旧轮次
+export interface SessionOutlineRound {
+  id: string;               // 用户消息 ID
+  timestamp: number;
+  content: string;          // 用户描述，服务端截断
+  preset_title?: string | null;
+  workflow?: string | null;
+  media: string[];          // 前几个可展示的结果 URL
+  media_count: number;
+}
+
 // 上传图片响应
 export interface UploadImageResponse {
   success: boolean;

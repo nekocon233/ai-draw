@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, useCallback } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Image, Tag, Button, Popconfirm, message as antMessage } from 'antd';
 import {
   DownloadOutlined, PictureOutlined, ReloadOutlined,
@@ -17,6 +17,10 @@ import MotionReferenceImages from './MotionReferenceImages';
 import MotionPromptPanel from './MotionPromptPanel';
 import { motionPromptSource } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
+import { isVideoUrl } from '../utils/media';
+import { buildNavigatorRounds, loadUntilFound } from '../utils/roundNavigator';
+import { useSessionOutline } from '../hooks/useSessionOutline';
+import RoundNavigator from './RoundNavigator';
 import './ResultGrid.css';
 
 const loadFrameEditors = () => import('./FrameExtractionModal');
@@ -25,6 +29,25 @@ const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default
 
 type EditReferenceSlot = 'img1' | 'img2' | 'img3' | 'imgEnd';
 type EditReferences = Partial<Record<EditReferenceSlot, string | null>>;
+
+// 跳转落点离结果区顶部的最小距离，避开顶部状态栏和手机菜单按钮
+const NAV_TARGET_MIN_OFFSET = 56;
+
+const nextFrames = () => new Promise<void>(resolve => {
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+});
+
+// 导航条跳转后给目标轮次一个短暂的描边提示
+function flashRound(element: HTMLElement) {
+  if (element.classList.contains('is-nav-target')) return;
+  const onEnd = (event: AnimationEvent) => {
+    if (event.animationName !== 'round-nav-flash') return;
+    element.classList.remove('is-nav-target');
+    element.removeEventListener('animationend', onEnd);
+  };
+  element.addEventListener('animationend', onEnd);
+  element.classList.add('is-nav-target');
+}
 
 function normalizeEditReferences(content: string, images: EditReferences, mentionsEnabled: boolean) {
   const compact = compactImageReferences(content, [images.img1, images.img2, images.img3]);
@@ -75,6 +98,8 @@ export default function ResultGrid() {
   const isNearBottomRef = useRef(true);
   // 挂载前的发送已由会话首次加载滚到底，只响应挂载后的新发送
   const handledScrollRequestRef = useRef(scrollToLatestRequest);
+  // 导航代数：导航条跳转和用户发送各加一。已排好的被动跟随、会话位置恢复发现代数变了就放弃，不覆盖用户的选择
+  const navTokenRef = useRef(0);
   const historyMatchesCurrentSession = Boolean(
     currentSessionId
     && chatHistory.length > 0
@@ -142,7 +167,8 @@ export default function ResultGrid() {
   }, []);
 
   // 按「顶部可见消息 + 相对偏移」恢复。相比纯 scrollTop，它能抵抗刷新后图片逐步加载造成的重排。
-  const restoreScrollPosition = useCallback((position: StoredScrollPosition) => {
+  // maxAttempts：100ms 间隔的最多校正次数，默认约 10 秒
+  const restoreScrollPosition = useCallback((position: StoredScrollPosition, { maxAttempts = 100 }: { maxAttempts?: number } = {}) => {
     const container = getScrollContainer();
     if (!container) return;
     const gen = ++restoreGenRef.current;
@@ -151,7 +177,6 @@ export default function ResultGrid() {
     let lastHeight = -1;
     let heightStable = 0;
     let attempts = 0;
-    const maxAttempts = 100; // 100ms 间隔，最多校正约 10 秒
     const tick = () => {
       if (gen !== restoreGenRef.current) return; // 被更新的恢复取代
       if (!isRestoringRef.current) return;
@@ -175,9 +200,13 @@ export default function ResultGrid() {
       lastHeight = sh;
       attempts += 1;
       const anchorAfter = findMessageElement(el, position.messageId);
-      const reached = anchorAfter
-        ? Math.abs((anchorAfter.getBoundingClientRect().top - el.getBoundingClientRect().top) - (position.offset ?? 0)) < 1
-        : Math.abs(lastSetTop - position.scrollTop) < 1;
+      // 正值表示还需要往下滚
+      const remaining = anchorAfter
+        ? (anchorAfter.getBoundingClientRect().top - el.getBoundingClientRect().top) - (position.offset ?? 0)
+        : position.scrollTop - lastSetTop;
+      // 已经滚到顶或到底、无法再靠近时也算到位，例如跳到最后几轮
+      const atEdge = (remaining > 0 && lastSetTop >= el.scrollHeight - el.clientHeight - 1) || (remaining < 0 && lastSetTop <= 0);
+      const reached = Math.abs(remaining) < 1 || atEdge;
       const hasPendingImagesBeforeAnchor = Array.from(el.querySelectorAll<HTMLImageElement>('img')).some(image => {
         if (image.complete) return false;
         if (!anchorAfter) return true;
@@ -196,6 +225,92 @@ export default function ResultGrid() {
     };
     requestAnimationFrame(tick);
   }, [findMessageElement, getScrollContainer]);
+
+  // 同时记下会话与位置：只更新位置时，flush 可能把它存进别的会话
+  const rememberScrollPosition = useCallback((sessionId: string, position: StoredScrollPosition) => {
+    latestScrollSessionRef.current = sessionId;
+    latestScrollPositionRef.current = position;
+    setScrollPosition(sessionId, position);
+  }, []);
+
+  // ---- 对话轮次导航 ----
+  const { rounds: sessionOutline, forget: forgetOutlineRound, refresh: refreshOutline } = useSessionOutline(
+    currentSessionId,
+    hasEarlierMessages && historyMatchesCurrentSession,
+  );
+  const navigatorRounds = useMemo(
+    () => (historyMatchesCurrentSession
+      ? buildNavigatorRounds(chatHistory, hasEarlierMessages ? sessionOutline : null, currentGeneratingMessageId)
+      : []),
+    [chatHistory, currentGeneratingMessageId, hasEarlierMessages, historyMatchesCurrentSession, sessionOutline],
+  );
+  const workflowLabels = useMemo(
+    () => Object.fromEntries(availableWorkflows.map(item => [item.key, item.label])),
+    [availableWorkflows],
+  );
+
+  const jumpToRound = useCallback(async (roundId: string) => {
+    const sessionId = useAppStore.getState().currentSessionId;
+    if (!sessionId) return;
+    const navToken = ++navTokenRef.current;
+    const gen = ++restoreGenRef.current; // 取消在途的位置恢复，由本次跳转接管
+    isRestoringRef.current = true; // 期间暂停位置保存、贴底和被动跟随
+    isNearBottomRef.current = false;
+    const alive = () => navTokenRef.current === navToken
+      && restoreGenRef.current === gen
+      && isRestoringRef.current
+      && useAppStore.getState().currentSessionId === sessionId;
+    const locate = () => {
+      const container = getScrollContainer();
+      return container ? findMessageElement(container, roundId) : null;
+    };
+    let handedOff = false;
+    try {
+      if (!locate()) {
+        // 先回到顶部：这里正好显示「加载更早记录」的进度，往前插入内容时视口也不会乱跳
+        const container = getScrollContainer();
+        if (container) container.scrollTop = 0;
+        const result = await loadUntilFound({
+          find: () => locate() !== null,
+          hasMore: () => useAppStore.getState().hasEarlierMessages,
+          load: () => useAppStore.getState().loadEarlierMessages(),
+          alive,
+          settle: nextFrames,
+        });
+        if (result === 'cancelled') return;
+        if (result === 'error') {
+          antMessage.error('加载更早记录失败，请重试');
+          return;
+        }
+        if (result === 'missing') {
+          const latest = await refreshOutline();
+          if (alive()) {
+            const stillExists = latest === null || latest.some(round => round.id === roundId);
+            antMessage.warning(stillExists ? '没能定位到这一轮，请刷新页面后重试' : '这一轮对话已不存在');
+          }
+          return;
+        }
+      }
+      const container = getScrollContainer();
+      const target = locate();
+      if (!container || !target) return;
+      const offset = Math.max(parseFloat(window.getComputedStyle(container).paddingTop) || 0, NAV_TARGET_MIN_OFFSET);
+      const position: StoredScrollPosition = {
+        scrollTop: Math.max(0, container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - offset),
+        messageId: roundId,
+        offset,
+        savedAt: Date.now(),
+      };
+      rememberScrollPosition(sessionId, position);
+      handedOff = true;
+      restoreScrollPosition(position, { maxAttempts: 30 });
+      flashRound(target);
+    } catch (error) {
+      console.error('跳转到对话轮次失败:', error);
+    } finally {
+      if (!handedOff && restoreGenRef.current === gen) isRestoringRef.current = false;
+    }
+  }, [findMessageElement, getScrollContainer, refreshOutline, rememberScrollPosition, restoreScrollPosition]);
 
   // ---- 编辑状态 ----
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
@@ -291,8 +406,6 @@ export default function ResultGrid() {
     e.target.value = '';
   }, [updateEditReference]);
 
-  const isVideo = (url: string) => url.startsWith('data:video/') || /\.(mp4|webm)$/i.test(url) || url.includes('/video/');
-
   const getEditReferenceSlots = (params?: {
     workflow: string;
     referenceImage?: string;
@@ -352,7 +465,10 @@ export default function ResultGrid() {
       prevHistoryLength.current = chatHistory.length;
       const sid = currentSessionId as string;
       const saved = getScrollPosition(sid);
+      // 恢复期间用户已经用导航条跳转过，就不再拉回上次位置
+      const navToken = navTokenRef.current;
       setTimeout(() => {
+        if (navTokenRef.current !== navToken) return;
         if (saved == null) {
           scrollToBottom('auto');
           return;
@@ -360,16 +476,17 @@ export default function ResultGrid() {
         isNearBottomRef.current = false;
         void (async () => {
           let pagesLoaded = 0;
-          while (saved.messageId && pagesLoaded < 20) {
+          while (saved.messageId && pagesLoaded < 20 && navTokenRef.current === navToken) {
             const container = getScrollContainer();
             if (container && findMessageElement(container, saved.messageId)) break;
             const state = useAppStore.getState();
             if (state.currentSessionId !== sid || !state.hasEarlierMessages) break;
-            await state.loadEarlierMessages();
+            const result = await state.loadEarlierMessages();
+            if (result === 'error' || result === 'stale') break;
             pagesLoaded += 1;
             await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
           }
-          if (useAppStore.getState().currentSessionId === sid) restoreScrollPosition(saved);
+          if (useAppStore.getState().currentSessionId === sid && navTokenRef.current === navToken) restoreScrollPosition(saved);
         })();
       }, 50);
       return;
@@ -378,7 +495,12 @@ export default function ResultGrid() {
     // 当前会话内消息条数变化（发消息 / 生成 / 删除）→ 平滑滚到底
     if (chatHistory.length !== prevHistoryLength.current) {
       prevHistoryLength.current = chatHistory.length;
-      if (isNearBottomRef.current) setTimeout(() => scrollToBottom('smooth'), 50);
+      if (isNearBottomRef.current) {
+        const navToken = navTokenRef.current;
+        setTimeout(() => {
+          if (navTokenRef.current === navToken && !isRestoringRef.current) scrollToBottom('smooth');
+        }, 50);
+      }
     }
   }, [chatHistory, currentSessionId, findMessageElement, getScrollContainer, restoreScrollPosition, scrollToBottom]);
 
@@ -403,8 +525,9 @@ export default function ResultGrid() {
     if (!hasNewMedia || !isNearBottomRef.current) return;
 
     const sessionAtSchedule = currentSessionId;
+    const navToken = navTokenRef.current;
     [50, 250, 700].forEach(delay => window.setTimeout(() => {
-      if (prevSessionId.current === sessionAtSchedule) scrollToBottom('smooth');
+      if (prevSessionId.current === sessionAtSchedule && navTokenRef.current === navToken) scrollToBottom('smooth');
     }, delay));
   }, [chatHistory, currentSessionId, scrollToBottom]);
 
@@ -413,8 +536,10 @@ export default function ResultGrid() {
     if (scrollToLatestRequest === handledScrollRequestRef.current) return;
     handledScrollRequestRef.current = scrollToLatestRequest;
     const sessionAtSchedule = useAppStore.getState().currentSessionId;
+    // 发送优先于之前的导航条跳转；发送后再跳转则以跳转为准
+    const navToken = ++navTokenRef.current;
     const timers = [50, 300, 800].map(delay => window.setTimeout(() => {
-      if (useAppStore.getState().currentSessionId === sessionAtSchedule) scrollToBottom('smooth');
+      if (useAppStore.getState().currentSessionId === sessionAtSchedule && navTokenRef.current === navToken) scrollToBottom('smooth');
     }, delay));
     return () => timers.forEach(timer => window.clearTimeout(timer));
   }, [scrollToLatestRequest, scrollToBottom]);
@@ -428,10 +553,10 @@ export default function ResultGrid() {
       isNearBottomRef.current = distanceFromBottom <= 120;
       const rect = container.getBoundingClientRect();
       setShowScrollToBottom(distanceFromBottom > 120);
-      setScrollButtonPosition({
-        left: rect.left + rect.width / 2,
-        bottom: window.innerHeight - rect.bottom + 14,
-      });
+      const left = rect.left + rect.width / 2;
+      const bottom = window.innerHeight - rect.bottom + 14;
+      // 位置不变时保持同一对象，避免每次滚动都重渲染整个列表
+      setScrollButtonPosition(previous => (previous.left === left && previous.bottom === bottom ? previous : { left, bottom }));
     };
 
     // 输入框变高会压缩结果区：原本停在底部时保持贴底，最新内容不被挡住，之后的新结果也照常自动滚动
@@ -483,7 +608,11 @@ export default function ResultGrid() {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => saveNow(position), 50);
     };
-    const cancelRestore = () => { isRestoringRef.current = false; };
+    const cancelRestore = (event: Event) => {
+      // 在导航条上按方向键预览不算用户滚动，不能打断跳转后的位置校正
+      if (event.target instanceof Element && event.target.closest('.round-nav, .round-nav-preview')) return;
+      isRestoringRef.current = false;
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flush();
     };
@@ -511,7 +640,7 @@ export default function ResultGrid() {
     chatHistory.forEach(message => {
       if (message.type !== 'assistant' || !message.images) return;
       message.images.forEach((image, imgIndex) => {
-        if (typeof image !== 'string' || isVideo(image) || !image.includes('/uploads/spritesheet/')) return;
+        if (typeof image !== 'string' || isVideoUrl(image) || !image.includes('/uploads/spritesheet/')) return;
         candidates.push({ key: `${message.id}:${imgIndex}`, url: image });
       });
     });
@@ -563,7 +692,7 @@ export default function ResultGrid() {
   const downloadImage = (imageUrl: string, index: number) => {
     const link = document.createElement('a');
     link.href = imageUrl;
-    link.download = `ai-draw-${Date.now()}-${index + 1}.${isVideo(imageUrl) ? 'mp4' : 'png'}`;
+    link.download = `ai-draw-${Date.now()}-${index + 1}.${isVideoUrl(imageUrl) ? 'mp4' : 'png'}`;
     link.click();
   };
 
@@ -845,7 +974,10 @@ export default function ResultGrid() {
                     />
                     <Popconfirm
                       title="确认删除这轮对话？"
-                      onConfirm={() => deleteChatMessage(message.id)}
+                      onConfirm={() => {
+                        forgetOutlineRound(message.id);
+                        return deleteChatMessage(message.id);
+                      }}
                       okText="删除"
                       cancelText="取消"
                       okButtonProps={{ danger: true }}
@@ -881,7 +1013,7 @@ export default function ResultGrid() {
                     >
                       {typeof image === 'string' ? (() => {
                         const mediaKey = `${message.id}:${imgIndex}`;
-                        const video = isVideo(image);
+                        const video = isVideoUrl(image);
                         const stripImage = stripImageKeys.has(mediaKey);
                         const failed = failedMediaKeys.has(mediaKey);
                         const retryVersion = mediaRetryVersions[mediaKey] ?? 0;
@@ -1023,6 +1155,14 @@ export default function ResultGrid() {
         tabIndex={showScrollToBottom ? 0 : -1}
         title="回到最新结果"
       />
+      {navigatorRounds.length > 1 && (
+        <RoundNavigator
+          rounds={navigatorRounds}
+          getContainer={getScrollContainer}
+          onJump={jumpToRound}
+          workflowLabels={workflowLabels}
+        />
+      )}
       <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载媒体编辑器...</div>}>
         {frameEditor && (
           <FrameExtractionModal
