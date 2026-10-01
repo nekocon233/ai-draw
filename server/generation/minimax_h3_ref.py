@@ -120,6 +120,7 @@ class MiniMaxH3ReferenceProvider:
             images=[request.images[0], *request.motion_images],
             # Reference shots own the framing, so the automatic canvas follows the first reference.
             duration=duration, aspect_ratio="auto", audio=audio, canvas_image_index=1 if mode == "shot" else 0,
+            seed=request.seed,
         )
         if not result:
             raise RuntimeError("MiniMax H3 动作参考未返回视频")

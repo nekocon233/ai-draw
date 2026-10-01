@@ -1,4 +1,5 @@
 import type { LastTaskInfo, WSMessage } from '../../types/api';
+import { readMediaSeed } from '../../utils/generationSeed.ts';
 
 export interface GenerationState {
   isGenerating: boolean;
@@ -14,7 +15,7 @@ export interface GenerationEventPort {
   start(messageId: string, taskId: string | null): void;
   finish(): void;
   retainImages(messageId: string): void;
-  appendMedia(messageId: string, image: string, index: number): void;
+  appendMedia(messageId: string, image: string, index: number, seed: number | null): void;
   refreshRound(sessionId: string, messageId: string): Promise<string[]>;
   notify(kind: 'info' | 'success' | 'warning' | 'error', text: string): void;
 }
@@ -97,7 +98,7 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
       const value = message.value as Record<string, unknown>;
       if (typeof value.image === 'string' && value.image && typeof value.index === 'number'
         && Number.isInteger(value.index) && value.index >= 0) {
-        port.appendMedia(messageId, value.image, value.index);
+        port.appendMedia(messageId, value.image, value.index, readMediaSeed(value.seed));
       }
     }
   };

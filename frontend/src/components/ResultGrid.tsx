@@ -18,6 +18,7 @@ import MotionPromptPanel from './MotionPromptPanel';
 import { motionPromptSource } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
 import { isVideoUrl } from '../utils/media';
+import { getFixedSeed, getSeedParameter } from '../utils/generationSeed';
 import { buildNavigatorRounds, loadUntilFound } from '../utils/roundNavigator';
 import { useSessionOutline } from '../hooks/useSessionOutline';
 import RoundNavigator from './RoundNavigator';
@@ -78,6 +79,18 @@ export default function ResultGrid() {
   const formatLora = (loraPrompt: string, workflow?: string) =>
     formatLoraPromptForDisplay(loraPrompt, availableWorkflows.find(item => item.key === workflow)?.lora_labels);
   const isWorkflowAvailable = (workflow?: string) => availableWorkflows.some(item => item.key === workflow);
+  const fixedSeedOf = (params?: { workflow: string; workflowOptions?: Record<string, unknown> }) =>
+    params ? getFixedSeed(availableWorkflows.find(item => item.key === params.workflow), params.workflowOptions) : null;
+  // 助手消息的种子属于上一条用户消息所选的工作流
+  const roundWorkflows = useMemo(() => {
+    const workflows = new Map<string, string>();
+    let workflow: string | undefined;
+    for (const message of chatHistory) {
+      if (message.type === 'user') workflow = message.params?.workflow;
+      else if (workflow) workflows.set(message.id, workflow);
+    }
+    return workflows;
+  }, [chatHistory]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevHistoryLength = useRef<number>(0);
@@ -719,6 +732,21 @@ export default function ResultGrid() {
     antMessage.success('已添加到当前输入的参考图');
   };
 
+  const reuseSeed = (workflow: string | undefined, seed: number) => {
+    const state = useAppStore.getState();
+    const source = state.availableWorkflows.find(item => item.key === workflow);
+    const parameter = getSeedParameter(source);
+    if (!parameter) {
+      antMessage.warning('此生成方式已停用，无法复用种子');
+      return;
+    }
+    state.setSelectOption(parameter.name, seed);
+    const active = getSeedParameter(state.availableWorkflows.find(item => item.key === state.currentWorkflow));
+    antMessage.success(active?.name === parameter.name
+      ? `已固定种子 ${seed}，可在生成设置中改回随机`
+      : `已为「${source?.category ?? source?.label}」固定种子 ${seed}，切换过去后生效`);
+  };
+
   const openFrameEditor = (messageId: string, videoUrl: string) => {
     setFrameEditor({ messageId, videoUrl });
   };
@@ -851,6 +879,7 @@ export default function ResultGrid() {
                           {message.params.strength != null && <Tag>强度: {message.params.strength}</Tag>}
                           {message.params.count != null && message.params.count > 1 && <Tag>数量: {message.params.count}</Tag>}
                           {message.params.loraPrompt && <Tag>LoRA: {formatLora(message.params.loraPrompt, message.params.workflow)}</Tag>}
+                          {fixedSeedOf(message.params) !== null && <Tag>固定种子: {fixedSeedOf(message.params)}</Tag>}
                         </div>
                       )}
                       <div className="edit-actions">
@@ -946,6 +975,9 @@ export default function ResultGrid() {
                       {message.params.loraPrompt && (
                         <Tag>LoRA: {formatLora(message.params.loraPrompt, message.params.workflow)}</Tag>
                       )}
+                      {fixedSeedOf(message.params) !== null && (
+                        <Tag>固定种子: {fixedSeedOf(message.params)}</Tag>
+                      )}
                       {message.params.frameRate != null && (
                         <Tag>帧率: {message.params.frameRate}</Tag>
                       )}
@@ -1004,12 +1036,14 @@ export default function ResultGrid() {
                     className="chat-images-grid"
                     aria-busy={message.id === currentGeneratingMessageId}
                   >
-                    {message.images.map((image, imgIndex) => (
+                    {message.images.map((image, imgIndex) => {
+                    const seed = typeof image === 'string' ? message.mediaSeeds?.[image] : undefined;
+                    return (
                     <div
                       key={imgIndex}
                       className={`chat-image-item ${typeof image === 'string' && stripImageKeys.has(`${message.id}:${imgIndex}`) ? 'is-strip' : ''}`}
                       tabIndex={typeof image === 'string' ? 0 : undefined}
-                      aria-label={typeof image === 'string' ? `生成结果 ${imgIndex + 1}` : undefined}
+                      aria-label={typeof image === 'string' ? `生成结果 ${imgIndex + 1}${seed === undefined ? '' : `，种子 ${seed}`}` : undefined}
                     >
                       {typeof image === 'string' ? (() => {
                         const mediaKey = `${message.id}:${imgIndex}`;
@@ -1077,6 +1111,17 @@ export default function ResultGrid() {
                                 />
                               )}
                             </div>
+                            {seed !== undefined && (
+                              <button
+                                type="button"
+                                className="chat-image-seed"
+                                title="复用此种子"
+                                aria-label={`复用种子 ${seed}`}
+                                onClick={() => reuseSeed(roundWorkflows.get(message.id), seed)}
+                              >
+                                <span>种子 {seed}</span>
+                              </button>
+                            )}
                             <div className="chat-image-overlay" aria-label={`媒体 ${imgIndex + 1} 操作`}>
                               {!video && !failed && acceptsReferenceImage && (
                                 <Button type="text" size="small" icon={<PictureOutlined />} onClick={() => setAsReference(image)}>
@@ -1121,7 +1166,8 @@ export default function ResultGrid() {
                         </div>
                       )}
                     </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 ) : (
                   <div

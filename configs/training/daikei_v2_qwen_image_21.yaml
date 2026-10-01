@@ -1,0 +1,110 @@
+# Daikei v2 style LoRA. v1 captions named the style (flat_color, 粗黑轮廓…), so plain prompts got a weak, generic
+# flat look; Prodigy stayed at a constant 1.1e-4 with batch 1, so checkpoints swung. v2 changes, all in one run:
+# - style-free captions (scripts/prepare_qwen_image_21_style_free.py), no trigger word, higher caption dropout;
+# - text/signature regions masked out of the loss and trained toward the base prediction (inverted_mask_prior);
+# - non-black-hair images repeated twice (train_minor) to soften the 76% black-hair / 34% red-background skew;
+# - rank 32, AdamW8bit with cosine decay to a floor, EMA, 768/1024 buckets only.
+# Ameniwa/Sen (26-31 images) trained ~130-150 samples per image and read strongly; Daikei v1/CZN (~470 images)
+# got 17-32. 9000 single-sample updates give 15 (black hair) to 31 (others, repeated) samples per image.
+# Resumed from 9000 to 15000 (2026-09-29, user request): the cosine is re-evaluated at step 9000 of the new
+# 15000-step curve (LR back up to ~6.1e-5, then down to 3e-5); EMA restarts from the saved EMA weights.
+job: extension
+config:
+  name: DaikeiV2Qwen21
+  process:
+    - type: diffusion_trainer
+      training_folder: /app/ai-toolkit/output
+      sqlite_db_path: /app/ai-toolkit/aitk_db.db
+      device: cuda:0
+      network:
+        type: lora
+        linear: 32
+        linear_alpha: 32
+      save:
+        dtype: float16
+        save_every: 500
+        max_step_saves_to_keep: 40
+      datasets:
+        - folder_path: /app/ai-toolkit/datasets/daikei_v2_qwen21/train_main
+          caption_ext: txt
+          caption_dropout_rate: 0.1
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [768, 1024]
+          mask_path: /app/ai-toolkit/datasets/daikei_v2_masks
+          mask_min_value: 0.0
+          num_repeats: 1
+        - folder_path: /app/ai-toolkit/datasets/daikei_v2_qwen21/train_minor
+          caption_ext: txt
+          caption_dropout_rate: 0.1
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [768, 1024]
+          mask_path: /app/ai-toolkit/datasets/daikei_v2_masks
+          mask_min_value: 0.0
+          num_repeats: 2
+      train:
+        batch_size: 1
+        gradient_accumulation: 1
+        steps: 15000
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: shift
+        optimizer: adamw8bit
+        lr: 0.00012
+        lr_scheduler: cosine
+        lr_scheduler_params:
+          eta_min: 0.00003
+        optimizer_params:
+          weight_decay: 0.01
+        ema_config:
+          use_ema: true
+          ema_decay: 0.999
+        inverted_mask_prior: true
+        dtype: bf16
+        skip_first_sample: false
+        disable_sampling: false
+      model:
+        name_or_path: Comfy-Org/Qwen-Image-2.1
+        arch: qwen_image_2
+        quantize: true
+        qtype: convrot8
+        quantize_te: true
+        qtype_te: convrot8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_transformer_percent: 0.5
+        layer_offloading_text_encoder_percent: 1.0
+      sample:
+        sampler: flowmatch
+        sample_every: 1000
+        width: 1024
+        height: 1024
+        # The first five match SenQwen21 / DaikeiQwen21; the last two are the user's own everyday prompts.
+        samples:
+          - prompt: 一个女孩
+          - prompt: 一个二次元女孩
+          - prompt: 1girl, solo, black_hair, twintails, school_uniform, white_background
+          - prompt: 一个穿黄色雨衣的女孩，站在公交站旁，手持一把蓝色雨伞。
+          - prompt: A girl wearing a blue jacket, holding a red cup, simple white background.
+          - prompt: 穿着女仆装的女性，黑白配色
+          - prompt: 一个可爱的女学生，面容清秀，眼神明亮，带着自然亲切的微笑
+        neg: ""
+        seed: 42
+        walk_seed: false
+        guidance_scale: 1
+        network_multiplier: 0.8
+        sample_steps: 40
+      logging:
+        log_every: 1
+        use_ui_logger: true
+        use_wandb: false
+meta:
+  name: "[name]"
+  version: "3.0"
+  base_model: Qwen/Qwen-Image-2.1
+  caption_format: style_free_tags_then_chinese_paragraph

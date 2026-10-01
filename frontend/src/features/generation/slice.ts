@@ -3,6 +3,7 @@ import type { AppState } from '../../stores/appStore';
 import type { ApiChatMessage } from '../../types/models';
 import { apiService } from '../../api/services';
 import { isLoggedIn } from '../../utils/helpers';
+import { buildMediaSeeds } from '../../utils/generationSeed';
 
 export interface GenerationSlice {
   generationProgress: string;
@@ -55,6 +56,7 @@ export const createGenerationSlice: StateCreator<AppState, [], [], GenerationSli
       if (get().currentSessionId !== sessionId || get().generationRevision !== revision) return [];
       const round = (response.messages as ApiChatMessage[]).map(item => ({
         ...item, session_id: sessionId, content: item.content || '', images: item.images || [],
+        mediaSeeds: buildMediaSeeds(item.images, item.seeds),
       }));
       const byId = new Map(round.map(item => [item.id, item]));
       set(state => ({ chatHistory: state.chatHistory.map(item => byId.get(item.id) ?? item) }));

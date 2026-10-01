@@ -74,6 +74,8 @@ class ProviderInput:
     images: tuple[Optional[str], Optional[str], Optional[str]]
     end_image: Optional[str] = None
     motion_images: tuple[str, ...] = ()
+    # Chosen by the engine for workflows that declare a seed option; image n of a round uses base + n.
+    seed: Optional[int] = None
 
 
 @dataclass(frozen=True)

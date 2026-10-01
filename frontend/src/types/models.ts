@@ -80,6 +80,8 @@ export interface ApiChatMessage {
   type: 'user' | 'assistant';
   content?: string;
   images?: ChatMessage['images'];
+  /** Parallel to images: the seed each result used, null for edits and seedless workflows. */
+  seeds?: (number | null)[];
   timestamp: number;
   params?: ChatMessage['params'];
 }
@@ -93,6 +95,8 @@ export interface ChatMessage {
   type: 'user' | 'assistant';
   content: string;
   images?: (string | { loading: true })[];
+  /** Result URL → seed it was generated with; keyed by URL so edits and removed placeholders cannot shift it. */
+  mediaSeeds?: Record<string, number>;
   timestamp: number;
   params?: {
     workflow: string;

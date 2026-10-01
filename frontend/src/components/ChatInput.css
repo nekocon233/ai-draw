@@ -471,6 +471,22 @@
   transform: scale(0.95);
 }
 
+.chat-input-icon-button.has-fixed-seed {
+  position: relative;
+}
+
+.chat-input-icon-button.has-fixed-seed::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--control-accent);
+  box-shadow: 0 0 0 2px var(--bg-secondary);
+}
+
 .chat-input-attachment-button {
   height: 40px;
   min-width: 0;

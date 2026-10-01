@@ -67,3 +67,18 @@ test('retired Qwen seed and reference-mode options saved on sessions are not sen
   assert.deepEqual(getWorkflowOptions(qwen, { qwen_steps: '25', qwen_seed: '42', qwen_reference_mode: 'reference' }),
     { qwen_steps: '25' });
 });
+
+test('seed options are sent as a fixed integer or empty for random', () => {
+  const qwen: WorkflowMetadata = {
+    ...metadata,
+    key: 'qwen_image_21_t2i',
+    parameters: [{ name: 'qwen_fixed_seed', label: '种子', type: 'seed', min: 0, default: '' }],
+  };
+  assert.deepEqual(getWorkflowOptions(qwen, { qwen_fixed_seed: 42, h3_fixed_seed: 7 }), { qwen_fixed_seed: 42 });
+  assert.deepEqual(getWorkflowOptions(qwen, { qwen_fixed_seed: '42' }), { qwen_fixed_seed: 42 });
+  for (const value of [-1, 1.5, 'abc']) {
+    assert.deepEqual(getWorkflowOptions(qwen, { qwen_fixed_seed: value }), { qwen_fixed_seed: '' });
+  }
+  // Retired seed option names never reach the server.
+  assert.deepEqual(getWorkflowOptions(qwen, { qwen_seed: 42 }), { qwen_fixed_seed: '' });
+});

@@ -27,6 +27,7 @@ import MotionReferenceImages from './MotionReferenceImages';
 import { motionPromptSource, motionPromptSourceKey, rebindMotionPrompt, resolveMotionPrompt } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
 import { placeholderAutoSize } from '../utils/placeholderAutoSize';
+import { getFixedSeed } from '../utils/generationSeed';
 import './ChatInput.css';
 
 const SettingsModal = lazy(() => import('./SettingsModal'));
@@ -171,6 +172,9 @@ export default function ChatInput() {
     clearError: state.clearError,
   })));
   const workflowMeta = availableWorkflows.find(w => w.key === currentWorkflow);
+  // 固定种子时相同输入会得到同一结果，在设置按钮上提示
+  const fixedSeed = useAppStore(state => getFixedSeed(
+    state.availableWorkflows.find(item => item.key === state.currentWorkflow), state.selectOptions));
   const motionReferenceImages = useAppStore(state => state.motionReferenceImages);
   const setMotionReferenceImages = useAppStore(state => state.setMotionReferenceImages);
   const isMotionReference = workflowMeta?.supports_motion_reference === true;
@@ -945,9 +949,9 @@ export default function ChatInput() {
             {/* 参数设置 */}
             <button 
               type="button"
-              className="chat-input-icon-button" 
-              title="参数设置"
-              aria-label="打开生成设置"
+              className={`chat-input-icon-button${fixedSeed === null ? '' : ' has-fixed-seed'}`}
+              title={fixedSeed === null ? '参数设置' : `参数设置（已固定种子 ${fixedSeed}）`}
+              aria-label={fixedSeed === null ? '打开生成设置' : `打开生成设置，已固定种子 ${fixedSeed}`}
               onClick={() => setSettingsOpen(true)}
             >
               <SettingOutlined />

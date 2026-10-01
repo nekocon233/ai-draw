@@ -29,6 +29,8 @@ class GenerationTask:
     cancel_requested: bool = False
     runner: Optional[asyncio.Task] = None
     artifacts: list[str] = field(default_factory=list)
+    # Parallel to artifacts: the seed each result used, None when the workflow has no seed.
+    seeds: list[Optional[int]] = field(default_factory=list)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -119,6 +121,7 @@ class TaskManager:
             ),
             "phase": task.phase,
             "images": list(task.artifacts) if task.phase == "completed" else [],
+            "seeds": list(task.seeds) if task.phase == "completed" else [],
             "error": None,
             "finished_at": None,
         }

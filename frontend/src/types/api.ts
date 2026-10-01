@@ -96,6 +96,8 @@ export interface LastTaskInfo {
   status: 'running' | 'completed' | 'error';
   phase?: 'reserved' | 'running' | 'persisting' | 'completed' | 'error' | 'cancelled';
   images: string[];
+  /** Parallel to images once the task completes. */
+  seeds?: (number | null)[];
   error: string | null;
   finished_at: number | null;
 }
@@ -131,7 +133,7 @@ export interface WorkflowParameter {
   option_labels?: Record<string, string>;
   name: string;
   label: string;
-  type: 'number' | 'text' | 'select';
+  type: 'number' | 'text' | 'select' | 'seed';  // seed: '' 为随机，整数为固定种子
   min?: number;
   max?: number;
   step?: number;

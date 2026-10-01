@@ -87,6 +87,8 @@ def init_db():
                         conn.execute(text(
                             f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}{field} {sql_type}"
                         ))
+                # Seeds are recorded from 2026-09-30; older results keep NULL.
+                conn.execute(text("ALTER TABLE generated_images ADD COLUMN IF NOT EXISTS seed BIGINT"))
                 conn.execute(text(
                     "DELETE FROM generated_images older USING generated_images newer "
                     "WHERE older.message_id = newer.message_id "

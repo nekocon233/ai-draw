@@ -1,10 +1,12 @@
 """Shared preparation and output pipeline, independent of provider-specific APIs."""
 import asyncio
 import base64
+from dataclasses import replace
 from io import BytesIO
-from typing import Callable
+from typing import Callable, Optional
 
 from PIL import Image
+from comfyui.structures.seed import round_seeds
 from utils.image_reference import normalize_image_reference
 
 from .contracts import GenerationParameters, ProviderInput, TaskContext
@@ -55,7 +57,7 @@ class GenerationEngine:
         self,
         parameters: GenerationParameters,
         context: TaskContext,
-        on_artifact: Callable[[str, int, int], None],
+        on_artifact: Callable[[str, int, int, Optional[int]], None],
         check_cancelled: Callable[[], None],
     ) -> list[str]:
         parameters = parameters.for_provider()
@@ -65,10 +67,13 @@ class GenerationEngine:
             registration.prepare(parameters.workflow)
 
         provider_input, target_size = await asyncio.to_thread(self._provider_input, parameters)
+        # A fixed seed counts up per result (seed, seed + 1, ...); random mode draws a seed for every result.
+        seeds = round_seeds(parameters.workflow_options, registration.seed_option, parameters.count) if registration.seed_option else None
         results = []
         for index in range(parameters.count):
             check_cancelled()
-            output = await registration.provider.generate(provider_input)
+            request = provider_input if seeds is None else replace(provider_input, seed=seeds[index])
+            output = await registration.provider.generate(request)
             check_cancelled()
             expected = metadata.get("output_type", "image")
             if output.kind != expected or not output.content:
@@ -78,7 +83,7 @@ class GenerationEngine:
                 resize_mode=metadata.get("output_resize_mode", "cover"),
             )
             # Register each file immediately so later failures can clean partial batches.
-            on_artifact(url, index, parameters.count)
+            on_artifact(url, index, parameters.count, request.seed)
             results.append(url)
         return results
 

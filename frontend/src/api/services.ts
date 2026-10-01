@@ -297,6 +297,8 @@ export const apiService = {
     count?: number;
     lora_prompt?: string;
     images?: string[];
+    /** Parallel to images; lets the server keep each seed on its own image after reordering or edits. */
+    seeds?: (number | null)[];
     reference_image?: string;
     reference_image_2?: string;
     reference_image_3?: string;

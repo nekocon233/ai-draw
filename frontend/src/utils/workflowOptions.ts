@@ -1,4 +1,5 @@
 import type { WorkflowMetadata, WorkflowParameterValue } from '../types/api';
+import { normalizeSeed } from './generationSeed.ts';
 
 export function resolveAvailableWorkflow(
   requested: string | null | undefined,
@@ -37,9 +38,10 @@ export function getWorkflowOptions(
   if (!metadata) return {};
   return Object.fromEntries(
     metadata.parameters
-      .filter(parameter => parameter.type === 'select')
+      .filter(parameter => parameter.type === 'select' || parameter.type === 'seed')
       .map(parameter => {
         const current = values[parameter.name];
+        if (parameter.type === 'seed') return [parameter.name, normalizeSeed(current)];
         const valid = current !== undefined
           && (!parameter.options || parameter.options.includes(String(current)));
         return [parameter.name, valid ? current : parameter.default];

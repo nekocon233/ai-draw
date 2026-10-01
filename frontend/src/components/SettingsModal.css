@@ -69,6 +69,26 @@
   overscroll-behavior: contain;
 }
 
+/* 字段间距略收紧，配合随窗口变高的正文，尽量不出现滚动条 */
+.settings-modal .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.settings-modal .ant-form > .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+/* 矮窗口（笔记本、手机浏览器）再收紧一些 */
+@media (max-height: 860px) {
+  .settings-modal .ant-form-item {
+    margin-bottom: 12px;
+  }
+
+  .settings-modal .ant-form-item-label {
+    padding-bottom: 4px;
+  }
+}
+
 .settings-modal .settings-control-row {
   min-width: 0;
   flex-wrap: nowrap;
@@ -108,4 +128,25 @@
   .settings-modal :is(.ant-modal-container, .ant-modal-content) {
     padding-inline: 20px;
   }
+}
+
+.settings-modal .seed-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.settings-modal .seed-field-value {
+  display: flex;
+  flex: 1 1 180px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-modal .seed-field-input {
+  flex: 1;
+  min-width: 0;
 }

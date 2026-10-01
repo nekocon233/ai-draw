@@ -15,7 +15,7 @@ export function useGenerationConnection(messageApi: MessageInstance) {
       start: (messageId, taskId) => useAppStore.getState().startGeneration(messageId, taskId),
       finish: () => useAppStore.getState().finishGeneration(),
       retainImages: messageId => useAppStore.getState().retainGenerationImages(messageId),
-      appendMedia: (messageId, image, index) => useAppStore.getState().appendChatMedia(messageId, image, index),
+      appendMedia: (messageId, image, index, seed) => useAppStore.getState().appendChatMedia(messageId, image, index, seed),
       refreshRound: async (sessionId, messageId) => {
         if (disposed) return [];
         const images = await useAppStore.getState().refreshGenerationRound(sessionId, messageId);

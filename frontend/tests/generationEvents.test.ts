@@ -13,6 +13,7 @@ function setup() {
   };
   const notices: string[] = [];
   const media: string[] = [];
+  const seeds: (number | null)[] = [];
   const port: GenerationEventPort = {
     getState: () => state,
     start: (messageId, taskId) => { state = {
@@ -24,11 +25,11 @@ function setup() {
       isGenerating: false, generationRevision: state.generationRevision + 1,
     }; },
     retainImages: () => {},
-    appendMedia: (_messageId, image) => { media.push(image); },
+    appendMedia: (_messageId, image, _index, seed) => { media.push(image); seeds.push(seed); },
     refreshRound: async () => ['image.png'],
     notify: (kind, text) => { notices.push(kind + ':' + text); },
   };
-  return { port, notices, media, handler: createGenerationEventHandler(port) };
+  return { port, notices, media, seeds, handler: createGenerationEventHandler(port) };
 }
 
 test('drops stale task events and errors without task identity', async () => {
@@ -54,6 +55,15 @@ test('validates media payloads before appending', async () => {
   }
   await handler({ type: 'state_change', field: 'media_generated', value: { image: 'new.png', index: 0 }, task_id: 'task-a' });
   assert.deepEqual(media, ['new.png']);
+});
+
+test('forwards each result seed and ignores malformed seeds', async () => {
+  const { handler, media, seeds } = setup();
+  for (const [index, seed] of [123, -1, '5', undefined, 2 ** 53].entries()) {
+    await handler({ type: 'state_change', field: 'media_generated', value: { image: `r${index}.png`, index, seed }, task_id: 'task-a' });
+  }
+  assert.deepEqual(media, ['r0.png', 'r1.png', 'r2.png', 'r3.png', 'r4.png']);
+  assert.deepEqual(seeds, [123, null, null, null, null]);
 });
 
 test('completion refreshes persisted results and releases generation state', async () => {

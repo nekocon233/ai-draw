@@ -76,7 +76,7 @@ class FakeRepository:
         self.final_release = None
         self.status = "persisted"
 
-    def persist(self, task_context, images, *, replace_existing=True, source_updates=None):
+    def persist(self, task_context, images, *, replace_existing=True, source_updates=None, seeds=None):
         if replace_existing:
             if self.final_started:
                 self.final_started.set()

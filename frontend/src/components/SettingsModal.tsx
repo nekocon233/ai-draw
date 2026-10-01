@@ -3,9 +3,11 @@ import { Modal, Form, Slider, InputNumber, Input, Row, Col, Switch, Select } fro
 import { useAppStore, buildWorkflowTransition, type GenerationSettingsDraft } from '../stores/appStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { WorkflowParameterValue } from '../types/api';
-import { getWorkflowOptions, getWorkflowMethods } from '../utils/workflowOptions';
+import { getGenerationCount, getWorkflowOptions, getWorkflowMethods } from '../utils/workflowOptions';
+import { getMaxBaseSeed, getSeedError, getSeedParameter, normalizeSeed } from '../utils/generationSeed';
 import { clampLoraPromptStrengths, getLoraPromptError } from '../utils/loraOptions';
 import LoraSelector from './LoraSelector';
+import SeedField from './SeedField';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -67,6 +69,15 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const countParam = workflowMeta?.parameters.find(p => p.name === 'count');
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
   const heightParam = workflowMeta?.parameters.find(p => p.name === 'height');
+  // 固定种子时第 n 张用 种子 + n - 1，上限随本轮数量收紧。
+  const seedParam = getSeedParameter(workflowMeta);
+  const seedCount = getGenerationCount(workflowMeta, Form.useWatch('count', form) ?? count);
+  const watchedSeed = Form.useWatch(['selectOptions', seedParam?.name ?? ''], form);
+  const draftSeed = normalizeSeed(watchedSeed);
+  const seedHint = watchedSeed === null ? undefined  // 固定但未填写，只显示校验错误
+    : draftSeed === '' ? '每张随机；结果图上的种子可一键复用'
+      : seedCount > 1 ? `${seedCount} 张依次使用 ${draftSeed}–${draftSeed + seedCount - 1}`
+        : '提示词和其他参数不变时可复现结果';
 
   // 每次打开弹窗时，从当前已提交状态创建一份完整草稿。
   useEffect(() => {
@@ -97,6 +108,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     const parameter = (name: string) => targetMeta.parameters.find(item => item.name === name);
     const nextSelectOptions = { ...(form.getFieldValue('selectOptions') ?? selectOptions) };
     targetMeta.parameters.forEach(param => {
+      if (param.type === 'seed') {
+        nextSelectOptions[param.name] = normalizeSeed(nextSelectOptions[param.name]);
+        return;
+      }
       if (param.type !== 'select') return;
       const current = nextSelectOptions[param.name];
       if (current === undefined || (param.options && !param.options.includes(String(current)))) {
@@ -162,7 +177,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       okText="确定"
       cancelText="取消"
       destroyOnClose
-      styles={{ body: { maxHeight: 'min(70dvh, 680px)', overflowY: 'auto', overflowX: 'hidden' } }}
+      styles={{ body: { maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto', overflowX: 'hidden' } }}
     >
       <Form
         form={form}
@@ -340,6 +355,21 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </Form.Item>
               </Col>
             </Row>
+          </Form.Item>
+        )}
+
+        {seedParam && (
+          <Form.Item
+            label={seedParam.label}
+            name={['selectOptions', seedParam.name]}
+            dependencies={['count']}
+            extra={seedHint}
+            rules={[({ getFieldValue }) => ({ validator: (_, value: unknown) => {
+              const error = getSeedError(value, seedParam, getGenerationCount(workflowMeta, getFieldValue('count') ?? count));
+              return error ? Promise.reject(new Error(error)) : Promise.resolve();
+            } })]}
+          >
+            <SeedField max={getMaxBaseSeed(seedParam, seedCount)} />
           </Form.Item>
         )}
 

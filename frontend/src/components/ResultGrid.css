@@ -2908,3 +2908,73 @@
     min-height: 72px;
   }
 }
+
+/* 种子标签放在左上角，不占用底部操作栏；显示时机与操作栏一致 */
+.chat-image-seed {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  max-width: calc(100% - 16px);
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(0, 0, 0, 0.56);
+  color: #fff;
+  font-size: 12px;
+  line-height: 26px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.16s ease, visibility 0.16s ease, background 0.16s ease;
+}
+
+/* 省略号放在内层，按钮本身不裁剪，触屏上扩大的点击区域才有效 */
+.chat-image-seed > span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-image-item:hover .chat-image-seed,
+.chat-image-item:focus-within .chat-image-seed {
+  opacity: 1;
+  visibility: visible;
+}
+
+.chat-image-seed:hover {
+  background: rgba(0, 0, 0, 0.74);
+}
+
+.chat-image-seed:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* 长条图的操作栏在顶部，种子移到左下角 */
+.chat-image-item.is-strip .chat-image-seed {
+  top: auto;
+  bottom: 8px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .chat-image-seed {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 32px;
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* 视觉保持小巧，触控区域扩到 44px */
+  .chat-image-seed::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
+}

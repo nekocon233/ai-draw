@@ -15,6 +15,8 @@ class ProviderRegistration:
     prepare: Optional[Callable[[str], None]] = None
     validate: Optional[Callable[[GenerationParameters], None]] = None
     enrich: Optional[Callable[[ProviderInput, Callable[[str], None]], Awaitable[GenerationParameters]]] = None
+    # workflow_options key holding a fixed seed; providers with one receive ProviderInput.seed.
+    seed_option: Optional[str] = None
 
 
 class ProviderRegistry:
@@ -95,6 +97,7 @@ class PixelLabProvider:
 def build_provider_registry(comfyui) -> ProviderRegistry:
     """Composition root: new adapters are registered here, not in the runner."""
     from comfyui.structures.minimax_h3 import validate_minimax_h3_options
+    from comfyui.structures.seed import H3_SEED_OPTION, QWEN_SEED_OPTION
     from .qwen_image_21 import QwenImage21Provider, validate_qwen_image_21
     from .minimax_h3_ref import MiniMaxH3ReferenceProvider, validate_motion_references
 
@@ -108,24 +111,25 @@ def build_provider_registry(comfyui) -> ProviderRegistry:
         return {
             "prompt_text": request.parameters.prompt, "start_image_base64": request.images[0],
             "end_image_base64": request.end_image, "duration": duration, "aspect_ratio": aspect_ratio,
-            "audio": audio,
+            "audio": audio, "seed": request.seed,
         }
 
     registry.register(
         "comfyui_minimax_h3", CallbackProvider(comfyui.generate_minimax_h3, h3_options, "video"),
         interrupt=comfyui.interrupt, prepare=prepare,
-        validate=lambda params: validate_minimax_h3_options(params.workflow_options),
+        validate=lambda params: validate_minimax_h3_options(params.workflow_options), seed_option=H3_SEED_OPTION,
     )
     registry.register("openai_image", OpenAIImageProvider())
     motion_provider = MiniMaxH3ReferenceProvider(comfyui)
     registry.register(
         "comfyui_minimax_h3_ref", motion_provider,
         interrupt=comfyui.interrupt, prepare=prepare, validate=validate_motion_references,
-        enrich=motion_provider.enrich,
+        enrich=motion_provider.enrich, seed_option=H3_SEED_OPTION,
     )
     registry.register(
         "comfyui_qwen_image_21", QwenImage21Provider(comfyui),
         interrupt=comfyui.interrupt, prepare=prepare, validate=validate_qwen_image_21,
+        seed_option=QWEN_SEED_OPTION,
     )
     registry.register("pixel_lab", PixelLabProvider())
     return registry

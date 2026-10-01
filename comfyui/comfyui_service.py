@@ -134,6 +134,13 @@ class ComfyUIService:
         else:
             print(f"[ComfyUIService] 工作流已经是: {workflow_type}")
 
+    def _workflow_file(self):
+        """返回当前工作流的临时副本；暂停服务时 close_connect 会删除它，此时按当前类型重新加载。"""
+        if not self.temp_workflow_file or not os.path.exists(self.temp_workflow_file):
+            print(f"[ComfyUIService] 临时工作流文件已清理，重新加载: {self.current_workflow_type}")
+            self.load_workflow(self.current_workflow_type)
+        return self.temp_workflow_file
+
     def get_current_workflow_type(self):
         """
         获取当前工作流类型
@@ -171,7 +178,7 @@ class ComfyUIService:
         self, finish_callback, prompt_text, images, loras, width=1024, height=1024,
         use_original_size=True, steps=40, reference_resolution=1024, seed=None,
     ):
-        workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        workflow = ComfyWorkflowWrapper(self._workflow_file())
         result = await self.request.generate_qwen_image_21(
             workflow, prompt_text, images, loras,
             random.randrange(0, 2**63) if seed is None else seed,
@@ -249,7 +256,7 @@ class ComfyUIService:
             seed = random.randrange(0, 2**63)
 
         # 可选关键帧和音轨会删除工作流节点，每次请求必须使用新副本。
-        fresh_workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        fresh_workflow = ComfyWorkflowWrapper(self._workflow_file())
         result = await self.request.generate_minimax_h3(
             fresh_workflow,
             prompt_text,
@@ -269,7 +276,7 @@ class ComfyUIService:
         self, finish_callback, prompt_text, images, duration=5, aspect_ratio="auto", seed=None, audio=False,
         canvas_image_index=0,
     ):
-        workflow = ComfyWorkflowWrapper(self.temp_workflow_file)
+        workflow = ComfyWorkflowWrapper(self._workflow_file())
         result = await self.request.generate_minimax_h3_ref(
             workflow, prompt_text, random.randrange(0, 2**63) if seed is None else seed,
             images, duration=duration, aspect_ratio=aspect_ratio, audio=audio,

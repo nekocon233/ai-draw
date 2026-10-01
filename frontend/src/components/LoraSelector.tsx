@@ -102,7 +102,9 @@ export default function LoraSelector({ id, workflow, value = '', onChange }: Lor
                 onChange={name => {
                   setOpenIndex(null);
                   const next = [...selections];
-                  if (name) next[index] = { name, strength: models.find(model => model.value === name)?.default_strength ?? 0.8 };
+                  // 换模型时保留这一行已调好的强度，空行首次选择才用该模型的默认强度
+                  const strength = selection.name ? selection.strength : models.find(model => model.value === name)?.default_strength ?? 0.8;
+                  if (name) next[index] = { name, strength };
                   else next.splice(index, 1);
                   update(next);
                 }}

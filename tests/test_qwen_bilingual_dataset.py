@@ -56,6 +56,29 @@ class BilingualDatasetTests(unittest.TestCase):
                 module.prepare(source, split, root / 'bilingual', lambda *_: CHINESE, model_name='test')
             self.assertFalse((root / 'bilingual').exists())
 
+    def test_forbidden_words_are_retried_and_recorded_only_when_used(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, split, _ = self.fixture(root)
+            replies = {'train.jpg': ['一个Q版小人' + CHINESE, CHINESE], 'holdout.jpg': [CHINESE]}
+            original_sleep = module.time.sleep
+            module.time.sleep = lambda _seconds: None
+            try:
+                destination = root / 'forbidden'
+                module.prepare(source, split, destination, lambda path, _english: replies[path.name].pop(0),
+                               model_name='test', workers=1, forbidden=module.forbidden_list('Q版，小人, sd'))
+            finally:
+                module.time.sleep = original_sleep
+            self.assertEqual(replies, {'train.jpg': [], 'holdout.jpg': []})
+            self.assertTrue((destination / 'train/train.txt').read_text().endswith(CHINESE + '\n'))
+            identity = json.loads((destination / 'preparation.json').read_text())
+            self.assertEqual(identity['forbidden_words'], ['Q版', '小人', 'sd'])
+            plain = root / 'plain'
+            module.prepare(source, split, plain, lambda *_: CHINESE, model_name='test', workers=1)
+            self.assertNotIn('forbidden_words', json.loads((plain / 'preparation.json').read_text()))
+        with self.assertRaisesRegex(ValueError, 'forbidden words: SD'):
+            module.chinese_caption(CHINESE + '整体是SD比例。', ('SD',))
+
     def test_refuses_overwriting_edited_bilingual_caption(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

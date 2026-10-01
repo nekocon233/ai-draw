@@ -24,6 +24,7 @@ flowchart LR
 - `coordinator.py` 负责占位、执行、结果提交、取消和清理，依赖生成与持久化的窄接口。
 - `providers.py` 的每个适配器只生成一个媒体结果。取消、准备和专用校验是独立的可选能力，不要求所有外部 API 实现无意义的方法。
 - `engine.py` 统一参考图规范化、逐个生成和产物通知；`storage.py` 统一使用配置的上传目录，在线程中完成解码、缩放和文件写入。
+- 注册了 `seed_option` 的 provider 由 `engine.py` 按 `round_seeds` 为每个结果定种子：固定时第 n 个用“种子 + n − 1”，随机时逐个抽取互不相同的种子。种子随产物事件、任务快照和 `generated_images.seed` 记录，接口以与 `images` 平行的 `seeds` 返回。
 - `persistence.py` 保留现有数据库事务：重新生成时保留旧结果，新结果提交成功后才清理旧文件。
 - `server/websocket/manager.py` 只负责连接投递；`routes.py` 负责认证和握手。事件在创建时固定用户、会话和任务身份，不再回读可变服务上下文。
 
@@ -60,6 +61,7 @@ flowchart LR
 - `features/generation/events.ts` 是可脱离 React 测试的事件处理器，依赖窄状态接口，过滤旧任务和无归属事件。
 - `features/generation/slice.ts` 集中管理开始、结束、停止和结果补拉。revision 防止迟到的旧请求覆盖新任务状态。
 - 聊天消息类型统一使用 `types/models.ts`；旧 `types/store.ts` 转为活动 store 类型的兼容导出。
+- 助手消息的 `mediaSeeds` 以结果地址为键记录种子（`utils/generationSeed.ts`），编辑或移除占位后不会错位；保存时按图片顺序还原为 `seeds`。
 - 生图与生视频（按元数据 `output_type` 区分）各用一套输入栏。跨类切换时，`buildWorkflowTransition` 用 `utils/composerDrafts.ts` 把当前的描述、参考图、首尾帧、动作图、看图分析快照和暂存图存进 `inputDrafts`，换回目标类上次的输入（首次为空）。两套输入连同当前一类的镜像一起保存在会话 `config_input_drafts`，刷新或换设备后都能恢复；草稿里的图片与输入栏图片一样校验归属、不被清理，删除会话时一并删除。
 - `buildWorkflowTransition` 在同一类里只调整与生成方式相关的参数：切换方式不改写输入栏的提示词、参考图和首尾帧。目标方式放不下的参考图按 `utils/workflowOptions.ts` 的 `carryReferenceImages` 暂存到 `parkedReferences`，换回可容纳的方式时按原顺序回到输入栏；LoRA 和尺寸仍按方式记忆在 `workflowSettingsStash`。
 - 帧编辑、撤销重做和导出交互保持原有实现。

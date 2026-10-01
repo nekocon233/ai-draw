@@ -54,7 +54,8 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
                 catalog.validate(GenerationParameters("x", workflow=retired))
         self.assertTrue(all(item["max_count"] == 1 for item in catalog.list() if item["output_type"] == "video"))
         for workflow in ("qwen_image_21_t2i", "qwen_image_21_i2i"):
-            self.assertEqual(catalog.describe(workflow)["lora_labels"], {"Ameniwa": "Ameniwa", "sen": "sen"})
+            self.assertEqual(catalog.describe(workflow)["lora_labels"],
+                             {"Ameniwa": "Ameniwa", "Sen": "Sen", "Daikei": "Daikei", "CZN": "CZN"})
         self.assertEqual(catalog.describe("gpt_image")["lora_labels"], {})
         params = GenerationParameters("audio and video", workflow="minimax_h3", workflow_options={"h3_duration": "10"})
         await registry.get("comfyui_minimax_h3").provider.generate(ProviderInput(params, ("start", None, None), "end"))

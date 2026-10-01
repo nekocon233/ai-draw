@@ -50,6 +50,10 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.catalog.describe('minimax_h3')['default_prompt_preset_id'], 'video_transition')
         self.assertEqual(self.catalog.describe('minimax_h3_ref')['default_prompt_preset_id'], 'video_fixed_camera')
 
+    def test_image_workflows_start_without_a_preset(self):
+        for workflow in ("qwen_image_21_t2i", "qwen_image_21_i2i", "gpt_image"):
+            self.assertIsNone(self.catalog.describe(workflow)["default_prompt_preset_id"], workflow)
+
     def test_current_video_presets_are_scoped_to_their_h3_workflows(self):
         for preset in ('video_motion', 'video_transition'):
             for workflow in ('minimax_h3_ref',):

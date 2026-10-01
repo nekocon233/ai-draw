@@ -27,7 +27,6 @@ workflow_defaults:
       description: "文字生成图片，添加参考图后切换为编辑；支持专用 LoRA"
       category: "生图"
       method: "Qwen-Image-2.1"
-      default_prompt_preset_id: "sketch_finish"
       method_group: "qwen_image_21_t2i"
       text_workflow: "qwen_image_21_t2i"
       image_workflow: "qwen_image_21_i2i"
@@ -38,7 +37,10 @@ workflow_defaults:
       output_type: "image"
       lora_models:
         - {name: "Ameniwa.safetensors", label: "Ameniwa"}
-        - {name: "sen.safetensors", label: "sen"}
+        - {name: "Sen.safetensors", label: "Sen"}
+        # Daikei 为不写画风的 v2 重训（原 DaikeiV2）；最初的 v1 保留为 DaikeiV1.safetensors，暂不登记
+        - {name: "Daikei.safetensors", label: "Daikei"}
+        - {name: "CZN.safetensors", label: "CZN"}
       prompt_template: "你是 Qwen-Image-2.1 图像生成提示词专家。将描述扩写为明确的中文自然语言提示词，忠实保留主体、文字、构图和用户指定的画风。不要擅自添加风格词；用户要求透明背景时明确 alpha 透明通道。\n描述：{desc}\n只输出提示词："
       parameters: &qwen_image_21_parameters
         - {name: "prompt", label: "画面描述", type: "text", default: ""}
@@ -47,6 +49,7 @@ workflow_defaults:
         - {name: "width", label: "图片宽度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
+        - &qwen_fixed_seed {name: "qwen_fixed_seed", label: "种子", type: "seed", min: 0, max: 9007199254740991, default: ""}
     qwen_image_21_i2i:
       <<: *qwen_image_21
       label: "图生图（Qwen-Image-2.1）"
@@ -63,13 +66,13 @@ workflow_defaults:
         - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
         - {name: "qwen_reference_resolution", label: "参考图处理分辨率", type: "select", options: ["512", "768", "1024", "1536", "2048"], default: "1024"}
+        - *qwen_fixed_seed
     gpt_image:
       provider: "openai_image"
       label: "图生图（GPT Image · Codex 订阅）"
       description: "使用 Codex 订阅额度生成或编辑图片，支持多张参考图"
       category: "生图"
       method: "GPT Image"
-      default_prompt_preset_id: "sketch_finish"
       reference_image_label: "参考图"
       reference_image_description: "描述编辑或合成要求，输入 @ 选择参考图"
       requires_image: false
@@ -101,6 +104,7 @@ workflow_defaults:
         - {name: "h3_duration", label: "时长（秒）", type: "select", options: ["4", "5", "6", "8", "10", "12", "15"], default: "5"}
         - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "自动（固定镜头按原图，参考镜头按首张参考图）"}, default: "auto"}
         - &h3_audio {name: "h3_audio", label: "声音", type: "select", options: ["silent", "native"], option_labels: {silent: "无声", native: "原生双声道音频"}, default: "silent"}
+        - &h3_fixed_seed {name: "h3_fixed_seed", label: "种子", type: "seed", min: 0, max: 9007199254740991, default: ""}
     minimax_h3:
       provider: "comfyui_minimax_h3"
       label: "MiniMax H3 · 首尾帧"
@@ -128,3 +132,4 @@ workflow_defaults:
           options: ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
           default: "auto"
         - *h3_audio
+        - *h3_fixed_seed

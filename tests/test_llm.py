@@ -97,10 +97,12 @@ class PromptAnalysisRouteTests(unittest.TestCase):
             validate_image_mentions(preset["prompt"], ["a", "b", "c"])
             # Generation appends the user's description directly after the preset.
             self.assertTrue(preset["prompt"].endswith("。"), preset["id"])
-        sketch = next(preset for preset in presets if preset["id"] == "sketch_finish")
-        self.assertTrue(sketch["prompt"].startswith("@图片1 "))
-        for term in ("二次元", "动漫", "插画", "画风", "风格", "平涂", "厚涂", "赛璐璐", "水彩", "写实", "粗黑", "块面", "渐变"):
-            self.assertNotIn(term, sketch["prompt"])
+        for preset_id in ("sketch_finish", "pose_composition"):
+            preset = next(preset for preset in presets if preset["id"] == preset_id)
+            self.assertEqual((preset["output_type"], len(preset["images"])), ("image", 1), preset_id)
+            self.assertTrue(preset["prompt"].startswith("@图片1 "), preset_id)
+            for term in ("二次元", "动漫", "插画", "画风", "风格", "平涂", "厚涂", "赛璐璐", "水彩", "写实", "粗黑", "块面", "渐变"):
+                self.assertNotIn(term, preset["prompt"], preset_id)
         self.app.dependency_overrides.clear()
         self.assertEqual(self.client.get("/api/prompt/presets").status_code, 401)
 

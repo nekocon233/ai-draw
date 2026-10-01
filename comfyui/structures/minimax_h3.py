@@ -1,5 +1,7 @@
 import math
 
+from comfyui.structures.seed import H3_SEED_OPTION, fixed_seed
+
 
 MINIMAX_H3_RESOLUTIONS = {
     "21:9": (1536, 672),
@@ -80,7 +82,7 @@ def get_minimax_h3_frame_count(duration: float) -> int:
 def validate_minimax_h3_options(options: dict | None) -> tuple[float, str, bool]:
     """返回时长、画幅和是否保留音轨；未设置声音（含旧消息）时默认无声。"""
     options = options or {}
-    allowed = {"h3_duration", "h3_aspect_ratio", "h3_audio"}
+    allowed = {"h3_duration", "h3_aspect_ratio", "h3_audio", H3_SEED_OPTION}
     unknown = set(options) - allowed
     if unknown:
         raise ValueError(f"MiniMax H3 包含未知参数: {', '.join(sorted(unknown))}")
@@ -91,6 +93,7 @@ def validate_minimax_h3_options(options: dict | None) -> tuple[float, str, bool]
         raise ValueError(f"MiniMax H3 不支持声音选项: {audio}")
     get_minimax_h3_frame_count(duration)
     get_minimax_h3_resolution(aspect_ratio)
+    fixed_seed(options, H3_SEED_OPTION)
     return duration, aspect_ratio, audio == "native"
 
 

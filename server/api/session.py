@@ -116,9 +116,12 @@ def _media_url(path: str) -> str:
     return get_file_storage().get_file_url(path)
 
 
+def _sorted_media(message: ChatMessage) -> list:
+    return sorted(message.images, key=lambda item: (item.image_index is None, item.image_index or 0))
+
+
 def _media_urls(message: ChatMessage) -> list[str]:
-    images = sorted(message.images, key=lambda item: (item.image_index is None, item.image_index or 0))
-    return [_media_url(image.file_path) for image in images]
+    return [_media_url(image.file_path) for image in _sorted_media(message)]
 
 
 def _serialize_message(message: ChatMessage) -> dict:
@@ -156,7 +159,10 @@ def _serialize_message(message: ChatMessage) -> dict:
         params.update({key: value for key, value in optional_params.items() if value is not None})
         payload['params'] = params
     elif message.type == 'assistant':
-        payload['images'] = _media_urls(message)
+        media = _sorted_media(message)
+        payload['images'] = [_media_url(image.file_path) for image in media]
+        # Parallel to images: the seed each result used, null for edits and seedless workflows.
+        payload['seeds'] = [image.seed for image in media]
     return payload
 
 @router.get("/sessions", response_model=List[SessionResponse])

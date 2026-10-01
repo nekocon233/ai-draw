@@ -300,6 +300,7 @@ def get_chat_history(
                     return path  # 已是绝对 URL，直接返回（如视频路径 /uploads/video/...）
                 return file_storage.get_file_url(path)  # 相对路径加前缀
             msg_dict["images"] = [_to_url(img.file_path) for img in images]
+            msg_dict["seeds"] = [img.seed for img in images]
         
         result.append(msg_dict)
     
@@ -400,6 +401,18 @@ def clear_reference_image(
     db.commit()
     return {"success": True}
 
+def _message_seeds(message: dict) -> Optional[list]:
+    """Seeds sent alongside images, in the same order; None when the client sent none."""
+    from comfyui.structures.seed import MAX_SEED
+    seeds = message.get("seeds")
+    if not isinstance(seeds, list):
+        return None
+    return [
+        value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_SEED else None
+        for value in seeds
+    ]
+
+
 @router.post("/chat/save")
 def save_chat_message(
     message: dict,
@@ -458,11 +471,15 @@ def save_chat_message(
             # 如果是 assistant 消息且有新图片，更新图片
             if message["type"] == "assistant" and "images" in message:
                 file_storage = get_file_storage()
-                incoming_images = [img for img in message["images"] if isinstance(img, str) and img]
+                seeds = _message_seeds(message)
+                incoming_images = [
+                    (img, seeds[index] if seeds is not None and index < len(seeds) else None)
+                    for index, img in enumerate(message["images"]) if isinstance(img, str) and img
+                ]
                 existing_images = {image.image_index: image for image in existing.images}
                 old_paths = []
                 new_paths = []
-                for idx, img_data in enumerate(incoming_images):
+                for idx, (img_data, seed) in enumerate(incoming_images):
                     try:
                         canonical_path = canonical_upload_url(img_data)
                         if canonical_path:
@@ -480,11 +497,17 @@ def save_chat_message(
                             if existing_img.file_path != file_path:
                                 old_paths.append(existing_img.file_path)
                                 existing_img.file_path = file_path
+                                if seeds is None:
+                                    # A different image now sits at this index; its seed is unknown.
+                                    existing_img.seed = None
+                            if seeds is not None:
+                                existing_img.seed = seed
                         else:
                             db.add(GeneratedImage(
                                 message_id=msg_id,
                                 file_path=file_path,
                                 image_index=idx,
+                                seed=seed,
                             ))
                     except Exception as e:
                         print(f"保存图片失败: {e}")
@@ -543,6 +566,7 @@ def save_chat_message(
         # 如果是 assistant 消息，保存图片
         if message["type"] == "assistant" and "images" in message:
             file_storage = get_file_storage()
+            seeds = _message_seeds(message)
             for idx, img_data in enumerate(message["images"]):
                 if isinstance(img_data, str):  # base64 图片数据或文件路径
                     try:
@@ -561,7 +585,8 @@ def save_chat_message(
                         gen_img = GeneratedImage(
                             message_id=msg_id,
                             image_index=idx,
-                            file_path=file_path
+                            file_path=file_path,
+                            seed=seeds[idx] if seeds is not None and idx < len(seeds) else None,
                         )
                         db.add(gen_img)
                     except Exception as e:

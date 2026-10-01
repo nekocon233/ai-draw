@@ -10,6 +10,7 @@ def _persist_assistant_message(
     *,
     replace_existing: bool = True,
     source_updates: Optional[dict] = None,
+    seeds: Optional[List[Optional[int]]] = None,
 ) -> Literal['persisted', 'target_missing', 'failed']:
     """把生成结果（助手消息 + GeneratedImage 行）落库。
 
@@ -130,6 +131,7 @@ def _persist_assistant_message(
                 message_id=message_id,
                 image_index=idx,
                 file_path=file_path,
+                seed=seeds[idx] if seeds and idx < len(seeds) else None,
             ))
         db.commit()
         try:
@@ -161,12 +163,12 @@ def _delete_generated_files(images: List[str]) -> None:
 
 
 class SQLAlchemyGenerationRepository:
-    def persist(self, context: TaskContext, images: list[str], *, replace_existing=True, source_updates=None):
+    def persist(self, context: TaskContext, images: list[str], *, replace_existing=True, source_updates=None, seeds=None):
         if not context.session_id or not context.message_id:
             return "persisted"
         return _persist_assistant_message(
             context.user_id, context.session_id, context.message_id, images,
-            replace_existing=replace_existing, source_updates=source_updates,
+            replace_existing=replace_existing, source_updates=source_updates, seeds=seeds,
         )
 
     def discard(self, images: list[str]) -> None:

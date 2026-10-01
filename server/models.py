@@ -1,7 +1,7 @@
 """
 数据库 ORM 模型
 """
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from server.database import Base
@@ -153,6 +153,7 @@ class GeneratedImage(Base):
     message_id = Column(String(50), ForeignKey("chat_messages.message_id", ondelete="CASCADE"), nullable=False)
     image_index = Column(Integer)  # 图片在消息中的索引
     file_path = Column(Text, nullable=False)  # 存储相对文件路径（登录用户）或 base64（游客模式）
+    seed = Column(BigInteger, nullable=True)  # 生成该结果所用的种子；不支持种子的工作流、旧结果和编辑结果为空
     created_at = Column(DateTime, default=datetime.now)
     
     # 关系

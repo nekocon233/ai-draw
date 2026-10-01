@@ -24,6 +24,7 @@ import { createGenerationSlice, type GenerationSlice } from '../features/generat
 import type { MotionPromptSnapshot, PromptPreset, PromptPresetChoices, WorkflowMetadata, WorkflowParameterValue } from '../types/api';
 import { rememberWorkflowPromptPreset, resolveWorkflowPromptPreset, restorePromptPresetChoices } from '../utils/promptPresets';
 import { motionPromptSource, resolveMotionPrompt } from '../utils/motionPrompt';
+import { alignSeeds, buildMediaSeeds, clearFixedSeeds } from '../utils/generationSeed';
 import { carryReferenceImages, compactReferenceImages, getImageGenerationSettings, getGenerationCount, getWorkflowOptions, NO_PARKED_REFERENCES, resolveAvailableWorkflow, restoreWorkflowSelection, getWorkflowMethodKey, rememberWorkflowMethod, resolveInputWorkflow, resolveInputLora, type ParkedReferences } from '../utils/workflowOptions';
 import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
 import { getMotionReferenceError, MAX_MOTION_REFERENCES } from '../utils/motionReferences';
@@ -146,7 +147,7 @@ export interface AppState extends GenerationSlice {
   setMotionPrompt: (snapshot: MotionPromptSnapshot | null) => void;
   addChatMessage: (params: { prompt: string; workflow: string; strength: number | undefined; count: number; loraPrompt?: string; width?: number; height?: number; useOriginalSize?: boolean; referenceImage?: string | null; referenceImage2?: string | null; referenceImage3?: string | null; referenceImageEnd?: string | null; workflowOptions?: Record<string, WorkflowParameterValue>; promptPreset?: PromptPreset | null; motionReferenceImages?: string[]; motionPrompt?: MotionPromptSnapshot }) => Promise<{ messageId: string; sessionId: string } | null>;
   updateChatImages: (messageId: string, images: string[], persist?: boolean) => void;
-  appendChatMedia: (messageId: string, image: string, index: number) => void;
+  appendChatMedia: (messageId: string, image: string, index: number, seed?: number | null) => void;
   deleteChatMessage: (messageId: string) => Promise<void>;
   editAndRegenerateMessage: (
     userMsgId: string,
@@ -720,11 +721,12 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           type: 'assistant',
           content: '',
           images: images.filter(img => typeof img === 'string') as string[],
+          seeds: alignSeeds(images.filter(img => typeof img === 'string') as string[], message.mediaSeeds),
         }).catch(err => console.error('保存 AI 消息失败:', err));
       }
     }
   },
-  appendChatMedia: (messageId: string, image: string, index: number) => {
+  appendChatMedia: (messageId: string, image: string, index: number, seed?: number | null) => {
     set((state) => {
       const newHistory = state.chatHistory.map((msg) => {
         if (msg.id === messageId && msg.images) {
@@ -740,7 +742,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
             newImages[index] = image;
           }
           
-          return { ...msg, images: newImages };
+          const mediaSeeds = typeof seed === 'number' ? { ...msg.mediaSeeds, [image]: seed } : msg.mediaSeeds;
+          return { ...msg, images: newImages, mediaSeeds };
         }
         return msg;
       });
@@ -781,6 +784,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           type: 'assistant',
           content: message.content || '',
           images: (message.images?.filter(img => typeof img === 'string') ?? []) as string[],
+          seeds: alignSeeds((message.images?.filter(img => typeof img === 'string') ?? []) as string[], message.mediaSeeds),
         }).catch(err => console.error('保存追加媒体失败:', err));
       }
     }
@@ -972,6 +976,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           type: message.type,
           content: message.content || '',
           images: message.images || [],
+          mediaSeeds: buildMediaSeeds(message.images, message.seeds),
           timestamp: message.timestamp,
           params: message.params || undefined,
         }));
@@ -1346,6 +1351,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           workflowSettingsStash: {},
           parkedReferences: NO_PARKED_REFERENCES,
           inputDrafts: {},
+          selectOptions: clearFixedSeeds(get().selectOptions, get().availableWorkflows),
         });
         get().syncPromptPreset();
         
@@ -1380,6 +1386,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
         workflowSettingsStash: {},
         parkedReferences: NO_PARKED_REFERENCES,
         inputDrafts: {},
+        selectOptions: clearFixedSeeds(get().selectOptions, get().availableWorkflows),
       });
       get().syncPromptPreset();
       
@@ -1457,6 +1464,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           type: msg.type,
           content: msg.content || '',
           images: msg.images || [],
+          mediaSeeds: buildMediaSeeds(msg.images, msg.seeds),
           timestamp: msg.timestamp,
           params: msg.params || undefined,
         }));

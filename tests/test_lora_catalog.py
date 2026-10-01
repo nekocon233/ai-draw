@@ -45,6 +45,19 @@ class LoraCatalogTests(unittest.TestCase):
             default = next(item["default"] for item in self.metadata[workflow]["parameters"] if item["name"] == "lora_prompt")
             self.assertEqual(default, "")
 
+    def test_models_can_set_their_own_default_strength(self):
+        node = {"input": {"required": {"lora_name": [["A.safetensors", "B.safetensors"]]}}}
+        metadata = {"lora_models": [
+            {"name": "A.safetensors", "label": "A", "default_strength": 0.7},
+            {"name": "B.safetensors", "label": "B"},
+        ]}
+        self.assertEqual([(item["value"], item["default_strength"]) for item in workflow_lora_options(metadata, node)],
+                         [("A", 0.7), ("B", 0.8)])
+        # Daikei is now the v2 retrain at the default strength; the first version stays unlisted as DaikeiV1.
+        entries = {item["name"]: item for item in self.metadata["qwen_image_21_t2i"]["lora_models"]}
+        self.assertNotIn("default_strength", entries["Daikei.safetensors"])
+        self.assertFalse({"DaikeiV1.safetensors", "DaikeiV2.safetensors"} & set(entries))
+
     def test_reads_legacy_and_combo_node_schemas(self):
         combo = {"input": {"required": {"lora_name": ["COMBO", {"options": self.installed}]}}}
         self.assertEqual(installed_lora_names({"LoraLoaderModelOnly": self.node}), set(self.installed))

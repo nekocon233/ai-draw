@@ -24,7 +24,7 @@
 - 文生图默认 1024×1024。宽高范围 256–3072，按 32 对齐，总像素最多 3072×1536。
 - 编辑默认按第一张图的比例创建采样 latent，参考图处理分辨率默认 1024。最终以 contain 方式还原原图尺寸，保留 alpha。关闭原图尺寸后使用指定宽高；明显改变画幅可能影响编辑位置。
 - 图生图只有编辑连法：编码器接 `vae`，参考图同时编码成 reference latents 拼进序列，按像素对齐修改第一张图，采样经过 `QwenImage21Cache`。
-- 每次生成使用随机 seed，设置中不提供固定种子。
+- 默认随机 seed，一轮多张时每张各自随机。生成设置可改为固定种子（`qwen_fixed_seed`，文生图与编辑共用），一轮多张时第 n 张使用“种子 + n − 1”。每张结果都记录实际种子，可在结果图上一键复用，见下文“2026-09-30 恢复固定种子”。
 - PNG 输出保留 RGBA。需要透明背景时在提示词中明确说明；官方建议使用 “This is an RGBA format image with transparency. … The image has an alpha channel and a transparent background.”。
 - 宽高和原图尺寸开关同时保存到会话及消息。新增列使用启动时幂等 DDL，旧记录保持 NULL，重生成按工作流默认值处理，不借用当前其他会话的设置。
 - 提示词扩写继续使用项目已有 Codex 连接，不额外部署官方 PE 文本模型。
@@ -92,7 +92,7 @@ python scripts/install_qwen_image_21_lora.py CHECKPOINT.safetensors /opt/comfyui
 
 脚本需在安装 PyTorch 与 safetensors 的环境中运行。文件检查并不等于画风验收：仍需实际运行文生图和图生图，检查未匹配 LoRA 键、与无 LoRA 的固定 seed 对照及留出图片上的效果。
 
-当前状态（2026-09-24 起）：两种 Qwen 2.1 模式只登记了 `Ameniwa.safetensors`，标识和网页显示名称都是 **Ameniwa**。它就是双语 4000 步权重（SHA-256 `3f07795c…`），由 `AmeniwaQwen21Bilingual.safetensors` 改名而来，历史记录已一并迁移，详见文末“改名为 Ameniwa”一节。v3 的 5000 步、3000 步和最早的 `AmeniwaQwen21.safetensors` 已从 ComfyUI 删除，原件保留在 `/opt/ai-toolkit/output/` 各自的训练目录中，训练产物仍沿用原来的文件名。认证 LoRA 接口仅在登记文件实际存在时展示。其它风格权重安装后仍需在两种模式共用的 `lora_models` 中明确登记，不能直接列入其它架构的 LoRA。网页默认不选 LoRA，此时隐藏强度控件；选择 Ameniwa 时默认强度 0.8，选择框、0–1 强度滑条与末尾的 × 位于同一行，数值仅在滑条提示中显示。直接使用静态 JSON 时默认加载 `Ameniwa.safetensors`，强度 0.8。下文保留各阶段安装与验收的历史记录，其中出现的旧文件名均为当时的状态。
+当前状态（2026-09-30 起）：两种 Qwen 2.1 模式按顺序登记了 **Ameniwa**、**Sen**、**Daikei** 和 **CZN** 四个 LoRA，标识与网页显示名称相同，各自的记录见文末相应小节。Daikei 是不写画风标注的 v2 重训（2026-09-30 由 DaikeiV2 改名，历史已迁移）；最初的 v1 保留为 `DaikeiV1.safetensors`，暂不登记。`lora_models` 的条目可用 `default_strength` 指定选中时的默认强度，缺省 0.8，目前都用缺省值。`Ameniwa.safetensors` 就是双语 4000 步权重（SHA-256 `3f07795c…`），由 `AmeniwaQwen21Bilingual.safetensors` 改名而来，历史记录已一并迁移，详见文末“改名为 Ameniwa”一节。v3 的 5000 步、3000 步和最早的 `AmeniwaQwen21.safetensors` 已从 ComfyUI 删除，原件保留在 `/opt/ai-toolkit/output/` 各自的训练目录中，训练产物仍沿用原来的文件名。认证 LoRA 接口仅在登记文件实际存在时展示。其它风格权重安装后仍需在两种模式共用的 `lora_models` 中明确登记，不能直接列入其它架构的 LoRA。网页默认不选 LoRA，此时隐藏强度控件；空行首次选择模型时使用该模型的默认强度，已选模型换成另一个时保留当前强度，选择框、0–1 强度滑条与末尾的 × 位于同一行，数值仅在滑条提示中显示。直接使用静态 JSON 时默认加载 `Ameniwa.safetensors`，强度 0.8。下文保留各阶段安装与验收的历史记录，其中出现的旧文件名均为当时的状态。
 
 ## 2026-09-21 验收记录
 
@@ -194,6 +194,8 @@ ssh -N -L 18675:127.0.0.1:8675 nekocon-server
 ```
 
 然后打开 `http://localhost:18675/jobs/db9cb8c8-0cf9-456a-94d1-d8d11738aef8`，使用现有 AI Toolkit 登录密码；不在文档中记录密码。
+
+2026-09-28 起也可以从公网访问 `https://aitoolkit.nekocon.cn`：先用 phaser 站点的网关账号登录，再输入 AI Toolkit 密码。链路为公网服务器 `nekocon-frps` 上的 Caddy，经 frps、本机 frpc 的 `aitoolkit` 代理，到 `192.168.100.195:8675`。AI Toolkit 自身不校验 `/api/img/*`（包括上传，以及只做前缀检查、可被 `..` 绕过的删除）、`/api/files/*` 和 `/api/audio/art/*`，所以公网 Caddy 只放行网关登录或完全匹配的 AI Toolkit 令牌。令牌匹配规则单独存放在该服务器的 `/etc/caddy/aitoolkit-token.caddy`（root:caddy 640），更换 AI Toolkit 密码后要同步更新这个文件并重载 Caddy。该站点的压缩要跳过 `Accept: text/event-stream` 请求：首页监控用 `/api/monitor` 事件流，被 zstd 压缩时事件全部积在缓冲区里（55 秒送出 0 字节），首页会一直转圈。
 
 - 启动前已通过 SQLite backup API 备份任务库，执行 WAL checkpoint，并在重建 UI 容器后确认原有 3 个任务完整保留；备份为 `/opt/ai-toolkit/config/aitk-ui-before-bilingual-20260921.sqlite`。
 - AI Toolkit Compose 增加三个已有 Qwen 权重文件的只读挂载，保留原模型目录与 Hugging Face 缓存挂载。
@@ -488,3 +490,297 @@ ssh -N -L 18675:127.0.0.1:8675 nekocon-server
   - 用生产 provider 做了一次文生图（`<lora:sen:0.8>`，1024×1024），ComfyUI 历史中 LoRA 节点为 `sen.safetensors`，强度 0.8，用时 55 秒；输出存为 `/opt/ai-toolkit/datasets/sen_qwen21_eval/production_t2i_sen_0.8.png`。
     - 画风生效：粗手绘墨线、明亮平涂；内容遵循提示词。
     - 背景出现类似水印的乱码文字和手写涂鸦，与训练集中的水印和手写字有关。
+
+### 2026-09-28 Daikei 画风数据集准备
+
+- 来源：作者授权用户自行下载的 X 账号 `@Daikei_625`（だいけい）的媒体图片。沿用 sen 的 gallery-dl 虚拟环境（`/opt/tools/gallery-dl`）和参数：只下载图片，不含视频和转推；取原图；请求间隔 2–4 秒。
+  - 共 1062 张（推文时间 2022-09-21 至 2026-09-15），存放在 `/opt/ai-toolkit/datasets/daikei_raw/`，附推文元数据 JSON、下载记录 `.download-archive.sqlite3`，日志为 `datasets/daikei_raw_download.log`；
+  - 用户要求保留登录 cookies 供下次使用：`/root/x-cookies.txt`，权限 600，不再像 sen 那样下载后粉碎。
+- 筛选：1062 张中保留 476 张；用户随后在 AI Toolkit 网页删去 3 张（两张烤面包机、一张文字贴纸），最终 473 张。
+  - 去重：先按 dHash 和 pHash 分组（同一张图反复发布，或只换颜色、加眼镜、换背景的差分），再用 ORB 特征点加 RANSAC 找出只是裁切比例不同的版本。每组保留没有大段叠字、分辨率最高的一张，共去掉 347 张。
+  - 其余按 WD v3 标签初筛，再逐页人工核对缩略图。剔除截图和宣传图（价目表、封面、Logo、票券）69 张、漫画分格 47 张、纸上草稿 31 张、实拍照片合成 25 张、周边实拍和商品效果图 21 张、大字贴纸 19 张、短边不足 700 像素 13 张、画风不符（厚涂、与他人合作）7 张、模糊特效 7 张。另有 4 张多人插画因 `multiple_views` 被误判为漫画，已恢复。
+  - AI Toolkit 分桶不会放大小图（`toolkit/buckets.py` 取 `min(原图像素, 分辨率²)`），小图在 1024 档里也只按原尺寸训练。素材充足，所以仍剔除了短边不足 700 像素的图，它们多为截图或裁切。
+  - 按用户选择，DAIKEI 字标和签名原样保留：候选集中 57 张带英文字，52 张带签名。约 75% 是作者的黑发角色，34% 是红色背景，LoRA 会明显偏向这两点。
+  - 源目录 `/opt/ai-toolkit/datasets/daikei/`（图片与 WD v3 标签）；审阅用的编号缩略图在 `/opt/ai-toolkit/datasets/daikei_review/`。
+- 英文标签：与 sen 相同，在 ComfyUI 容器内用 CPU 运行 WD v3（`SmilingWolf/wd-eva02-large-tagger-v3`），先铺白底并补成正方形，通用标签阈值 0.35，角色标签阈值 0.75。每张 9–57 个标签；容器内的临时文件已清理。
+- 划分：`prepare_qwen_image_21_training.py --holdout 5` 输出到 `/opt/ai-toolkit/datasets/daikei_split/`，训练 468 张、验证 5 张。
+- 中文描述：`prepare_qwen_image_21_bilingual.py`（gpt-6-astra，3 路并发）输出到 `/opt/ai-toolkit/datasets/daikei_qwen21/`。
+  - 这次没有把脚本和数据拷进线上后端容器，而是用后端镜像起一个临时容器：仓库只读挂载为工作目录（读取其中的 `.env`），挂载 datasets 目录，接入 `ai-draw_ai-draw-network` 访问 Codex 代理；
+  - 每张约 3.3 秒。
+- 训练配置：`configs/training/daikei_qwen_image_21.yaml`，任务名 `DaikeiQwen21`，参数和预览提示词与 SenQwen21 相同，便于对比。数据量约为 sen 的 15 倍，4000 步时每张图平均只训练约 8.5 次；风格很统一，若 4000 步画风不够再从检查点续训。
+- 开训（2026-09-28 北京时间 01:35）：任务 `DaikeiQwen21`（`e9fc38ce-9560-4b76-a3ce-7f61763ddd23`）。
+  - 开训前：ComfyUI 队列连续空闲 60 秒；用 SQLite backup API 把任务库备份为 `/opt/ai-toolkit/config/aitk-ui-before-daikei-20260927T173214Z.sqlite`；确认容器内 GPU 可用；用临时用户调用 `/api/service/stop` 暂停生图（有任务在跑时该接口返回 409，不会强停），再停止 ComfyUI。停止前核对过 ComfyUI 的网络 ID 与当前 `ai-draw_ai-draw-network` 一致。
+  - 通过网页接口建任务需要三步：`POST /api/jobs`（请求体存为 `config/daikei_job_request.json`），`GET /api/jobs/{id}/start` 只负责入队，`GET /api/queue/0/start` 才会启动 GPU 0 的队列。任务信息在 `config/daikei_job.json`。
+  - 日志确认 `Found 468 images`、Prodigy、lr 1；第 0 步的 5 张预览已生成，训练约 1.4–2.6 秒一步，显存约 11 GB。
+  - 监视容器 `ai-draw-daikei-watch` 运行 `config/watch-daikei.py`（由 `watch-sen.py` 替换任务 ID 生成），用后端镜像、以 root 运行，挂载 docker.sock 和宿主机 `/usr/bin/docker`。任务结束且 GPU 释放后，它会启动 ComfyUI 并恢复生图服务，状态写在输出目录的 `training-service-watch.json`。
+- 训练结果（2026-09-28）：
+  - 01:43 开始训练步，04:21 保存最终权重，04:24 写完末组预览；连同缓存和每 400 步的预览，共约 2 小时 49 分。20 个检查点全部保留（200–3800 步每 200 步一个，加 4000 步最终文件）。
+  - 训练期间 03:10 有一次部署重建了 `ai-draw_ai-draw-network`。停止中的 ComfyUI 仍引用旧网络 ID，监视容器启动它时报 `network ... not found`，一直重试。
+    - 处理方法与 09-22 相同：先停监视容器，用 `docker network disconnect -f ai-draw_ai-draw-network comfyui` 解除失效引用，再用 `docker network connect --alias comfyui` 连回现有同名网络，最后重新启动监视容器；
+    - 04:32 ComfyUI 启动，生图服务恢复，后端能访问 ComfyUI，临时用户已删除；
+    - 以后训练期间如果要部署，需要在训练结束前做这一步检查，或者部署后立即检查。
+  - 预览对比图（固定 seed 42、CFG 1、40 步、LoRA 0.8）：`/opt/ai-toolkit/datasets/daikei_qwen21_eval/overview_0_4000.jpg` 和 `candidates_2400_4000.jpg`。
+    - 800 步起，动漫类提示词出现粗黑线平涂画风；照片类提示词到 3200 步才全部变成插画。
+    - 2800 步的动漫类结果最干净，最接近原作；但 `一个女孩` 和雨衣公交站两条仍是照片。
+    - 3200 步起全部插画化，但 `一个女孩` 与 `blue jacket, red cup` 出现类似 DAIKEI 字标的乱码，是保留字标带来的外溢。
+    - 3600 和 4000 步：`一个女孩` 稳定变成粉发、红上衣、格子裙（红色内容外溢）；`blue jacket, red cup` 出现面部畸形；线条偏潦草。
+  - 候选检查点：2800、3200、3600、4000 步，等用户选择后再安装为 `Daikei`。
+- 上线（2026-09-28）：用户选择 4000 步。
+  - 最终权重 `DaikeiQwen21.safetensors` 的元数据为 step 4000、epoch 2。经 `scripts/install_qwen_image_21_lora.py` 校验：384 个张量，192 个上投影非零（脚本在 `ostris/aitoolkit:0.13.18` 的临时容器里运行，镜像自带 torch）。安装为 ComfyUI 的 `loras/Daikei.safetensors`，SHA-256 `920337e8e6252fb204bf676b72c8bf51574e48d51f3644c419683310e0eaacfd`，与训练输出的原件一致。
+  - `lora_models` 追加 `{name: "Daikei.safetensors", label: "Daikei"}`，排在 sen 之后；`tests/test_generation_pipeline.py` 已同步，165 项后端测试通过。
+  - 部署时 ComfyUI 在运行，`compose down` 提示网络仍在使用而保留了网络，所以没有再出现网络 ID 失效的问题。
+  - 部署后：两个 Qwen 工作流的 `/api/service/loras` 都返回 Ameniwa、sen、Daikei（默认强度 0.8），`/api/service/workflows` 的 `lora_labels` 已包含 Daikei。核对用的临时用户已删除。
+  - 生产 provider 文生图（1024×1024、40 步、seed 42）：ComfyUI 历史中 LoRA 节点为 `Daikei.safetensors`，每张约 55 秒。输出为 `/opt/ai-toolkit/datasets/daikei_qwen21_eval/production_t2i_Daikei_*.png`：
+    - `一个女孩坐在咖啡店窗边看书`，强度 0.8：仍是实拍照片，窗上出现手写乱码，画风没有生效；
+    - 前面加「二次元插画，」，强度 0.8：变成插画，但线条潦草，有签名状涂写，出现粉发、红衣和红色书包（红色外溢），不如原作干净的粗线平涂；
+    - 原提示词，强度 1.0：画面破碎，大量乱码文字。
+  - 结论：4000 步只在提示词明确要求插画时生效，而且带有文字和红色外溢，还没有达到「普通中文提示词稳定呈现原作画风」。候选改进：在生产链路对比训练预览中更干净的 2800、3200 步；或清理 DAIKEI 字标和签名、精选画面干净的图、提高每张图的训练轮数后重训。
+- 续训到 8000 步（2026-09-28 北京时间 04:58 开始）：用户认为图片多、训练量不够。4000 步时每张图平均只训练约 8.5 次（2.85 轮 × 3 档分辨率），sen 约为 129 次；loss 在 500 步后走平，Prodigy 实际学习率在 2000 步时稳定在约 1.1e-4，说明不是学习率没到位，而是遍历次数少。多训预计能增强画风，但字标乱码和红色偏向来自数据，不会因此消失。
+  - 续训前把整个输出目录备份到 `/opt/ai-toolkit/backups/DaikeiQwen21-step4000-20260928/`（2.1 GB，含 4000 步最终权重、19 个中间检查点和 `optimizer.pt`）；任务库备份为 `config/aitk-ui-before-daikei-resume-20260927T205709Z.sqlite`。
+  - 配置改为 `steps: 8000`、`max_step_saves_to_keep: 40`：AI Toolkit 只清理带步数后缀的中间检查点，超过上限会从最早的开始删，40 可以保住全部 200–7800 步。结束时会覆盖不带后缀的最终文件，所以 4000 步版本只在备份和 ComfyUI 的 `Daikei.safetensors` 里保留。
+  - 续训按创建时间取最新的 `DaikeiQwen21*.safetensors`（即 4000 步最终文件，元数据 step 4000），并加载 `optimizer.pt`。因此续训前不能改动输出目录里的任何文件。
+  - 用同一任务 ID 调 `POST /api/jobs` 更新配置，再调用 start 和 queue start。第一轮日志归档为 `logs/0_log.txt`，上一轮监视状态归档为 `training-service-watch-step4000.json`。
+  - 监视脚本 `config/watch-daikei.py` 增加了网络自愈：`docker start comfyui` 失败且其网络 ID 已不是当前 `ai-draw_ai-draw-network` 时，自动 `disconnect -f` 再 `connect --alias comfyui` 后重试。监视容器必须在任务进入 `running` 后才启动，否则会把上一轮的 `completed` 当成训练结束。
+- 续训结果（2026-09-28 07:40 完成 8000 步）：约 2 小时 42 分钟。检查点 200–7800 步全部保留（共 39 个中间文件），最终文件已被 8000 步覆盖，4000 步原件在备份目录和 ComfyUI 的 `Daikei.safetensors` 中。
+  - 预览对比图：`daikei_qwen21_eval/resume_2800_6000.jpg` 和 `resume_6000_8000.jpg`。训练效果不是单调变好：4800 步和 7600 步时 `一个女孩` 又退回照片，雨衣公交站在 4800 步也退回照片。
+    - 5600–6000 步 5 条全部插画化，4000 步的畸形和大部分乱码消失，黑白双马尾一条线条最干净；
+    - 8000 步 `一个女孩` 接近作者的黑发齐刘海眼镜角色，公交站变为干净平涂，但动漫女孩一条自 7200 步起变成大脸特写；
+    - 红上衣、格子裙和橙色圆形背景的偏向贯穿 5600–8000 步，来自数据，多训不会消除。
+  - Daikei 结束后，AI Toolkit 队列紧接着运行另一个会话排入的 `CznQwen21`，生图服务要等它结束才会恢复。两个监视容器都在等待，同时恢复不会冲突。
+  - 6000、8000 步经安装脚本校验后以 `DaikeiEval_s6000`、`DaikeiEval_s8000` 临时放进 ComfyUI（SHA-256 分别为 `6d3cf801…`、`44430c22…`），未登记到应用。服务恢复后，用生产 provider 对比 4000/6000/8000 步：4 条提示词 × 2 个种子，强度 0.8，40 步，1024×1024。结果写入 `daikei_qwen21_eval/prod_cmp/`，对比图为 `prod_cafe.jpg` 和 `prod_peace_shiba.jpg`。
+- 生产对比与替换（2026-09-28 13:35–14:05）：CZN 训练结束、服务恢复后，自动跑完 24 张对比，对比图为 `daikei_qwen21_eval/prod_cafe.jpg` 和 `prod_peace_shiba.jpg`。
+  - 8000 步最好：画风生效的场景里，线条最干净、乱写的字最少。红底比耶种子 42 时，4000 步是满画面潦草红线，6000 步叠了大量乱写的字，8000 步是干净的全身像。加「二次元插画」的咖啡店，8000 步最干净，种子 7 的黑发高对比平涂最接近原作。
+  - 局限没有随步数消失：写实场景（咖啡店种子 42）和动物（柴犬两个种子）在三个检查点、强度 0.8 下都仍是照片。提示词需要带「插画」「二次元」一类说明，或者描述作者常画的人物和场景。
+  - 用户选择 8000 步。沿用 `Daikei` 名称，以原子改名把 ComfyUI 的 `loras/Daikei.safetensors` 换成 8000 步（SHA-256 `44430c2294b5e1a347a282a84133872d47be08dd54e699f104baf627fae83970`），不改应用配置、不部署。4000 步原件（`920337e8…`）在 `/opt/ai-toolkit/backups/DaikeiQwen21-step4000-20260928/`。临时的 `DaikeiEval_s6000/s8000` 已删除。
+  - ComfyUI 的 LoRA 节点按文件路径缓存权重，同名替换后必须调用 `POST /free {"unload_models": true, "free_memory": true}` 重置缓存。替换后用同一提示词、同一种子生成，与对比中的 8000 步结果逐像素一致（平均差 0.00，和 4000 步相差 54.05）。
+  - 上线后到替换前，有 6 条消息和 1 个会话配置使用过 `Daikei`，重新生成这些消息时会用 8000 步权重。
+
+### 2026-09-28 卡厄思梦境小人（CZN）数据集、训练与上线
+
+- 来源：用户已获版权方授权，从 Windows 上传 PC 国际服客户端的 `bin/appdata/cznlive/` 到服务器 `/opt/tools/czn/client/cznlive/`：`data.pack` 共 6 个分卷，5.9 GB；`gameres` 目录为空。解包、渲染和数据集工具都放在仓库外的 `/opt/tools/czn/`，用法见其中的 `README.md`。
+- 解包：
+  - 基于 [akioukun/Chaos-Zero-Nightmare-ASSet-Ripper](https://github.com/akioukun/Chaos-Zero-Nightmare-ASSet-Ripper)（MIT，锁定 `53975460`），加 Linux 补丁后构建成无界面的 `czn-ripper:53975460`。补丁内容：POSIX `mmap`、SSRA 路径处理、AES 条目跳过并计数、UTF-8 转换。
+  - 每个输出都经过校验，解码失败只报错，不写出文件。用合成的两段加密包和 SSRA 更新包做过自测。
+  - 扫描用时 1.5 秒，共 85,702 个文件，覆盖率 99.63%。其中 16,329 个 Spine 骨骼带 atlas，几乎都是 3.8.79 版。
+- 纹理与渲染：
+  - 纹理为 ASTC 4×4/8×8 和 ETC2，都是预乘 alpha。ETC2 有损压缩会让最多 25% 的半透明像素颜色大于 alpha，而真正的非预乘纹理约 75%，所以按 50% 为界判断。
+  - 渲染用无头 Chrome 加 spine-ts 3.8，WebGL 走 SwiftShader，不占 GPU。spine-ts 3.8 在非预乘模式下会把 alpha 通道再乘一次，导致导出颜色偏亮，已改成与引擎一致的 `(ONE, ONE_MINUS_SRC_ALPHA)` 累积 alpha。Screen 混合同样按引擎处理。
+  - 隐藏 additive/screen 特效槽，按纹理 1:1 的密度渲染。
+  - 用官方 spineboy 的预乘版和普通版对照，白底上平均差 0.22–0.25/255。
+- 选小人：
+  - 总览拼图在 `datasets/czn_review/overview/`。确认小人是 `model/` 下的 Q 版战斗模型。
+  - 不属于小人：`face/portrait` 和 `_battle_ready` 是正常比例的立绘，`card` 是卡牌插画，`map` 是地图标记，10xxxxx 编号是写实风格怪物。
+  - 用户选定 108 个：4 位编号 32 个、5 位编号 68 个，以及 8 套 `_01` 换装。
+- 候选帧与筛选：
+  - 排除受击、死亡、眩晕、崩溃、入场和过渡动作。每个动作取相位 0/0.3/0.6/0.9，共 7108 帧。
+  - 再剔除以下几类帧：半透明面积大；必杀技开头被涂成黑色剪影；闪白；部件比待机时明显更分散。
+  - 以待机帧为起点做最远点采样，每个动作最多 2 帧。每个角色的上限：战斗角色 6 帧，伙伴 4 帧，换装和 NPC 3 帧。
+  - 最终 484 帧，覆盖 107 个角色。`30040` 是全息投影角色，整体半透明，被排除。
+- 成品图：
+  - 按纹理 1:1 渲染时，小人长边中位数约 300 px（AI Toolkit 分桶不会放大小图），所以经 ComfyUI 用 Real-CUGAN 4x（`up4x-latest-conservative.pth`）放大。
+  - 约 75% 白底，约 25% 用 5 种浅色纯色底。人物占画面 55–90%，边长补齐到 32 的倍数，长边上限 1536。
+  - 放大器会让纯色底偏 1 个色阶，所以把人物以外的区域重置为准确底色。深色轮廓外侧的放大过冲会在浅色底上形成白边，已把这一圈的亮度限制在不超过底色。
+  - 13 张清除了远离主体的零星特效碎块。
+  - 数据集放在 `datasets/czn/`，共 484 张 RGB，246 MB。编号审阅图在 `datasets/czn_review/candidates/`，用户没有删图。
+- 英文标签：WD v3，参数与 sen、Daikei 相同，在 ComfyUI 镜像的临时 CPU 容器里运行。
+  - 删去 `chibi` 类标签。
+  - 删去误标的 `transparent_background`：打标器把纯色底上的抠像人物当成了透明底，试跑时 19 张中有 16 张被这样标。
+  - 每张 10–65 个标签，浅色底分别标为 grey/pink/green/brown_background。
+- 中文描述：`prepare_qwen_image_21_bilingual.py` 新增可选参数 `--forbid`。
+  - 禁用词会追加到 system prompt，并在结果里校验，命中就重试。只有使用该参数时才写入 `preparation.json`，旧数据集的标识不变。
+  - 禁用词为：Q版、二头身、三头身、SD、大头、小人、卡通、手办、玩偶、公仔、贴纸、精灵图、像素、游戏截图、卡厄思、卡厄斯。这样 Q 版比例由 LoRA 承担，而不是绑定到某个词上。
+  - 划分为训练 479 张、验证 5 张，输出到 `datasets/czn_qwen21/`。描述 119–168 字，生成过程中没有触发重试。
+- 训练：配置为 `configs/training/czn_qwen_image_21.yaml`，任务 `CznQwen21`（`1bd576ac-aa52-46b3-9219-c790674d3a4b`）。参数与 Daikei 相同，预览提示词在原 5 条外加了 2 条纯内容句。
+  - 按用户要求排在 Daikei 续训之后：07:32 入队，07:39 开始训练，10:41 完成 4000 步，约 2 秒一步。
+  - 用户随后要求训练到 8000 步，做法如下：
+    - 先停掉两个监视容器，避免 4000 步结束时恢复服务；
+    - 把输出目录连同 `optimizer.pt` 备份到 `/opt/ai-toolkit/backups/CznQwen21-step4000-20260928/`，哈希一致；
+    - 备份任务库，把任务配置改为 8000 步，重新启动任务和队列；
+    - 日志确认从 4000 步的权重和优化器接着训练，然后恢复两个监视容器。
+  - 13:35 完成 8000 步，监视容器随即恢复生图。续训只保留最近 20 个中间检查点，200–3800 步只存在于上述备份里。
+- 效果：
+  - 训练预览（seed 42，强度 0.8）：4000 步以前，`一个女孩` 和咖啡馆两条会退回照片；4800 步起，7 条提示词全部是小人画风。对比图为 `datasets/czn_qwen21_eval/training_samples_0_4000.jpg` 和 `training_samples_2000_8000.jpg`。
+  - 生产对比：5600、7200、8000 步各跑 4 条训练未用过的提示词 × 2 个种子，结果在 `czn_qwen21_eval/multiseed/`，对比图为 `multiseed_5600_7200_8000.jpg`。
+    - 种子 731946：全部是小人。
+    - 种子 5820193：7200 和 8000 步的 `一个女孩` 是照片，西装男和实验室两条是正常比例的动漫插画；5600 步的这两条接近写实。
+  - 各检查点都有红色服装外溢，也常出现绿色笔刷状色块。
+- 上线：
+  - 用户选择 8000 步。经安装脚本校验，384 个张量，192 个上投影非零，元数据为 step 8000、epoch 4，SHA-256 `714616d4b94c3ea60e7c6344e609d4196e374c5faafd4f8cac6f2e91d1fb1112`。
+  - 起初以 `czn.safetensors`／显示名 CZN 上线，同日改名为 `CZN.safetensors`，见下节。
+  - 165 项后端测试通过，已部署。认证接口在两个 Qwen 工作流都返回 CZN，默认强度 0.8。
+  - 生产 provider 文生图的结果为 `czn_qwen21_eval/production_t2i_czn_0.8.png`：平涂画风，但这个种子下头身比例偏正常。
+- 已知局限：强度 0.8 时，部分种子仍会退回写实或正常比例。需要时可以调高强度，或在描述里写明是插画。
+
+### 2026-09-28 sen、czn 改名为 Sen、CZN
+
+- 用户要求 LoRA 名称统一以大写字母开头：
+  - `sen` 改为 `Sen`，文件和显示名都改；
+  - 刚上线的 `czn` 一并改为 `CZN`，改的是文件名和标识，显示名本来就是 CZN。
+- 先核对在用文件与训练原件的 SHA-256 一致（sen 为 `751f71a5…`，czn 为 `714616d4…`），再用安装脚本校验，装成 `Sen.safetensors` 和 `CZN.safetensors`。`lora_models` 与 `tests/test_generation_pipeline.py` 同步修改，165 项测试通过。
+- 迁移步骤：
+  - 迁移前把 `chat_messages`、`chat_sessions`、`user_configs` 三张表用 pg_dump 导出到 `/opt/ai-draw-backups/2026-09-28-lora-rename/lora-tables.dump`（自定义格式，附 sha256）。
+  - 部署前等 ComfyUI 连续空闲 60 秒，并确认没有进行中的生成。
+  - 部署后在一个事务里把 `<lora:sen:` 替换为 `<lora:Sen:`，把 `<lora:czn:` 替换为 `<lora:CZN:`。共改了 20 条消息（Sen 18 条、CZN 2 条）、1 个会话配置，用户配置 0 条。事务内检查没有残留旧标识后才提交，强度不变。
+- 核对结果：
+  - 两个 Qwen 工作流的认证接口返回 Ameniwa、Sen、Daikei、CZN，`lora_labels` 已同步。
+  - 用生产 provider 分别以 `<lora:Sen:0.8>` 和 `<lora:CZN:0.8>` 实际生成，ComfyUI 历史中的文件分别为 `Sen.safetensors` 和 `CZN.safetensors`。
+  - 随后删除了 ComfyUI 中旧的 `sen.safetensors` 和 `czn.safetensors`。
+- 迁移前已经打开的网页，内存里还是旧标识，需要刷新后再生成。训练产物（`SenQwen21`、`CznQwen21` 和各数据集目录）保留原名。
+- 再次续训到 15000 步（2026-09-28 18:37 开始，用户要求）：
+  - 续训前备份 8000 步状态（最终权重 `44430c22…`、`optimizer.pt`、配置、日志、loss 记录）到 `/opt/ai-toolkit/backups/DaikeiQwen21-step8000-20260928/`（600 MB）。中间检查点和预览不会被覆盖，没有重复备份。任务库备份为 `config/aitk-ui-before-daikei-resume15000-*.sqlite`。
+  - 配置改为 `steps: 15000`、`max_step_saves_to_keep: 80`（原有 38 个中间检查点加新增 34 个，共 72 个）。请求体为 `config/daikei_resume15000_request.json`，第二轮日志归档为 `logs/1_log.txt`，监视状态归档为 `training-service-watch-step8000.json`。
+  - 线上 `Daikei` 仍是 8000 步权重，这次续训不影响它。15000 步训完后，再在生产环境对比挑选。
+- 15000 步结果（2026-09-28 23:21 完成，约 4 小时 44 分）：监视容器在 23:22 启动 ComfyUI 并恢复生图（中间一次重试是 ComfyUI 启动中的就绪检查）。共 73 个权重文件（200–14800 步每 200 步一个，加 15000 步最终文件），全部保留；最终文件已被 15000 步覆盖，8000 步原件在备份目录和线上 `Daikei` 中。
+  - 预览对比图：`daikei_qwen21_eval/resume_8000_15000.jpg`（8000、9200、10400、11600、12800、14000、15000 步）。
+    - 10400 步 `一个女孩` 又退回照片。11600、12800 步 `一个女孩` 变成带仿 DAIKEI 字标（如「DARYENA」「DAIHI」）的红色箱子；`blue jacket, red cup` 从 9200 到 14000 步反复在脸上糊红色色块。
+    - 14000 步两条女孩提示词都变成作者的黑发齐刘海眼镜角色，最像原作，但压过提示词内容。
+    - 15000 步 5 条都干净：平涂清楚，没有字标外溢。
+  - 单种子预览起伏很大，是否替换线上 8000 步，仍需生产环境多种子对比。
+- 替换为 15000 步（2026-09-29 00:0x，用户选择不做生产对比、直接替换）：
+  - 最终权重的元数据为 step 15000、epoch 8，经安装脚本校验（384 个张量，192 个上投影非零）后先装成临时名，再以原子改名覆盖 `loras/Daikei.safetensors`，SHA-256 `0a97530b8cedd165d8603221aa556a95ec8f347185023b8f7a388bfb0fcd6853`。之后调用 ComfyUI `/free` 重置 LoRA 缓存。
+  - 验证：红底比耶提示词、种子 42、1024×1024、40 步、强度 0.8，ComfyUI 历史中 LoRA 节点为 `Daikei.safetensors`，与 8000 步同条件结果的平均差为 25.70，说明新权重已生效。输出为干净的全身平涂，黑发齐刘海，红底白卫衣，接近原作；卫衣 Logo 和手边有少量乱码，手势不是标准比耶。文件为 `daikei_qwen21_eval/production_t2i_Daikei_15000_peace_42.png`。
+  - 回退：8000 步原件在 `/opt/ai-toolkit/backups/DaikeiQwen21-step8000-20260928/DaikeiQwen21.safetensors`（`44430c22…`），4000 步在 `DaikeiQwen21-step4000-20260928/`。按同样的原子替换加 `/free` 即可换回，应用配置不变。
+  - 15000 步只看过单种子训练预览和这一张生产图，没有做多种子对比；写实场景和动物提示词的局限预计仍然存在。
+
+### 2026-09-29 Daikei v2：不写画风的标注、文字遮罩、加大训练量
+
+- 起因：用户试用线上 Ameniwa、Sen、Daikei、CZN 后，认为前两个明显更好。四者对比如下（「每张次数」为训练样本数除以训练图数，三档分辨率各算一次）：
+
+  | LoRA | 训练图 | 步数 | 每张次数 | 标注含 `flat_color` / 粗黑 |
+  |---|---|---|---|---|
+  | Ameniwa | 26 | 4000 | 约 154 | 0% / 0% |
+  | Sen | 31 | 4000 | 约 129 | 0% / 0% |
+  | Daikei v1 | 468 | 15000 | 约 32 | 40% / 20% |
+  | CZN | 479 | 8000 | 约 17 | 0% / 0% |
+
+  - CZN 的标注里没有画风词，效果同样偏弱，说明主因是每张图的训练次数少；Daikei 的标注还把画风写成了文字（`flat_color`、「人物以粗黑轮廓和大块黑白色面勾勒」），画风被归到这些词上，是额外的问题。
+  - 用户曾考虑自己训练或全量微调底模。评估结论：从头训练需要数十亿图文对，成本在 $10⁵–10⁶ 以上；全量微调在 AI Toolkit 里需要关闭 convrot8 量化并改用 14 GB 的 bf16 底模，16 GB 显卡不可行，保留原模型输出、遮罩先验等功能只支持 LoRA，而且问题的根源在数据和训练参数上，所以仍用 LoRA。
+  - 用户选择继续用全部 473 张，并把训练量加到 9000 步。
+- 不写画风的标注：新增 `scripts/prepare_qwen_image_21_style_free.py`（测试为 `tests/test_qwen_style_free_dataset.py`）。
+  - 英文标签删去 `flat_color`、`limited_palette`、`high_contrast`、`no_nose`、`outline`、`drop_shadow` 等画风标签；
+  - 中文描述由 Codex 重新生成，只写内容；用 v3 脚本的画风和渲染词表（加上卡通、高对比等）拒收，命中就重试；
+  - 按 `black_hair` 标签分成 `train_main`（354 张）和 `train_minor`（114 张，训练时重复 2 次），验证集 5 张沿用 `daikei_split`；
+  - 输出 `/opt/ai-toolkit/datasets/daikei_v2_qwen21/`：473 条描述、0 次重试、0 条含画风词，3 路并发约 20 分钟。
+- 文字遮罩：`/opt/ai-toolkit/datasets/daikei_v2_masks/`，138 张。
+  - 对 WD 标签含文字的 138 张图，在临时容器里用 EasyOCR（英文）检测并识别；
+  - 规则：至少 2 个字母或数字、置信度 ≥ 0.25 的框计入；
+  - 逐页人工核对后，补上漏检的 DAIKEI 大字、签名和日文，删掉眼睛、头发等误检；102 张有人工修正，记录在 `_records/edits.json`，检测结果、规则和生成脚本也放在 `_records/`；
+  - 自动识别的框按文字高度外扩 15%，人工框不外扩；遮罩面积中位数 7.5%，最大 60%；
+  - 不用 CRAFT 全图检测，因为它会把眼睛和头发高光当成文字。
+  - 注意：AI Toolkit 把遮罩归一化为均值 1（`mask_multiplier / mean`），全黑遮罩会除以 0，所以任何图都不能整张遮住。
+- 训练配置 `configs/training/daikei_v2_qwen_image_21.yaml`，任务名 `DaikeiV2Qwen21`：
+  - rank 32，AdamW8bit，峰值学习率 1.2e-4，余弦下降到 3e-5；
+  - EMA 0.999，不做梯度累积，共 9000 步；
+  - 分辨率 768/1024，描述丢弃率 0.1；
+  - 遮罩区域损失为 0，并用 `inverted_mask_prior` 让遮罩区域向底模预测学习；
+  - 每 500 步保存，每 1000 步预览 7 条提示词（原 5 条加用户常用的 2 条）；
+  - 每张次数：主组约 15、次组约 31。
+- 训练结果（2026-09-29）：04:00 开训，约 2.73 秒一步（只用 768/1024 两档、rank 32，有遮罩的样本还要多算一次底模预测），11:20 完成 9000 步。11:22 监视容器启动 ComfyUI 并恢复生图。
+  - 第 500 步检查点：384 个张量，192 个上投影非零（rank 32，形状 4096×32），学习率按余弦下降，没有碰上 AI Toolkit #1054。
+  - 保存和预览用的都是 EMA 权重。最终权重的 SHA-256 为 `c8cf252fb681970d402cf329c1d20e90ff46d07cbc509d7bf5280f5f15dce855`。
+- 生产对比：线上 v1（15000 步）与 v2 的 7000、9000 步。用户实际用过的 4 条提示词（女仆装黑白配色、双马尾兔女郎、黑色齐颈短发厚刘海、可爱女孩半身）加上咖啡店、柴犬，各 2 个种子，强度 0.8。对比图为 `daikei_qwen21_eval/v2_maid_bunny.jpg`、`v2_bob_student.jpg`、`v2_cafe_shiba.jpg`。
+  - 人物类 v2 明显更像原作：大块黑发、苍白皮肤、黑衣的高对比画面；「黑色齐颈短发」直接出了作者带内层红挑染的黑发角色；兔女郎提示词画出了兔耳（v1 没有）；v1 衣服上的「Daiki」乱码消失。
+  - 变差：线条更潦草，个别图笔画凌乱；常出现粉紫色背景；咖啡店种子 42 退回照片（v1 为插画）。柴犬三版都是照片。
+  - 7000 与 9000 步几乎相同，采用 9000 步。
+- 上线：好坏参半，所以作为单独一项登记，供用户在实际使用中和 v1 比较。
+  - 安装为 ComfyUI `loras/DaikeiV2.safetensors`（安装脚本已校验，哈希同上）；
+  - `lora_models` 在 Daikei 之后加入 `{name: "DaikeiV2.safetensors", label: "DaikeiV2"}`，同步 `tests/test_generation_pipeline.py`，170 项后端测试通过；
+  - 部署前确认线上 `server/`、`comfyui/`、`utils/` 的代码与工作区一致，配置只差这一行；
+  - 先构建镜像再停服，以缩短停机时间。
+  - 19:19 部署完成：ComfyUI 未停机，网络 ID 与当前网络一致。
+  - 两个 Qwen 工作流的 `/api/service/loras` 都返回 DaikeiV2（默认强度 0.8），`lora_labels` 也已包含；核对用的临时用户已删除。
+  - 生产 provider 用 `<lora:DaikeiV2:0.8>` 出图，ComfyUI 历史中的 LoRA 节点为 `DaikeiV2.safetensors`，结果与对比中的 9000 步同种子图逐像素一致。
+- 续训到 15000 步（2026-09-29 19:41 起）：
+  - 续训前备份 9000 步状态（最终权重、`optimizer.pt`、配置、日志、loss 记录）到 `/opt/ai-toolkit/backups/DaikeiV2Qwen21-step9000-20260929/`（311 MB）。
+  - 配置改为 `steps: 15000`、`max_step_saves_to_keep: 40`。
+  - 续训时 AI Toolkit 会按新的总步数重新计算余弦曲线，并用 `lr_scheduler.step(step_num)` 直接跳到当前步，所以学习率从 3e-5 回升到约 6.1e-5 后再下降。EMA 状态不保存，续训从保存的 EMA 权重重新开始计算。
+  - 22:50 保存第 13000 步后，用户手动停止了任务；监视容器把「stopped」当作结束，22:56 启动 ComfyUI 并恢复了生图。
+  - 之后任务再次启动时报 `No CUDA GPUs are available`：容器内 `nvidia-smi` 为 `Failed to initialize NVML`，又一次丢失了显卡访问。处理：先 WAL checkpoint，再备份任务库、`docker compose restart ai-toolkit`。
+  - 09-30 01:30 从第 13000 步接着训：日志确认加载了 `_000013000` 检查点和优化器状态，学习率 3.4e-5 与余弦曲线一致。
+- 15000 步完成与替换（2026-09-30）：
+  - 03:02 完成 15000 步，最终权重元数据为 step 15000、epoch 11。
+  - 用户要求替换，于是把 `DaikeiV2` 换成 15000 步：先装成临时名，再原子改名覆盖 `loras/DaikeiV2.safetensors`，SHA-256 `497cc44b117afe6599a0080cf0dcc44369edf32b9f16acc756419783dc8a8096`；`Daikei`（v1）不变。
+  - 替换时 ComfyUI 尚未启动，不存在旧权重缓存。9000 步原件在 `/opt/ai-toolkit/backups/DaikeiV2Qwen21-step9000-20260929/`。
+  - 训练结束后 AI Toolkit 容器再次丢失显卡访问（`Failed to initialize NVML`，当天第二次）。监视脚本要先在该容器里执行 `nvidia-smi` 确认显卡已释放，这一步一直失败，生图没有恢复。处理：停监视容器，WAL checkpoint，`docker compose restart ai-toolkit`，再启动监视容器；03:16 恢复生图。
+  - 修复：`config/watch-daikei.py` 和 `watch-daikei-v2.py` 在任务已结束但 `nvidia-smi` 失败时，等 90 秒后视为显卡已释放并照常恢复。原文件备份为 `.bak-20260930`。
+  - 对比：v1、v2-9000（临时名 `DaikeiV2Eval_s9000`）和 v2-15000（`DaikeiV2`），用户的 6 条中文提示词（新增猫娘），各 2 个种子。复用上次同提示词、同种子、同权重的 20 张图，只补 16 张。结果在 `daikei_qwen21_eval/v2_15000_cmp/`，对比图为 `v2_15000_*.jpg`。
+  - 对比跑到一半时用户叫停，改为自己在应用里对比。临时的 `DaikeiV2Eval_s9000` 已删除，原件在 9000 步备份里。
+  - 已完成的部分：猫娘提示词 2 个种子的三版对比（`v2_15000_catgirl.jpg`），以及 v2 在 9000、11000、13000、15000 步的训练预览（`v2_previews_9000_15000.jpg`）。
+    - 15000 与 9000 几乎一样：同种子的猫娘图只是头发的黑色块更实一些。预览里女仆装和雨衣公交站略干净，但「一个女孩」仍固定为红衣格子裙和橙色圆底。后半段学习率只有 3e-5 到 6e-5，模型基本已经收敛。
+    - v1 与 v2 差别更大：v1 更柔和（浅色底、皮肤有柔和阴影、脸更精致），v2 更接近作者本人的画法（纯白底、大块纯黑头发、线条更硬）。用户觉得 v2 不如 v1，说明用户想要的是精致的通用平涂，而不是更像作者本人的笔触。
+- 2026-09-30 03:26 用户反馈无法生图，报错 `ComfyWorkflowWrapper(self.temp_workflow_file)` → `TypeError: 'NoneType' object is not iterable`。
+  - 根因：训练前暂停生图调用 `/api/service/stop` → `ComfyUIService.close_connect()`，会删除当前工作流的临时副本，并把 `temp_workflow_file` 置空，但 `current_workflow_type` 不变。恢复时 `/api/service/start` 只把服务标记为可用，不重新加载工作流。此后第一次生成如果和暂停前是同一个工作流，`switch_workflow` 会跳过加载，直接读空路径。
+  - 以前没暴露，是因为训练后恰好都有过部署（后端重启），或者用户先切换了工作流。03:25 ComfyUI 被 `docker restart` 与此无关。
+  - 处理：先重启后端恢复使用。再修复：`ComfyUIService._workflow_file()` 在临时副本缺失时按当前类型重新加载，三个生成入口都改用它。新增 `tests/test_comfyui_service.py` 复现暂停、恢复、再生成：修复前报同样的 TypeError，修复后通过；171 项后端测试通过，已部署。
+- 同种子强度对比（2026-09-30）：
+  - 设置：用户用固定种子 4089305171 和猫娘提示词，比较 v1 与 v2 在 1.0、0.8、0.6 三档的效果。用户满意 **v1 @1.0** 与 **v2 @0.8**。
+  - 画风阈值：作者标志性的红眼、红色耳内，v1 在 0.8→1.0 之间才出现（红色像素 0.05% → 0.20%），v2 在 0.6→0.8 之间出现（0% → 2.15%）。0.6 时两版都退回底模的通用动漫脸，这时跨版本差异最小。
+  - v2 过头：v2 从 0.8 到 1.0 的画面变化量是 v1 同区间的 1.6 倍，1.0 时头发变深变长、暗红描边加粗、脸型变窄，已经过头。两张满意图的画风并不相同：v1 为浅灰底、细黑线，v2 为白底、较粗的红棕描边。它们只是各自刚好越过阈值、还没过头。
+  - 原因：v1 的 468 条标注中，`flat_color` 191 条、「粗黑」98 条、`limited_palette` 80 条、「色块」55 条，v2 一条都没有。
+    - v1 的一部分画风由这些词承担。用户的提示词不写这些词，所以要开到 1.0 才补足。
+    - v2 的画风全部记在权重里，0.8 就够；1.0 会把原作偏重的粗描边、深色块全量带出。
+  - 权重本身解释不了强度差异：
+    - v2 的增量 ΔW 总范数只有 v1 的 0.63 倍（51.5 对 81.9）；
+    - 两版都高度集中，最大奇异方向约占 65% 能量；
+    - 两版方向几乎正交（余弦 0.04）。
+    - 因此不同 LoRA 的强度数值不能直接横比。
+  - 本结论只来自一条提示词、一个种子；统一改默认强度之前，应再换几组提示词和种子确认。
+
+### 2026-09-30 恢复固定种子：设置、记录与一键复用
+
+用户要求在设置里可以指定种子，并确认了三点：图片和视频都要；一轮生成多张时每张依次加 1；记录每张的实际种子并能一键复用。09-23 按当时的要求删掉了 `qwen_seed`，这次使用新的键重新加入，旧键仍由前端过滤、后端忽略。
+
+- 元数据新增参数类型 `seed`：空字符串表示随机，整数表示固定。
+  - Qwen 文生图与编辑共用 `qwen_fixed_seed`，两种 H3 方式共用 `h3_fixed_seed`；GPT Image 没有种子。
+  - 图片和视频用不同的键，切换时互不影响。
+  - 取值范围 0 到 2^53 − 1（JSON 能精确表示的最大整数）。随机种子取 32 位，便于阅读和输入。
+  - 一轮 n 张时要求“种子 + n − 1”不超过上限：前后端都校验，后端报“种子必须在 0 到 N 之间”。
+- 执行：
+  - 注册了 `seed_option` 的 provider（Qwen、两种 H3），由 `GenerationEngine` 用 `round_seeds` 定出本轮每张的种子，通过 `ProviderInput.seed` 传给 ComfyUI。固定时第 n 张用“种子 + n − 1”；随机时每张各自抽取互不相同的 32 位种子。
+  - 最初随机模式也是抽一个基准再依次加 1，用户反馈“选的随机，种子却连号”后改为逐张随机（见下文“LoRA 列表、默认强度与设置弹窗”）。每张的种子都单独记录，复用任何一张都不受影响。
+- 记录：
+  - `generated_images` 新增可空列 `seed BIGINT`，由启动时的幂等 DDL 添加；旧结果、编辑后的图片和没有种子的工作流为 NULL。
+  - WebSocket 的 `media_generated` 和 `preview_update` 携带 `seed`，任务快照带 `seeds`。
+  - 历史与轮次接口返回与 `images` 一一对应的 `seeds`；`/chat/save` 也接受 `seeds`，前端调整或编辑图片后按图片地址重新对齐。
+- 界面：
+  - 生成设置末尾新增“种子”：可在“随机/固定”之间切换，固定时可输入数值，或用按钮换一个随机值。
+  - 多张时提示“4 张依次使用 N–N+3”。数量调大导致越界、或选了固定但没填数值时，不能保存。
+  - 结果图左上角显示“种子 N”：桌面悬停时出现，触屏上常驻，点击范围扩到 44px。点击后把该种子固定到对应工作流并保存到会话；如果当前是另一类工作流，提示切换过去后生效。
+  - 固定种子的轮次显示“固定种子: N”标签；编辑重生成沿用该轮的固定种子。
+  - 固定种子期间，输入栏的设置按钮显示小圆点，按钮名称带上当前种子，避免忘记改回随机而一直出同样的图。
+  - 新会话恢复为随机。
+- 验证：
+  - 后端 181 项、前端 123 项测试，以及改动文件的定向 lint、生产构建均通过。全量 lint 仍有 `utils/helpers.ts`、`utils/indexedDB.ts` 原有的 24 个错误。
+  - 浏览器检查使用模拟接口与 WebSocket，在 1440、390、320 宽度下 47 项全部通过，覆盖：设置校验与提示、请求携带种子、结果逐张显示、复用后保存、视频种子与图片种子分开、设置按钮圆点、新会话恢复随机，以及手机上底部操作栏保持一行、没有横向溢出。
+  - 04:11 部署。部署前确认 ComfyUI 队列已连续空闲 60 秒，用户最近两轮都已完成落库。
+  - 线上核对：元数据返回两个种子参数，`generated_images.seed` 列已添加。临时用户用 Qwen 文生图生成 512×512、20 步：
+    - 固定种子 424242 生成两张：任务快照、轮次接口、数据库和 ComfyUI 执行图中的种子都是 424242、424243；
+    - 随机生成一张：记录为 1165148824，与执行图一致；
+    - 生成两张时传入 2^53 − 1，返回 422“种子必须在 0 到 9007199254740990 之间”。
+  - 核对后已删除临时用户、会话和生成的文件。
+
+### 2026-09-30 LoRA 列表、默认强度与设置弹窗
+
+用户对比后先要求下架 v1、把 v2 的默认强度设为 0.7，随后改为“v2 就叫 Daikei，默认 0.8”。另提了三点：换 LoRA 时不要重置强度；随机种子不该连号；生成设置弹窗尽量不出现滚动条。
+
+- Daikei 改名（最终状态）：
+  - ComfyUI 中 v1 的 `Daikei.safetensors`（`0a97530b…`）改名为 `DaikeiV1.safetensors`，不登记；v2 的 `DaikeiV2.safetensors`（`497cc44b…`）改名为 `Daikei.safetensors`。`lora_models` 只登记 `{name: "Daikei.safetensors", label: "Daikei"}`，默认强度 0.8。
+  - 迁移前用 pg_dump 导出 `chat_messages`、`chat_sessions`、`user_configs` 到 `/opt/ai-draw-backups/2026-09-30-daikei-rename/lora-tables.dump`（附 sha256）。
+  - 等 ComfyUI 连续空闲 60 秒后停服，两个文件用 `mv -n` 改名，并调用 ComfyUI `/free` 清空模型与执行缓存。之后只启动数据库，在一个 DO 块里迁移（数量不符即回滚），最后全部启动。停机约 14 秒。
+  - 历史消息如实记录所用权重：21 条 `<lora:Daikei:` 改为 `<lora:DaikeiV1:`，7 条 `<lora:DaikeiV2:` 改为 `<lora:Daikei:`。v1 的历史轮次因此不能直接重新生成，会提示 LoRA 未登记。
+  - 会话配置表示“下次用什么”：3 个 DaikeiV2 改为 Daikei；原来选 v1 的 2 个（「泳装猫娘全身绘制」0.6、「金发校服女生设计」1.0）保持 `Daikei`，即改用 v2，强度不变。用户配置没有相关记录。
+  - 迁移前已打开的网页，内存里还是旧标识，需要刷新后再生成。
+- 默认强度：`lora_models` 的条目可写 `default_strength`，由 `server/lora_catalog.py` 下发，缺省为 0.8。中途曾给 DaikeiV2 设 0.7，改名后按用户要求用缺省 0.8。
+- 换模型保留强度：LoRA 选择器里把已选模型换成另一个时，保留这一行的强度；空行首次选择和“添加 LoRA”仍用模型的默认强度。
+- 随机种子：`round_seeds` 在随机模式下为每张抽取互不相同的 32 位种子，不再“基准 + n”连号；固定种子仍是“种子 + n − 1”。设置里随机模式的提示改为“每张随机”。
+- 设置弹窗：正文最大高度由 `min(70dvh, 680px)` 改为 `calc(100dvh - 140px)`（标题和按钮约占 116px，上下各留约 12px）。字段间距由 24px 收到 16px，最后一项不留底距；窗口高度不超过 860px 时，间距再收到 12px，标签下距 4px。
+  - 实测正文所需高度（改前 → 改后）：Qwen 文生图 713 → 641（窄窗口 589）；编辑模式关闭原图尺寸 827 → 747（687）；视频 498 → 442（406）。
+  - 窗口 1920×950、1440×900、1440×790，以及手机 390×844、390×750 下，Qwen 文生图和视频都不再滚动。
+  - 仍会滚动的情况：约 650px 高的小窗口、320px 宽的小手机，以及编辑模式关闭原图尺寸、显示宽高滑条时 790px 以下的窗口。
+- 验证：
+  - 后端 182 项测试通过，其中新增逐张随机种子与按模型默认强度的用例；前端 123 项测试和改动文件 lint 通过。
+  - 浏览器检查全部通过：LoRA 切换 11 项（调到 0.5 后换模型仍为 0.5、空行首选用默认值、添加 LoRA 用默认值、未登记的旧 LoRA 提示不可用），种子回归 47 项；弹窗高度按上面的尺寸逐一测量。
+  - 04:56 部署后的线上核对（临时账号，结束后已删除账号、会话和文件）：
+    - 两个 Qwen 工作流的 LoRA 接口返回 Ameniwa、Sen、Daikei、CZN，默认强度都是 0.8；`lora_labels` 同步。`DaikeiV1`、`DaikeiV2` 都返回 422 未登记。
+    - 随机模式两张的种子为 515915913 和 1032246189，不连号，与 ComfyUI 执行图一致；执行图中的 LoRA 为 `Daikei.safetensors`，强度 0.8。
+    - 用新名 `<lora:Daikei:0.8>` 和种子 4089305171 重跑用户的猫娘提示词（1024×1024、40 步），结果与改名前 DaikeiV2 0.8 的图逐像素相同。这说明改名正确、ComfyUI 没有沿用缓存的 v1，固定种子也能完全复现。

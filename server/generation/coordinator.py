@@ -15,14 +15,17 @@ class MediaGenerator(Protocol):
 
     async def generate(
         self, parameters: GenerationParameters, context: TaskContext,
-        on_artifact: Callable[[str, int, int], None], check_cancelled: Callable[[], None],
+        on_artifact: Callable[[str, int, int, Optional[int]], None], check_cancelled: Callable[[], None],
     ) -> list[str]: ...
 
     async def interrupt(self, workflow: str, runner: asyncio.Task) -> None: ...
 
 
 class ResultRepository(Protocol):
-    def persist(self, context: TaskContext, images: list[str], *, replace_existing: bool = True, source_updates: Optional[dict] = None) -> str: ...
+    def persist(
+        self, context: TaskContext, images: list[str], *, replace_existing: bool = True,
+        source_updates: Optional[dict] = None, seeds: Optional[list[Optional[int]]] = None,
+    ) -> str: ...
 
     def discard(self, images: list[str]) -> None: ...
 
@@ -53,6 +56,7 @@ class GenerationCoordinator:
                 self.repository.persist, task.context, list(task.artifacts) if final else [],
                 replace_existing=final,
                 source_updates=parameters.source_updates() if final else None,
+                seeds=list(task.seeds) if final else [],
             ))
             try:
                 status = await asyncio.shield(writer)
@@ -86,12 +90,13 @@ class GenerationCoordinator:
                 self.tasks.check_cancelled(task)
                 self.events.task(task.context, "generation_progress", "正在生成...")
 
-            def on_artifact(url: str, index: int, total: int):
+            def on_artifact(url: str, index: int, total: int, seed: Optional[int] = None):
                 task.artifacts.append(url)
-                self.events.task(task.context, "media_generated", {"image": url, "index": index, "total": total})
+                task.seeds.append(seed)
+                self.events.task(task.context, "media_generated", {"image": url, "index": index, "total": total, "seed": seed})
                 self.events.task(task.context, "preview_update", {
                     "action": "add",
-                    "data": {"id": index + 1, "image": url, "workflow": task.context.workflow},
+                    "data": {"id": index + 1, "image": url, "workflow": task.context.workflow, "seed": seed},
                 })
 
             await self.engine.generate(
@@ -144,8 +149,8 @@ class GenerationCoordinator:
         return {
             "is_generating": owns_task,
             "preview_items": [
-                {"id": index + 1, "image": url, "workflow": active.context.workflow}
-                for index, url in enumerate(active.artifacts)
+                {"id": index + 1, "image": url, "workflow": active.context.workflow, "seed": seed}
+                for index, (url, seed) in enumerate(zip(active.artifacts, active.seeds))
             ] if owns_task else [],
             "last_task": self.tasks.last_task(user_id),
         }

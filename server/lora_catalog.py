@@ -1,5 +1,8 @@
 """Intersect explicitly compatible workflow adapters with ComfyUI's installed files."""
 
+# Strength preselected when a LoRA is picked, unless its `lora_models` entry sets `default_strength`.
+DEFAULT_LORA_STRENGTH = 0.8
+
 
 def installed_lora_names(payload: dict) -> set[str]:
     try:
@@ -23,7 +26,7 @@ def workflow_lora_options(metadata: dict, payload: dict) -> list[dict]:
         {
             "value": item["name"].removesuffix(".safetensors"),
             "label": item["label"],
-            "default_strength": 0.8,
+            "default_strength": float(item.get("default_strength", DEFAULT_LORA_STRENGTH)),
         }
         for item in metadata.get("lora_models", [])
         if item["name"] in installed
