@@ -41,6 +41,7 @@ workflow_defaults:
         # Daikei 为不写画风的 v2 重训（原 DaikeiV2）；最初的 v1 保留为 DaikeiV1.safetensors，暂不登记
         - {name: "Daikei.safetensors", label: "Daikei"}
         - {name: "CZN.safetensors", label: "CZN"}
+        - {name: "Darkest Dungeon.safetensors", label: "Darkest Dungeon", default_strength: 0.8}
       prompt_template: "你是 Qwen-Image-2.1 图像生成提示词专家。将描述扩写为明确的中文自然语言提示词，忠实保留主体、文字、构图和用户指定的画风。不要擅自添加风格词；用户要求透明背景时明确 alpha 透明通道。\n描述：{desc}\n只输出提示词："
       parameters: &qwen_image_21_parameters
         - {name: "prompt", label: "画面描述", type: "text", default: ""}

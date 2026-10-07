@@ -1,0 +1,84 @@
+# Full-body hero style: reviewed Darkest Dungeon / anime skins, content-only bilingual captions.
+# Independent character groups are held out; the source/pose/QA ledger is manifest.json.
+job: extension
+config:
+  name: DarkGothicAnimeQwen21
+  process:
+    - type: diffusion_trainer
+      training_folder: /app/ai-toolkit/output
+      sqlite_db_path: /app/ai-toolkit/aitk_db.db
+      device: cuda:0
+      network: {type: lora, linear: 32, linear_alpha: 32}
+      save: {dtype: float16, save_every: 500, max_step_saves_to_keep: 40}
+      datasets:
+        - &dark_gothic_dataset
+          folder_path: /app/ai-toolkit/datasets/dark_gothic_anime_v1/train_groups/mod
+          caption_ext: txt
+          caption_dropout_rate: 0.1
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [768, 1024]
+          num_repeats: 2
+        - <<: *dark_gothic_dataset
+          folder_path: /app/ai-toolkit/datasets/dark_gothic_anime_v1/train_groups/base_female
+          num_repeats: 7
+        - <<: *dark_gothic_dataset
+          folder_path: /app/ai-toolkit/datasets/dark_gothic_anime_v1/train_groups/base_other
+          num_repeats: 1
+      train:
+        batch_size: 1
+        gradient_accumulation: 1
+        steps: 8000
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: shift
+        optimizer: adamw8bit
+        lr: 0.00012
+        lr_scheduler: cosine
+        lr_scheduler_params: {eta_min: 0.00003}
+        optimizer_params: {weight_decay: 0.01}
+        ema_config: {use_ema: true, ema_decay: 0.999}
+        dtype: bf16
+        skip_first_sample: false
+        disable_sampling: false
+      model:
+        name_or_path: Comfy-Org/Qwen-Image-2.1
+        arch: qwen_image_2
+        quantize: true
+        qtype: convrot8
+        quantize_te: true
+        qtype_te: convrot8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_transformer_percent: 0.5
+        layer_offloading_text_encoder_percent: 1.0
+      sample:
+        sampler: flowmatch
+        sample_every: 1000
+        width: 1024
+        height: 1024
+        samples:
+          - prompt: 一个女孩
+          - prompt: 银色短发的女骑士，右手持长剑，左手举盾，完整全身，白色背景。
+          - prompt: 黑色长发的女性，穿深紫色长袍，戴尖顶帽，手持木杖，完整全身，白色背景。
+          - prompt: 红发女游侠穿绿色披风，双手拉开长弓，完整全身，浅灰色背景。
+          - prompt: 戴圆框眼镜的女研究员，穿白色长大衣，手持一只蓝色药瓶，完整全身，白色背景。
+          - prompt: 穿黄色雨衣的女性，手持蓝色雨伞，完整全身，浅灰色背景。
+          - prompt: 留胡须的男性士兵，穿棕色皮甲，双手握长矛，完整全身，白色背景。
+          - prompt: A woman with blue braided hair, wearing a red coat and black boots, holding a lantern, full body, white background.
+        neg: ""
+        seed: 42
+        walk_seed: false
+        guidance_scale: 1
+        network_multiplier: 0.8
+        sample_steps: 40
+      logging: {log_every: 1, use_ui_logger: true, use_wandb: false}
+meta:
+  name: "[name]"
+  version: "1.0"
+  base_model: Qwen/Qwen-Image-2.1
+  caption_format: style_free_english_then_chinese

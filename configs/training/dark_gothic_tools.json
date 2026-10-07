@@ -1,0 +1,7 @@
+{
+  "spBinaryReader.py": {"url": "https://raw.githubusercontent.com/brachna/SpineConverter2.1.27/master/spBinaryReader.py", "sha256": "27ffff7f51f8d8199a39b44fa34d030fbacd776f608ea99984e36adcfade2575"},
+  "spJsonWriter.py": {"url": "https://raw.githubusercontent.com/brachna/SpineConverter2.1.27/master/spJsonWriter.py", "sha256": "83e6965cfac95b5f3b24aed57777d977f0bb76f543cace165256e37d2935227c"},
+  "spUtils.py": {"url": "https://raw.githubusercontent.com/brachna/SpineConverter2.1.27/master/spUtils.py", "sha256": "b72a148db573dc91099184539d01b1c9b31f666b005568e095179e997f1cfcf1"},
+  "spAtlas.py": {"url": "https://raw.githubusercontent.com/brachna/SpineConverter2.1.27/master/spAtlas.py", "sha256": "67ab9b08a42a3d1d137e5034957c584ab0867a1255a1eb94d1555e0bc0f3711e"},
+  "spine.js": {"url": "https://raw.githubusercontent.com/EsotericSoftware/spine-runtimes/2.1.25/spine-js/spine.js", "sha256": "89a8964502a9a0e23e97d129f5fe5565c1bc8ec5fafc5c8ed575172eccc3434c"}
+}
