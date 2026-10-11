@@ -48,6 +48,21 @@ test('validates all reserved indices without rewriting emails or partial text', 
   }
 });
 
+test('mention validation follows the actual slot count, not a fixed three', () => {
+  const four = ['a', 'b', 'c', 'd'];
+  assert.equal(getImageMentionError('@图片4', four), null);
+  assert(getImageMentionError('@图片5', four));
+  assert(getImageMentionError('@图片4', ['a', 'b', 'c']));
+});
+
+test('image preset capacity follows max_reference_images metadata', () => {
+  const gpt = { key: 'gpt_image', label: 'GPT', description: '', requires_image: false, parameters: [], supports_multi_image: true, max_reference_images: 16 };
+  const qwen = { key: 'qwen_image_21_i2i', label: 'Qwen', description: '', requires_image: true, parameters: [], supports_multi_image: true };
+  const wide = { prompt: '参照 @图片4 的构图。', images: [] };
+  assert.equal(getPresetWorkflowBlocker(wide, gpt), null);
+  assert.equal(getPresetWorkflowBlocker(wide, qwen), '预设最多支持 3 张参考图');
+});
+
 test('only multireference image workflows enable the picker', () => {
   const metadata = { key: 'gpt_image', label: 'GPT', description: '', requires_image: false, parameters: [], supports_multi_image: true };
   assert(supportsImageMentions(metadata));
@@ -110,6 +125,10 @@ test('fixed-camera motion presets require a motion-capable workflow and actual p
   assert.equal(getPresetBlocker(preset,motion,[]),'请先添加原始画面');
   assert.equal(getPresetBlocker(preset,motion,['character'],undefined,[]),'请先添加动作参考图');
   assert.equal(getPresetBlocker(preset,motion,['character'],undefined,['pose']),null);
+  // Video-capable workflows accept a motion video in place of the pose images.
+  const withVideo = {...motion,supports_motion_reference_video:true};
+  assert.equal(getPresetBlocker(preset,withVideo,['character'],undefined,[]),'请先添加动作参考图或动作视频');
+  assert.equal(getPresetBlocker(preset,withVideo,['character'],undefined,[null,`/uploads/reference/7/${'a'.repeat(32)}.mp4`]),null);
   assert.equal(getPresetBlocker({...preset,requires_motion_reference:undefined},video,['character']),null);
   // Reference-shot presets name their subject image; legacy snapshots without a label keep the old wording.
   const shot = {...preset,images:[{label:'主体图',role:'只提供外观',slot:1 as const}]};

@@ -69,8 +69,11 @@ class TaskManager:
         if task.cancel_requested:
             raise asyncio.CancelledError
 
-    def begin_persistence(self, task: GenerationTask) -> None:
-        self.check_cancelled(task)
+    def begin_persistence(self, task: GenerationTask, *, retain_cancelled: bool = False) -> None:
+        if retain_cancelled:
+            self._require_active(task)
+        else:
+            self.check_cancelled(task)
         task.phase = "persisting"
 
     def request_cancel(self, user_id: int, task_id: Optional[str] = None) -> tuple[Optional[GenerationTask], bool]:
@@ -120,8 +123,8 @@ class TaskManager:
                 "error" if task.phase in ("error", "cancelled") else "running"
             ),
             "phase": task.phase,
-            "images": list(task.artifacts) if task.phase == "completed" else [],
-            "seeds": list(task.seeds) if task.phase == "completed" else [],
+            "images": list(task.artifacts) if task.phase in ("completed", "cancelled") else [],
+            "seeds": list(task.seeds) if task.phase in ("completed", "cancelled") else [],
             "error": None,
             "finished_at": None,
         }

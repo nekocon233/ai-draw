@@ -255,6 +255,14 @@ def get_chat_history(
             }
             if msg.strength is not None:
                 params["strength"] = msg.strength
+            reference_images = msg.reference_images
+            if reference_images is None:
+                reference_images = [msg.reference_image, msg.reference_image_2, msg.reference_image_3]
+            reference_images = list(reference_images)
+            while reference_images and not reference_images[-1]:
+                reference_images.pop()
+            if reference_images:
+                params["referenceImages"] = reference_images
             if msg.reference_image:
                 params["referenceImage"] = msg.reference_image
             if msg.reference_image_2:
@@ -277,6 +285,8 @@ def get_chat_history(
                 params["workflowOptions"] = msg.workflow_options
             if msg.motion_reference_images is not None:
                 params["motionReferenceImages"] = msg.motion_reference_images
+            if msg.motion_reference_video:
+                params["motionReferenceVideo"] = msg.motion_reference_video
             if msg.motion_prompt is not None:
                 params["motionPrompt"] = msg.motion_prompt
             if msg.prompt_preset:
@@ -316,11 +326,13 @@ def clear_chat_history(
     file_paths = [image.file_path for message in messages for image in message.images]
     for message in messages:
         file_paths.extend(message.motion_reference_images or [])
+        file_paths.extend(filter(None, message.reference_images or []))
         file_paths.extend(filter(None, (
             message.reference_image,
             message.reference_image_2,
             message.reference_image_3,
             message.reference_image_end,
+            message.motion_reference_video,
         )))
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
     db.commit()
@@ -521,19 +533,42 @@ def save_chat_message(
             return {"success": True, "message": "消息已存在，已更新图片"}
         
         motion_images = message.get("motion_reference_images")
+        motion_video = message.get("motion_reference_video")
         from server.schemas import MotionPromptSnapshot
         from utils.motion_prompt import matching_motion_prompt
         try:
             snapshot = MotionPromptSnapshot.model_validate(message['motion_prompt']).model_dump() if message.get('motion_prompt') else None
         except ValueError as error:
             raise HTTPException(status_code=422, detail="动作提示词快照无效") from error
-        snapshot = matching_motion_prompt(snapshot, message.get('reference_image'), motion_images, message.get('content'), message.get('prompt_preset'))
+        if motion_video is not None:
+            from server.api.generation import _validate_motion_video_ownership
+            _validate_motion_video_ownership(motion_video, current_user.id)
+        # The subject is slot 1 of the ordered list; clients that predate it send only the legacy field.
+        listed_images = message.get("reference_images")
+        subject = (listed_images[0] if listed_images else None) if isinstance(listed_images, list) else message.get('reference_image')
+        snapshot = matching_motion_prompt(
+            snapshot, subject, motion_images, message.get('content'), message.get('prompt_preset'), video=motion_video,
+        )
         if motion_images is not None:
             from server.api.generation import _validate_reference_ownership
             if not isinstance(motion_images, list) or len(motion_images) > 8 or any(not isinstance(image, str) or not image.strip() for image in motion_images):
                 raise HTTPException(status_code=422, detail="动作参考图必须是最多 8 张图片的有序列表")
             for image in motion_images:
                 _validate_reference_ownership(image, current_user.id, db, '动作参考图')
+        reference_images = message.get("reference_images")
+        if reference_images is not None:
+            from server.api.generation import _validate_reference_ownership
+            if (
+                not isinstance(reference_images, list) or len(reference_images) > 16
+                or any(image is not None and (not isinstance(image, str) or not image.strip()) for image in reference_images)
+            ):
+                raise HTTPException(status_code=422, detail="参考图必须是最多 16 个槽位的有序列表")
+            for image in reference_images:
+                _validate_reference_ownership(image, current_user.id, db, '参考图')
+            # 双写：legacy 三列保留前 3 槽，便于回滚与旧读取路径
+            slots = list(reference_images[:3]) + [None] * (3 - len(reference_images))
+        else:
+            slots = [message.get("reference_image"), message.get("reference_image_2"), message.get("reference_image_3")]
         chat_msg = ChatMessage(
             session_id=session_id,
             user_id=current_user.id,
@@ -544,11 +579,13 @@ def save_chat_message(
             strength=message.get("strength"),
             count=message.get("count"),
             lora_prompt=message.get("lora_prompt"),
-            reference_image=message.get("reference_image"),
-            reference_image_2=message.get("reference_image_2"),
-            reference_image_3=message.get("reference_image_3"),
+            reference_image=slots[0],
+            reference_image_2=slots[1],
+            reference_image_3=slots[2],
+            reference_images=reference_images,
             reference_image_end=message.get("reference_image_end"),
             motion_reference_images=motion_images,
+            motion_reference_video=motion_video,
             motion_prompt=snapshot,
             prompt_end=message.get("prompt_end"),
             frame_rate=message.get("frame_rate"),

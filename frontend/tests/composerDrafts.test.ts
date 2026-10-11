@@ -20,25 +20,25 @@ const motionPrompt: MotionPromptSnapshot = {
 
 const imageComposer: ComposerDraft = {
   prompt: '红色外套',
-  referenceImage: '/uploads/sketch.png',
-  referenceImage2: '/uploads/color.png',
-  referenceImage3: null,
+  referenceImages: ['/uploads/sketch.png', '/uploads/color.png'],
   referenceImageEnd: null,
   motionReferenceImages: [],
+  motionReferenceVideo: null,
   motionPrompt: null,
   parkedReferences: { images: ['/uploads/parked.png'], endImage: null },
 };
 
 const videoComposer: ComposerDraft = {
   prompt: '头发细微飘动',
-  referenceImage: '/uploads/subject.png',
-  referenceImage2: null,
-  referenceImage3: null,
+  referenceImages: ['/uploads/subject.png'],
   referenceImageEnd: '/uploads/end.png',
   motionReferenceImages: ['/uploads/pose-1.png', '/uploads/pose-2.png'],
+  motionReferenceVideo: null,
   motionPrompt,
   parkedReferences: { images: [], endImage: null },
 };
+
+const clip = `/uploads/reference/7/${'c'.repeat(32)}.mp4`;
 
 test('video workflows use the video composer and everything else the image composer', () => {
   assert.equal(inputGroupOf({ output_type: 'video' }), 'video');
@@ -82,22 +82,20 @@ test('saved drafts mirror the live composer and keep the other output type', () 
   assert.deepEqual(saved, {
     image: {
       prompt: '红色外套',
-      reference_image: '/uploads/sketch.png',
-      reference_image_2: '/uploads/color.png',
-      reference_image_3: null,
+      reference_images: ['/uploads/sketch.png', '/uploads/color.png'],
       reference_image_end: null,
       motion_reference_images: [],
+      motion_reference_video: null,
       motion_prompt: null,
       parked_images: ['/uploads/parked.png'],
       parked_end_image: null,
     },
     video: {
       prompt: '头发细微飘动',
-      reference_image: '/uploads/subject.png',
-      reference_image_2: null,
-      reference_image_3: null,
+      reference_images: ['/uploads/subject.png'],
       reference_image_end: '/uploads/end.png',
       motion_reference_images: ['/uploads/pose-1.png', '/uploads/pose-2.png'],
+      motion_reference_video: null,
       motion_prompt: motionPrompt,
       parked_images: [],
       parked_end_image: null,
@@ -108,16 +106,27 @@ test('saved drafts mirror the live composer and keep the other output type', () 
   assert.deepEqual(toApiInputDrafts({}, 'image', EMPTY_COMPOSER_DRAFT), {
     image: {
       prompt: '',
-      reference_image: null,
-      reference_image_2: null,
-      reference_image_3: null,
+      reference_images: [],
       reference_image_end: null,
       motion_reference_images: [],
+      motion_reference_video: null,
       motion_prompt: null,
       parked_images: [],
       parked_end_image: null,
     },
   });
+});
+
+test('a motion video travels with its composer and only the stored form is restored', () => {
+  const withClip: ComposerDraft = { ...videoComposer, motionReferenceImages: [], motionReferenceVideo: clip };
+  const { drafts } = switchComposer(withClip, {}, 'video', 'image');
+  assert.equal(drafts.video?.motionReferenceVideo, clip);
+  const saved = toApiInputDrafts(drafts, 'image', imageComposer);
+  assert.equal(saved.video?.motion_reference_video, clip);
+  assert.deepEqual(fromApiInputDrafts(saved).video, withClip);
+  for (const value of ['/uploads/video/7/result.mp4', 'data:video/mp4;base64,AAAA', 3]) {
+    assert.equal(fromApiInputDrafts({ video: { ...saved.video, motion_reference_video: value } }).video?.motionReferenceVideo, null);
+  }
 });
 
 test('restored drafts round-trip and ignore malformed values', () => {
@@ -131,7 +140,7 @@ test('restored drafts round-trip and ignore malformed values', () => {
     image: 'broken',
     video: {
       prompt: 3,
-      reference_image: '',
+      reference_images: ['/uploads/a.png', 4, null],
       reference_image_end: '/uploads/end.png',
       motion_reference_images: ['/uploads/pose-1.png', 4, ''],
       motion_prompt: { ...motionPrompt, version: 2 },
@@ -140,8 +149,34 @@ test('restored drafts round-trip and ignore malformed values', () => {
   }), {
     video: {
       ...EMPTY_COMPOSER_DRAFT,
+      referenceImages: ['/uploads/a.png'],
       referenceImageEnd: '/uploads/end.png',
       motionReferenceImages: ['/uploads/pose-1.png'],
     },
   });
+});
+
+test('legacy drafts with three scalar fields restore into slot lists', () => {
+  assert.deepEqual(fromApiInputDrafts({
+    image: {
+      prompt: '旧草稿',
+      reference_image: '/uploads/one.png',
+      reference_image_2: null,
+      reference_image_3: '/uploads/three.png',
+      reference_image_end: null,
+      motion_reference_images: [],
+      motion_prompt: null,
+      parked_images: [],
+      parked_end_image: null,
+    },
+  }), {
+    image: {
+      ...EMPTY_COMPOSER_DRAFT,
+      prompt: '旧草稿',
+      referenceImages: ['/uploads/one.png', null, '/uploads/three.png'],
+    },
+  });
+  assert.deepEqual(fromApiInputDrafts({
+    image: { prompt: '', reference_image: null, reference_image_2: null, reference_image_3: null },
+  }), { image: { ...EMPTY_COMPOSER_DRAFT, referenceImages: [] } });
 });

@@ -8,6 +8,24 @@
   margin: 0 auto;
 }
 
+.chat-input-restore-state,
+.chat-input-save-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  font-size: 14px;
+}
+
+.chat-input-restore-state { min-height: 100px; }
+.chat-input-save-error { margin-bottom: 8px; }
+
 .chat-input-container {
   display: flex;
   flex-direction: column;

@@ -12,7 +12,7 @@ def validate_qwen_image_21(parameters: GenerationParameters) -> None:
     qwen_options(parameters.workflow_options)
     fixed_seed(parameters.workflow_options, QWEN_SEED_OPTION, parameters.count)
     editing = parameters.workflow == "qwen_image_21_i2i"
-    if not editing and any((parameters.reference_image, parameters.reference_image_2, parameters.reference_image_3)):
+    if not editing and any(parameters.reference_slots()):
         raise ValueError("请使用 Qwen-Image-2.1 图生图工作流处理参考图")
     if not editing or not parameters.use_original_size:
         validate_qwen_size(parameters.width, parameters.height)

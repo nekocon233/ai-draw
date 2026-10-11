@@ -83,6 +83,13 @@ def init_db():
                     conn.execute(text(
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}motion_prompt JSON"
                     ))
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}motion_reference_video TEXT"
+                    ))
+                    # 有序参考图槽位列表；为 NULL 的历史行回退读取 legacy 三列
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}reference_images JSON"
+                    ))
                     for field, sql_type in (("width", "INTEGER"), ("height", "INTEGER"), ("use_original_size", "BOOLEAN")):
                         conn.execute(text(
                             f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {prefix}{field} {sql_type}"

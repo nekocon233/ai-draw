@@ -34,9 +34,11 @@ flowchart LR
 
 - 任务占位在首次 await 之前完成。
 - 停止请求验证用户归属；可选 `task_id` 防止旧页面停止同一用户的新任务。
-- 停止操作不能打断结果提交；取消普通生成后等待清理完成。
+- 停止操作不能打断结果提交；取消后先把已完成的图片和种子追加落库，保留旧结果，再发布 `generation_cancelled`。取消快照携带本次已完成的结果，刷新与断线恢复从数据库补拉。
 - 单个文件写入被取消时，先等待后台写入结束，再删除文件。批量生成中途失败时清理已生成的临时结果。
 - `POST /api/media/generate` 保留 `count`、`images`，新增返回实际 `task_id`；旧请求仍可不传任务 ID。
+- Qwen 和 GPT Image 每批支持 1–16 张，视频每批仍为 1 个。连续发送相同描述、参考图、预设和参数时，前端复用上一轮并传 `append_results`；任务上下文固定追加模式及结果偏移，落库按文件路径幂等追加。显式“编辑并重新生成”仍采用替换模式。
+- 每张结果图片或视频的操作栏提供删除按钮。`DELETE /api/chat/sessions/{session_id}/messages/{message_id}/media` 校验会话、助手消息和任务状态，只删除指定的结果记录；共享文件仍通过引用检查保护。整轮提示词、其他结果和每张图片的种子保持对应。
 - 任务快照保留旧的 running/completed/error 状态，新增内部阶段信息；快照按用户隔离，30 分钟过期，最多保留 256 个已完成用户快照。
 - 私有事件必须有明确接收用户；公共广播仅允许服务可用性和工作流切换状态。
 - 提示词生成的进行中状态按用户计数，避免其他用户重连时看到不属于自己的状态。
@@ -60,9 +62,10 @@ flowchart LR
 - `features/generation/useGenerationConnection.ts` 管理初始化加载和 WebSocket 订阅。
 - `features/generation/events.ts` 是可脱离 React 测试的事件处理器，依赖窄状态接口，过滤旧任务和无归属事件。
 - `features/generation/slice.ts` 集中管理开始、结束、停止和结果补拉。revision 防止迟到的旧请求覆盖新任务状态。
+- 输入栏通过 `composerSessionId` 与加载状态确认内容归属。仅恢复成功的当前会话可自动保存；按会话排队写入，读取前完成待保存请求，保存失败暂存内存以便重试。加载失败显示重试入口，不回写空白默认值。配置接口只读恢复旧输入：已保存内容（包括主动清空）优先，其次取当前类型的草稿镜像，确实缺失时才取同类型最后一条用户消息；保留图片／视频草稿、空参考图和取消预设记录。
 - 聊天消息类型统一使用 `types/models.ts`；旧 `types/store.ts` 转为活动 store 类型的兼容导出。
 - 助手消息的 `mediaSeeds` 以结果地址为键记录种子（`utils/generationSeed.ts`），编辑或移除占位后不会错位；保存时按图片顺序还原为 `seeds`。
-- 生图与生视频（按元数据 `output_type` 区分）各用一套输入栏。跨类切换时，`buildWorkflowTransition` 用 `utils/composerDrafts.ts` 把当前的描述、参考图、首尾帧、动作图、看图分析快照和暂存图存进 `inputDrafts`，换回目标类上次的输入（首次为空）。两套输入连同当前一类的镜像一起保存在会话 `config_input_drafts`，刷新或换设备后都能恢复；草稿里的图片与输入栏图片一样校验归属、不被清理，删除会话时一并删除。
+- 生图与生视频（按元数据 `output_type` 区分）各用一套输入栏。跨类切换时，`buildWorkflowTransition` 用 `utils/composerDrafts.ts` 把当前的描述、参考图、首尾帧、动作图或动作视频、看图分析快照和暂存图存进 `inputDrafts`，换回目标类上次的输入（首次为空）。两套输入连同当前一类的镜像一起保存在会话 `config_input_drafts`，刷新或换设备后都能恢复；草稿里的图片和动作视频与输入栏里的一样校验归属、不被清理，删除会话时一并删除。
 - `buildWorkflowTransition` 在同一类里只调整与生成方式相关的参数：切换方式不改写输入栏的提示词、参考图和首尾帧。目标方式放不下的参考图按 `utils/workflowOptions.ts` 的 `carryReferenceImages` 暂存到 `parkedReferences`，换回可容纳的方式时按原顺序回到输入栏；LoRA 和尺寸仍按方式记忆在 `workflowSettingsStash`。
 - 帧编辑、撤销重做和导出交互保持原有实现。
 

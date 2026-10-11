@@ -24,6 +24,13 @@ class ImageMentionTests(unittest.TestCase):
             with self.subTest(prompt=prompt), self.assertRaises(ValueError):
                 validate_image_mentions(prompt, ("first", None, "third"))
 
+    def test_beyond_three_slots_follows_the_actual_reference_count(self):
+        references = tuple(f"image-{index}" for index in range(6))
+        validate_image_mentions("@图片4 和 <image6>", references)
+        self.assertEqual(resolve_image_mentions("@图片4 和 <image6>", references, "ordinal"), "第4张参考图 和 第6张参考图")
+        with self.assertRaises(ValueError):
+            validate_image_mentions("@图片7", references)
+
     def test_catalog_validates_before_scheduling_and_keeps_plain_text_workflows(self):
         registry = ProviderRegistry()
         registry.register("fake", Mock())

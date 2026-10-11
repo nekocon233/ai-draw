@@ -89,7 +89,7 @@ export const NO_PARKED_REFERENCES: ParkedReferences = { images: [], endImage: nu
 /** How many references a method shows in the composer; anything past that waits in the parking lot. */
 export function getReferenceImageCapacity(metadata: WorkflowMetadata | undefined): number {
   if (!metadata) return 0;
-  if (metadata.supports_multi_image) return 3;
+  if (metadata.supports_multi_image) return metadata.max_reference_images ?? 3;
   if (metadata.requires_image || metadata.image_workflow || metadata.supports_optional_keyframes) return 1;
   return 0;
 }
@@ -99,7 +99,7 @@ export function acceptsEndReferenceImage(metadata: WorkflowMetadata | undefined)
 }
 
 export interface CarriedReferences {
-  images: [string | null, string | null, string | null];
+  images: (string | null)[];
   endImage: string | null;
   parked: ParkedReferences;
 }
@@ -119,7 +119,7 @@ export function carryReferenceImages(
   const end = endImage || parked.endImage || null;
   const keepsEnd = acceptsEndReferenceImage(metadata);
   return {
-    images: [kept[0] ?? null, kept[1] ?? null, kept[2] ?? null],
+    images: kept,
     endImage: keepsEnd ? end : null,
     parked: { images: available.slice(kept.length), endImage: keepsEnd ? null : end },
   };

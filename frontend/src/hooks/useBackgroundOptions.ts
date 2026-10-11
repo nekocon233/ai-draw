@@ -37,8 +37,8 @@ const DEFAULTS: BackgroundOptionsState = {
   edge_feather: 10,
 };
 
-export function useBackgroundOptions() {
-  const [state, setState] = useState<BackgroundOptionsState>(DEFAULTS);
+export function useBackgroundOptions(initialState?: BackgroundOptionsState) {
+  const [state, setState] = useState<BackgroundOptionsState>(initialState ?? DEFAULTS);
 
   const set = useCallback(<K extends keyof BackgroundOptionsState>(key: K, value: BackgroundOptionsState[K]) => {
     setState(prev => ({ ...prev, [key]: value }));

@@ -44,7 +44,7 @@ export function getImageMentionError(prompt: string, references: readonly (strin
   if (prompt.includes(REMOVED_IMAGE_MENTION)) return '引用的图片已移除，请重新选择图片或删除该引用。';
   for (const match of prompt.matchAll(mentionPattern())) {
     const index = Number(match[1] ?? match[2]);
-    if (index < 1 || index > 3 || !references[index - 1]) return `图片${index}不存在，请先添加参考图或修改引用。`;
+    if (index < 1 || index > references.length || !references[index - 1]) return `图片${index}不存在，请先添加参考图或修改引用。`;
   }
   return null;
 }
@@ -69,9 +69,13 @@ export function getPresetWorkflowBlocker(preset: PresetReferences, metadata: Wor
   if (preset.workflow_ids && (!metadata || !preset.workflow_ids.includes(metadata.key))) return '此预设不适用于当前生成方式，请重新选择';
   if (preset.requires_motion_reference && !metadata?.supports_motion_reference) return '此预设需要支持动作参考图的生成方式';
   const count = getPresetReferenceCount(preset);
-  if (count > 3) return '预设最多支持 3 张参考图';
   if (outputType === 'image') {
-    if (count > 0 && !supportsImageMentions(metadata)) return '当前工作流不支持引用参考图';
+    if (!supportsImageMentions(metadata)) {
+      if (count > 0) return '当前工作流不支持引用参考图';
+    } else {
+      const capacity = metadata?.max_reference_images ?? 3;
+      if (count > capacity) return `预设最多支持 ${capacity} 张参考图`;
+    }
   } else {
     const capacity = metadata?.supports_multi_image ? 3
       : metadata?.requires_image || metadata?.supports_optional_keyframes ? 1 : 0;
@@ -98,6 +102,9 @@ export function getPresetBlocker(
       ? (preset.requires_motion_reference ? `请先添加${preset.images[0]?.label || '原始画面'}` : '请先添加开始帧') : `请先添加参考图 ${index}`;
   }
   if (preset.images.some(image => image.slot === 'end') && !endReference) return '请先添加结束帧';
-  if (preset.requires_motion_reference && !motionReferences.some(image => image?.trim())) return '请先添加动作参考图';
+  // A motion video counts as the motion reference; callers pass it together with the pose images.
+  if (preset.requires_motion_reference && !motionReferences.some(image => image?.trim())) {
+    return metadata?.supports_motion_reference_video ? '请先添加动作参考图或动作视频' : '请先添加动作参考图';
+  }
   return null;
 }

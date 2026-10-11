@@ -53,9 +53,16 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(workflow=retired), self.assertRaisesRegex(ValueError, "未知工作流"):
                 catalog.validate(GenerationParameters("x", workflow=retired))
         self.assertTrue(all(item["max_count"] == 1 for item in catalog.list() if item["output_type"] == "video"))
+        for workflow in ('qwen_image_21_t2i', 'qwen_image_21_i2i', 'gpt_image'):
+            self.assertEqual(catalog.describe(workflow)['max_count'], 16)
+            catalog.validate(GenerationParameters('x', workflow=workflow, count=16,
+                                                 reference_image=png_base64() if workflow != 'qwen_image_21_t2i' else None))
+            with self.assertRaisesRegex(ValueError, '1 到 16'):
+                catalog.validate(GenerationParameters('x', workflow=workflow, count=17, reference_image=png_base64()))
         for workflow in ("qwen_image_21_t2i", "qwen_image_21_i2i"):
             self.assertEqual(catalog.describe(workflow)["lora_labels"],
-                             {"Ameniwa": "Ameniwa", "Sen": "Sen", "Daikei": "Daikei", "CZN": "CZN"})
+                             {"Ameniwa": "Ameniwa", "Sen": "Sen",
+                              "Daikei": "Daikei", "CZN": "CZN", "Darkest Dungeon": "Darkest Dungeon"})
         self.assertEqual(catalog.describe("gpt_image")["lora_labels"], {})
         params = GenerationParameters("audio and video", workflow="minimax_h3", workflow_options={"h3_duration": "10"})
         await registry.get("comfyui_minimax_h3").provider.generate(ProviderInput(params, ("start", None, None), "end"))
@@ -125,7 +132,7 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((updates["content"], updates["prompt_preset"]), ("红色连衣裙", preset))
             # References named by the preset are validated like the user's own mentions.
             with self.assertRaisesRegex(ValueError, "图片1不存在"):
-                engine.validate(replace(params, reference_image=None))
+                engine.validate(replace(params, reference_images=[None]))
 
     async def test_provider_output_type_mismatch_never_writes_a_file(self):
         registry = ProviderRegistry()
@@ -213,6 +220,57 @@ class ProviderPipelineTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await writing
             self.assertEqual(list(Path(directory).rglob("*.mp4")), [])
+
+
+class ReferenceImageSlotTests(unittest.IsolatedAsyncioTestCase):
+    def test_parameters_sync_between_slot_list_and_legacy_fields(self):
+        params = GenerationParameters("p", workflow="gpt_image", reference_images=["a", None, "c", "d"])
+        self.assertEqual(params.reference_slots(), ("a", None, "c", "d"))
+        legacy = GenerationParameters("p", workflow="gpt_image", reference_image="a", reference_image_3="c")
+        self.assertEqual(legacy.reference_slots(), ("a", None, "c"))
+        updates = params.source_updates()
+        self.assertEqual(updates["reference_images"], ["a", None, "c", "d"])
+        # legacy 三列由列表派生双写；第 4 槽起只进列表列
+        self.assertEqual(
+            (updates["reference_image"], updates["reference_image_2"], updates["reference_image_3"]),
+            ("a", None, "c"))
+        # legacy 构造参数经 InitVar 吸收，实例不存储同名字段（单一数据源）
+        self.assertNotIn("reference_image", vars(params))
+
+    def test_multi_image_capacity_comes_from_metadata(self):
+        registry = ProviderRegistry()
+        registry.register("custom", SimpleNamespace(generate=AsyncMock()))
+        catalog = WorkflowCatalog({
+            "wide": {"provider": "custom", "supports_multi_image": True, "max_reference_images": 16},
+            "narrow": {"provider": "custom", "supports_multi_image": True},
+        }, registry)
+        self.assertEqual(catalog.describe("wide")["max_reference_images"], 16)
+        self.assertEqual(catalog.describe("narrow")["max_reference_images"], 3)
+        wide = [f"image-{index}" for index in range(16)]
+        catalog.validate(GenerationParameters("p", workflow="wide", reference_images=wide))
+        with self.assertRaisesRegex(ValueError, "最多支持 16 张"):
+            catalog.validate(GenerationParameters("p", workflow="wide", reference_images=wide + ["image-17"]))
+        with self.assertRaisesRegex(ValueError, "最多支持 3 张"):
+            catalog.validate(GenerationParameters("p", workflow="narrow", reference_images=["a", "b", "c", "d"]))
+        catalog.validate(GenerationParameters("参照 @图片4 的构图", workflow="wide", reference_images=["a", None, "c", "d"]))
+        with self.assertRaisesRegex(ValueError, "图片4不存在"):
+            catalog.validate(GenerationParameters("参照 @图片4 的构图", workflow="narrow", reference_images=["a", "b", "c"]))
+
+    async def test_engine_passes_every_slot_to_the_provider(self):
+        provider = SimpleNamespace(generate=AsyncMock(return_value=MediaOutput(png_base64(), "image")))
+        registry = ProviderRegistry()
+        registry.register("custom", provider)
+        catalog = WorkflowCatalog(
+            {"wide": {"provider": "custom", "supports_multi_image": True, "max_reference_images": 16}}, registry)
+        images = [png_base64() for _ in range(5)]
+        params = GenerationParameters("p", workflow="wide", reference_images=images)
+        with tempfile.TemporaryDirectory() as directory:
+            engine = GenerationEngine(catalog, ArtifactStorage(directory))
+            engine.validate(params)
+            await engine.generate(params, TaskContext(7, "task", "wide"), Mock(), lambda: None)
+            sent = provider.generate.await_args.args[0]
+            self.assertEqual(len(sent.images), 5)
+            self.assertIsNone(sent.end_image)
 
 
 if __name__ == "__main__":

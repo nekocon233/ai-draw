@@ -4,14 +4,17 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, load_only, selectinload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 
 from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
-from server.schemas import PromptPreset, MotionPromptSnapshot
+from server.schemas import MOTION_VIDEO_PATTERN, PromptPreset, MotionPromptSnapshot, DeleteMessageMediaRequest, DeleteMessageMediaResponse
+from server.api.generation import get_generation_coordinator
+from server.generation.coordinator import GenerationCoordinator
+from server.session_inputs import restore_session_input, session_input_group, LEGACY_VIDEO_WORKFLOWS
 from utils.motion_prompt import matching_motion_prompt
 from utils.file_storage import get_file_storage
 from utils.media_file_references import delete_unreferenced_media, input_draft_media_paths
@@ -37,8 +40,11 @@ class UpdateMessageRequest(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
+    # 有序参考图槽位列表（含空位）；非 None 时优先于上面三个 legacy 字段
+    reference_images: Optional[List[Optional[str]]] = Field(default=None, max_length=16)
     reference_image_end: Optional[str] = None
     motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_reference_video: Optional[str] = Field(default=None, pattern=MOTION_VIDEO_PATTERN)
     motion_prompt: Optional[MotionPromptSnapshot] = None
 
 class SessionResponse(BaseModel):
@@ -56,11 +62,14 @@ class InputDraft(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
+    # 有序参考图槽位列表（含空位）；非 None 时优先于上面三个 legacy 字段
+    reference_images: Optional[List[Optional[str]]] = Field(default=None, max_length=16)
     reference_image_end: Optional[str] = None
     motion_reference_images: List[str] = Field(default_factory=list, max_length=8)
+    motion_reference_video: Optional[str] = Field(default=None, pattern=MOTION_VIDEO_PATTERN)
     motion_prompt: Optional[MotionPromptSnapshot] = None
     # 当前生成方式放不下的图片，切回能放下的方式时恢复
-    parked_images: List[str] = Field(default_factory=list, max_length=8)
+    parked_images: List[str] = Field(default_factory=list, max_length=16)
     parked_end_image: Optional[str] = None
 
 
@@ -75,6 +84,8 @@ class SessionConfigRequest(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None
     reference_image_3: Optional[str] = None
+    # 有序参考图槽位列表（含空位）；非 None 时优先于上面三个 legacy 字段
+    reference_images: Optional[List[Optional[str]]] = Field(default=None, max_length=16)
     reference_image_end: Optional[str] = None
     workflow_options: Optional[dict] = None
     width: Optional[int] = None
@@ -83,6 +94,7 @@ class SessionConfigRequest(BaseModel):
     prompt_preset: Optional[PromptPreset] = None
     prompt_preset_choices: Optional[dict[str, Optional[PromptPreset]]] = Field(default=None, max_length=32)
     motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_reference_video: Optional[str] = Field(default=None, pattern=MOTION_VIDEO_PATTERN)
     motion_prompt: Optional[MotionPromptSnapshot] = None
     # image / video 两类生成方式各自的输入栏；当前使用的那一类同时写在上面的字段里
     input_drafts: Optional[dict[Literal["image", "video"], InputDraft]] = None
@@ -94,11 +106,13 @@ def _stored_media_paths(messages) -> list[str]:
     paths = [image.file_path for message in messages for image in list(message.images)]
     for message in messages:
         paths.extend(message.motion_reference_images or [])
+        paths.extend(filter(None, message.reference_images or []))
         paths.extend(filter(None, (
             message.reference_image,
             message.reference_image_2,
             message.reference_image_3,
             message.reference_image_end,
+            message.motion_reference_video,
         )))
     return paths
 
@@ -132,11 +146,19 @@ def _serialize_message(message: ChatMessage) -> dict:
         'timestamp': int(message.created_at.timestamp() * 1000),
     }
     if message.type == 'user' and message.workflow:
+        reference_images = message.reference_images
+        if reference_images is None:
+            reference_images = [message.reference_image, message.reference_image_2, message.reference_image_3]
+        reference_images = list(reference_images)
+        while reference_images and not reference_images[-1]:
+            reference_images.pop()
         params = {
             'workflow': message.workflow,
             'count': message.count,
             'loraPrompt': message.lora_prompt,
         }
+        if reference_images:
+            params['referenceImages'] = reference_images
         optional_params = {
             'strength': message.strength,
             'width': message.width,
@@ -154,6 +176,7 @@ def _serialize_message(message: ChatMessage) -> dict:
             'workflowOptions': message.workflow_options,
             'promptPreset': message.prompt_preset,
             'motionReferenceImages': message.motion_reference_images,
+            'motionReferenceVideo': message.motion_reference_video,
             'motionPrompt': message.motion_prompt,
         }
         params.update({key: value for key, value in optional_params.items() if value is not None})
@@ -262,11 +285,13 @@ def delete_session(
     file_paths = _stored_media_paths(session.messages)
     file_paths.extend(session.config_motion_reference_images or [])
     file_paths.extend(input_draft_media_paths(session.config_input_drafts))
+    file_paths.extend(filter(None, session.config_reference_images or []))
     file_paths.extend(filter(None, (
         session.config_reference_image,
         session.config_reference_image_2,
         session.config_reference_image_3,
         session.config_reference_image_end,
+        session.config_motion_reference_video,
     )))
     db.delete(session)
     db.commit()
@@ -393,6 +418,13 @@ def update_session_config(
             _validate_reference_ownership(image, current_user.id, db, '动作参考图')
         stale_reference_paths.extend(set(session.config_motion_reference_images or []) - set(images))
         session.config_motion_reference_images = images
+    if 'motion_reference_video' in update_data:
+        from server.api.generation import _validate_motion_video_ownership
+        video = update_data['motion_reference_video']
+        _validate_motion_video_ownership(video, current_user.id)
+        if session.config_motion_reference_video and session.config_motion_reference_video != video:
+            stale_reference_paths.append(session.config_motion_reference_video)
+        session.config_motion_reference_video = video
     reference_fields = {
         'reference_image': 'config_reference_image',
         'reference_image_2': 'config_reference_image_2',
@@ -404,12 +436,36 @@ def update_session_config(
             old_value = getattr(session, model_field)
             if old_value and old_value != update_data[request_field]:
                 stale_reference_paths.append(old_value)
+    if 'reference_images' in update_data:
+        from server.api.generation import _validate_reference_ownership
+        images = update_data['reference_images']
+        images = list(images) if images is not None else None
+        for image in images or []:
+            _validate_reference_ownership(image, current_user.id, db, '参考图')
+        stale_reference_paths.extend(
+            {path for path in (session.config_reference_images or []) if path}
+            - {path for path in (images or []) if path}
+        )
+        session.config_reference_images = images
+        # 双写 legacy 三列（前 3 槽），保持旧读取路径与回收扫描可用
+        slots = list((images or [])[:3])
+        slots += [None] * (3 - len(slots))
+        for model_field, value in zip(
+            ('config_reference_image', 'config_reference_image_2', 'config_reference_image_3'), slots,
+        ):
+            old_value = getattr(session, model_field)
+            if old_value and old_value != value:
+                stale_reference_paths.append(old_value)
+            setattr(session, model_field, value)
     if 'input_drafts' in update_data:
         from server.api.generation import _validate_reference_ownership
         drafts = update_data['input_drafts'] or None
         draft_paths = input_draft_media_paths(drafts)
         for image in draft_paths:
             _validate_reference_ownership(image, current_user.id, db, '输入栏图片')
+        from server.api.generation import _validate_motion_video_ownership
+        for draft in (drafts or {}).values():
+            _validate_motion_video_ownership(draft.get('motion_reference_video'), current_user.id, '输入栏动作视频')
         # Images moved between the live fields and a draft stay referenced; cleanup rechecks after commit.
         stale_reference_paths.extend(set(input_draft_media_paths(session.config_input_drafts)) - set(draft_paths))
         session.config_input_drafts = drafts
@@ -432,6 +488,13 @@ def update_session_config(
         session.config_reference_image_2 = update_data['reference_image_2']
     if 'reference_image_3' in update_data:
         session.config_reference_image_3 = update_data['reference_image_3']
+    if 'reference_images' not in update_data and any(
+        field in update_data for field in ('reference_image', 'reference_image_2', 'reference_image_3')
+    ):
+        # 旧客户端只写 legacy 字段时重建列表列，避免新列长期滞后
+        session.config_reference_images = [
+            session.config_reference_image, session.config_reference_image_2, session.config_reference_image_3,
+        ]
     if 'reference_image_end' in update_data:
         session.config_reference_image_end = update_data['reference_image_end']
     if 'workflow_options' in update_data:
@@ -452,7 +515,7 @@ def update_session_config(
         session.config_motion_prompt = update_data['motion_prompt']
     session.config_motion_prompt = matching_motion_prompt(
         session.config_motion_prompt, session.config_reference_image, session.config_motion_reference_images,
-        session.config_prompt, session.config_prompt_preset,
+        session.config_prompt, session.config_prompt_preset, video=session.config_motion_reference_video,
     )
     for field in ('width', 'height', 'use_original_size'):
         if field in update_data:
@@ -484,7 +547,7 @@ def get_session_config(
             detail="会话不存在"
         )
     
-    return {
+    config = {
         "workflow": session.config_workflow,
         "prompt": session.config_prompt,
         "lora_prompt": session.config_lora_prompt,
@@ -494,6 +557,8 @@ def get_session_config(
         "reference_image": session.config_reference_image,
         "reference_image_2": session.config_reference_image_2,
         "reference_image_3": session.config_reference_image_3,
+        # 列表列为 NULL 的历史会话回退到 legacy 三列
+        "reference_images": session.config_reference_images,
         "prompt_end": session.config_prompt_end,
         "reference_image_end": session.config_reference_image_end,
         "is_loop": session.config_is_loop,
@@ -508,9 +573,39 @@ def get_session_config(
         "prompt_preset": session.config_prompt_preset,
         "prompt_preset_choices": session.config_prompt_preset_choices,
         "motion_reference_images": session.config_motion_reference_images,
+        "motion_reference_video": session.config_motion_reference_video,
         "motion_prompt": session.config_motion_prompt,
         "input_drafts": session.config_input_drafts,
     }
+    latest = None
+    metadata = {}
+    if session.config_prompt is None:
+        from utils.config_loader import get_config
+        metadata = get_config().workflow_defaults.workflow_metadata
+        query = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.user_id == current_user.id,
+            ChatMessage.type == 'user',
+        )
+        # Do not fill an empty image composer from the video side of a mixed session.
+        if session.config_workflow:
+            video_workflows = LEGACY_VIDEO_WORKFLOWS | {key for key, value in metadata.items() if value.get('output_type') == 'video'}
+            if session_input_group(session.config_workflow, metadata) == 'video':
+                query = query.filter(ChatMessage.workflow.in_(video_workflows))
+            else:
+                # Retired image methods still have useful prompts and references.
+                query = query.filter(or_(ChatMessage.workflow.is_(None), ~ChatMessage.workflow.in_(video_workflows)))
+        source = query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).first()
+        if source:
+            fields = (
+                'workflow', 'lora_prompt', 'strength', 'count', 'width', 'height', 'use_original_size',
+                'reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end',
+                'workflow_options', 'prompt_preset', 'motion_reference_images', 'motion_reference_video', 'motion_prompt',
+            )
+            latest = {name: getattr(source, name) for name in fields}
+            latest['prompt'] = source.content or ''
+            latest['reference_images'] = source.reference_images if source.reference_images is not None else [source.reference_image, source.reference_image_2, source.reference_image_3]
+    return restore_session_input(config, metadata, latest)
 
 
 @router.get("/sessions/{session_id}/rounds/{assistant_message_id}")
@@ -615,11 +710,37 @@ def update_message_content(
             _validate_reference_ownership(image, current_user.id, db, '动作参考图')
         stale_reference_paths.extend(set(user_msg.motion_reference_images or []) - set(images))
         user_msg.motion_reference_images = images
+    if 'motion_reference_video' in update_data:
+        from server.api.generation import _validate_motion_video_ownership
+        video = update_data['motion_reference_video']
+        _validate_motion_video_ownership(video, current_user.id)
+        if user_msg.motion_reference_video and user_msg.motion_reference_video != video:
+            stale_reference_paths.append(user_msg.motion_reference_video)
+        user_msg.motion_reference_video = video
     for field in ('reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end'):
         if field in update_data:
             old_value = getattr(user_msg, field)
             if old_value and old_value != update_data[field]:
                 stale_reference_paths.append(old_value)
+    if 'reference_images' in update_data:
+        from server.api.generation import _validate_reference_ownership
+        images = update_data['reference_images']
+        images = list(images) if images is not None else None
+        for image in images or []:
+            _validate_reference_ownership(image, current_user.id, db, '参考图')
+        stale_reference_paths.extend(
+            {path for path in (user_msg.reference_images or []) if path}
+            - {path for path in (images or []) if path}
+        )
+        user_msg.reference_images = images
+        # 双写 legacy 三列（前 3 槽），保持旧读取路径与回收扫描可用
+        slots = list((images or [])[:3])
+        slots += [None] * (3 - len(slots))
+        for field, value in zip(('reference_image', 'reference_image_2', 'reference_image_3'), slots):
+            old_value = getattr(user_msg, field)
+            if old_value and old_value != value:
+                stale_reference_paths.append(old_value)
+            setattr(user_msg, field, value)
     if 'content' in update_data:
         user_msg.content = update_data['content']
     if 'reference_image' in update_data:
@@ -628,19 +749,70 @@ def update_message_content(
         user_msg.reference_image_2 = update_data['reference_image_2']
     if 'reference_image_3' in update_data:
         user_msg.reference_image_3 = update_data['reference_image_3']
+    if 'reference_images' not in update_data and any(
+        field in update_data for field in ('reference_image', 'reference_image_2', 'reference_image_3')
+    ):
+        # 旧客户端只写 legacy 字段时重建列表列，避免新列长期滞后
+        user_msg.reference_images = [
+            user_msg.reference_image, user_msg.reference_image_2, user_msg.reference_image_3,
+        ]
     if 'reference_image_end' in update_data:
         user_msg.reference_image_end = update_data['reference_image_end']
     if 'motion_prompt' in update_data:
         user_msg.motion_prompt = update_data['motion_prompt']
     user_msg.motion_prompt = matching_motion_prompt(
         user_msg.motion_prompt, user_msg.reference_image, user_msg.motion_reference_images,
-        user_msg.content, user_msg.prompt_preset,
+        user_msg.content, user_msg.prompt_preset, video=user_msg.motion_reference_video,
     )
 
     db.commit()
     delete_unreferenced_media(db, stale_reference_paths)
     print(f"[Session] 用户 {current_user.username} 编辑消息内容: {message_id}")
     return {"updated": True}
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}/media", response_model=DeleteMessageMediaResponse)
+def delete_message_media(
+    session_id: str,
+    message_id: str,
+    request: DeleteMessageMediaRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    coordinator: GenerationCoordinator = Depends(get_generation_coordinator),
+):
+    """Delete selected results while keeping the round and every unselected result."""
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id, ChatSession.user_id == current_user.id,
+    ).with_for_update().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    message = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id, ChatMessage.user_id == current_user.id,
+        ChatMessage.message_id == message_id, ChatMessage.type == 'assistant',
+    ).with_for_update().first()
+    if not message:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    active = coordinator.tasks.active
+    if active and active.context.user_id == current_user.id and active.context.message_id == message_id:
+        raise HTTPException(status_code=409, detail="本轮正在生成或保存，请完成后再删除图片")
+
+    selected = set(request.images)
+    removed_paths = []
+    remaining = []
+    for image in _sorted_media(message):
+        if _media_url(image.file_path) in selected:
+            removed_paths.append(image.file_path)
+            db.delete(image)
+        else:
+            remaining.append(image)
+    # Leave original indexes intact: order stays stable and no unique-index swaps are needed.
+    result = {"images": [_media_url(image.file_path) for image in remaining], "seeds": [image.seed for image in remaining]}
+    if removed_paths:
+        session.updated_at = datetime.now()
+    db.commit()
+    # Never delete arbitrary request paths, or a file still used by another round/draft/reference.
+    delete_unreferenced_media(db, removed_paths)
+    return result
 
 
 @router.delete("/sessions/{session_id}/messages/{message_id}")

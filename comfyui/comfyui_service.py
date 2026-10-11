@@ -274,13 +274,13 @@ class ComfyUIService:
 
     async def generate_minimax_h3_ref(
         self, finish_callback, prompt_text, images, duration=5, aspect_ratio="auto", seed=None, audio=False,
-        canvas_image_index=0,
+        canvas_image_index=0, video_path=None,
     ):
         workflow = ComfyWorkflowWrapper(self._workflow_file())
         result = await self.request.generate_minimax_h3_ref(
             workflow, prompt_text, random.randrange(0, 2**63) if seed is None else seed,
             images, duration=duration, aspect_ratio=aspect_ratio, audio=audio,
-            canvas_image_index=canvas_image_index,
+            canvas_image_index=canvas_image_index, video_path=video_path,
         )
         if not result.is_success or not result.data:
             raise RuntimeError(result.error or "MiniMax H3 动作参考未返回有效视频")

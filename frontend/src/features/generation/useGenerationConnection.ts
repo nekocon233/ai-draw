@@ -40,6 +40,7 @@ export function useGenerationConnection(messageApi: MessageInstance) {
 
     const loadData = async () => {
       const store = useAppStore.getState();
+      if (isLoggedIn() && !store.currentSessionId) useAppStore.setState({ sessionConfigStatus: 'loading', sessionConfigError: null });
       await store.loadDefaultConfig();
       await store.loadAvailableWorkflows();
       if (isLoggedIn()) await store.loadUserConfig();

@@ -25,7 +25,7 @@ def validate_prompt_preset(parameters: GenerationParameters, metadata: dict) -> 
         raise ValueError("预设引用的图片位置无效")
     reference_count = max((slot for slot in slots if slot != "end"), default=0)
     needs_end = "end" in slots
-    references = [parameters.reference_image, parameters.reference_image_2, parameters.reference_image_3]
+    references = list(parameters.reference_slots())
 
     if output_type == "image":
         if (reference_count or needs_end) and not metadata.get("supports_multi_image"):
@@ -39,7 +39,7 @@ def validate_prompt_preset(parameters: GenerationParameters, metadata: dict) -> 
     if needs_end and not (metadata.get("requires_end_image") or metadata.get("supports_optional_keyframes")):
         raise ValueError("当前工作流不支持结束帧")
     for index in range(reference_count):
-        if not references[index]:
+        if index >= len(references) or not references[index]:
             label = ("原始画面" if needs_motion else "开始帧") if output_type == "video" and index == 0 else f"参考图 {index + 1}"
             if needs_motion and index == 0:
                 # Motion presets name their subject image, e.g. 原始画面 or 主体图.
@@ -47,5 +47,5 @@ def validate_prompt_preset(parameters: GenerationParameters, metadata: dict) -> 
             raise ValueError(f"预设需要提供{label}")
     if needs_end and not parameters.reference_image_end:
         raise ValueError("预设需要提供结束帧")
-    if needs_motion and not parameters.motion_reference_images:
-        raise ValueError("预设需要提供动作参考图")
+    if needs_motion and not (parameters.motion_reference_images or parameters.motion_reference_video):
+        raise ValueError("预设需要提供动作参考图或动作视频")

@@ -10,17 +10,20 @@ import { useShallow } from 'zustand/react/shallow';
 import { getScrollPosition, setScrollPosition, type StoredScrollPosition } from '../utils/scrollPosition';
 import { formatLoraPromptForDisplay } from '../utils/loraOptions';
 import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
+import { compactReferenceImages, getReferenceImageCapacity } from '../utils/workflowOptions';
 import type { MotionPromptSnapshot, PromptPreset } from '../types/api';
 import ImageMentionInput from './ImageMentionInput';
 import PromptPresetTag from './PromptPresetTag';
 import MotionReferenceImages from './MotionReferenceImages';
 import MotionPromptPanel from './MotionPromptPanel';
-import { motionPromptSource } from '../utils/motionPrompt';
+import { motionPromptSource, motionReferenceMode } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
 import { isVideoUrl } from '../utils/media';
 import { getFixedSeed, getSeedParameter } from '../utils/generationSeed';
 import { buildNavigatorRounds, loadUntilFound } from '../utils/roundNavigator';
 import { useSessionOutline } from '../hooks/useSessionOutline';
+import { AUTH_REQUIRED_EVENT } from '../utils/helpers';
+import type { FrameWorkspaceSnapshot } from './FrameExtractionModal';
 import RoundNavigator from './RoundNavigator';
 import './ResultGrid.css';
 
@@ -28,8 +31,11 @@ const loadFrameEditors = () => import('./FrameExtractionModal');
 const FrameExtractionModal = lazy(loadFrameEditors);
 const ImageEditorModal = lazy(() => loadFrameEditors().then(module => ({ default: module.ImageEditorModal })));
 
-type EditReferenceSlot = 'img1' | 'img2' | 'img3' | 'imgEnd';
-type EditReferences = Partial<Record<EditReferenceSlot, string | null>>;
+type EditReferenceSlot = number | 'imgEnd';
+interface EditReferences {
+  images: (string | null)[];
+  imgEnd?: string | null;
+}
 
 // 跳转落点离结果区顶部的最小距离，避开顶部状态栏和手机菜单按钮
 const NAV_TARGET_MIN_OFFSET = 56;
@@ -51,15 +57,17 @@ function flashRound(element: HTMLElement) {
 }
 
 function normalizeEditReferences(content: string, images: EditReferences, mentionsEnabled: boolean) {
-  const compact = compactImageReferences(content, [images.img1, images.img2, images.img3]);
+  const compact = compactImageReferences(content, images.images);
   return {
     content: mentionsEnabled ? compact.prompt : content,
-    images: { ...images, img1: compact.images[0] ?? null, img2: compact.images[1] ?? null, img3: compact.images[2] ?? null },
+    images: { ...images, images: compact.images },
   };
 }
 
 export default function ResultGrid() {
-  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, editAndRegenerateMessage, appendChatMedia, scrollToLatestRequest } = useAppStore(useShallow(state => ({
+  const composerReady = useAppStore(state => state.sessionConfigStatus !== 'loading' && state.sessionConfigStatus !== 'error'
+    && (!state.currentSessionId || state.composerSessionId === state.currentSessionId));
+  const { chatHistory, currentSessionId, currentWorkflow, availableWorkflows, isGenerating, currentGeneratingMessageId, hasEarlierMessages, isLoadingEarlierMessages, loadEarlierMessages, deleteChatMessage, deleteChatMedia, editAndRegenerateMessage, appendChatMedia, scrollToLatestRequest } = useAppStore(useShallow(state => ({
     chatHistory: state.chatHistory,
     currentSessionId: state.currentSessionId,
     currentWorkflow: state.currentWorkflow,
@@ -70,6 +78,7 @@ export default function ResultGrid() {
     isLoadingEarlierMessages: state.isLoadingEarlierMessages,
     loadEarlierMessages: state.loadEarlierMessages,
     deleteChatMessage: state.deleteChatMessage,
+    deleteChatMedia: state.deleteChatMedia,
     editAndRegenerateMessage: state.editAndRegenerateMessage,
     appendChatMedia: state.appendChatMedia,
     scrollToLatestRequest: state.scrollToLatestRequest,
@@ -327,7 +336,7 @@ export default function ResultGrid() {
 
   // ---- 编辑状态 ----
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<{ content: string; images: EditReferences }>({ content: '', images: {} });
+  const [editDraft, setEditDraft] = useState<{ content: string; images: EditReferences }>({ content: '', images: { images: [] } });
   const { content: editContent, images: editRefImages } = editDraft;
   const editVersionRef = useRef(0);
   const editWorkflow = chatHistory.find(item => item.id === editingMsgId)?.params?.workflow;
@@ -335,35 +344,84 @@ export default function ResultGrid() {
   const editMentionsEnabled = supportsImageMentions(editWorkflowMeta);
   const [editPreset, setEditPreset] = useState<PromptPreset | null>(null);
   const [editMotionImages, setEditMotionImages] = useState<string[]>([]);
+  const [editMotionVideo, setEditMotionVideo] = useState<string | null>(null);
+  const editSupportsMotionVideo = editWorkflowMeta?.supports_motion_reference_video === true;
+  const editActiveMotionVideo = editSupportsMotionVideo ? editMotionVideo : null;
   const [editMotionUploading, setEditMotionUploading] = useState(false);
   const [editMotionPrompt, setEditMotionPrompt] = useState<MotionPromptSnapshot | null>(null);
   const [editMotionPreviewing, setEditMotionPreviewing] = useState(false);
   const editPresetIssue = editPreset
-    ? getPresetBlocker(editPreset, editWorkflowMeta, [editRefImages.img1, editRefImages.img2, editRefImages.img3], editRefImages.imgEnd, editMotionImages) : null;
+    ? getPresetBlocker(editPreset, editWorkflowMeta, editRefImages.images, editRefImages.imgEnd, [...editMotionImages, editActiveMotionVideo]) : null;
   const [frameEditor, setFrameEditor] = useState<{
     videoUrl: string;
     messageId: string;
+    sessionId: string | null;
+    workspaceKey: string;
+    initialWorkspace?: FrameWorkspaceSnapshot;
   } | null>(null);
+  const frameWorkspacesRef = useRef(new Map<string, FrameWorkspaceSnapshot>());
   const [imageEditor, setImageEditor] = useState<{ messageId: string; imageUrl: string } | null>(null);
   const [stripImageKeys, setStripImageKeys] = useState<Set<string>>(new Set());
   const [failedMediaKeys, setFailedMediaKeys] = useState<Set<string>>(new Set());
   const [mediaRetryVersions, setMediaRetryVersions] = useState<Record<string, number>>({});
+  const [deletingMediaKey, setDeletingMediaKey] = useState<string | null>(null);
+  const deletingMedia = deletingMediaKey !== null;
+  const deleteMedia = async (sessionId: string, messageId: string, image: string) => {
+    if (deletingMedia || isGenerating || useAppStore.getState().currentSessionId !== sessionId) return;
+    setDeletingMediaKey(`${messageId}:${image}`);
+    try {
+      await deleteChatMedia(messageId, [image]);
+      // Keep the navigator's thumbnail in sync if its former first result was removed.
+      if (useAppStore.getState().currentSessionId === sessionId && hasEarlierMessages) void refreshOutline();
+      antMessage.success(isVideoUrl(image) ? '视频已删除' : '图片已删除');
+    } catch (error) {
+      antMessage.error(error instanceof Error ? error.message : '删除失败，请重试');
+    } finally {
+      setDeletingMediaKey(null);
+    }
+  };
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [scrollButtonPosition, setScrollButtonPosition] = useState({ left: 0, bottom: 0 });
   const editFileInputRef = useRef<HTMLInputElement>(null);
-  const activeRefSlot = useRef<EditReferenceSlot>('img1');
+  const activeRefSlot = useRef<EditReferenceSlot>(0);
+
+  useEffect(() => {
+    const clearWorkspaces = () => {
+      frameWorkspacesRef.current.clear();
+      setFrameEditor(null);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'access_token' && event.newValue !== event.oldValue) clearWorkspaces();
+    };
+    window.addEventListener(AUTH_REQUIRED_EVENT, clearWorkspaces);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, clearWorkspaces);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    setFrameEditor(previous => previous && previous.sessionId !== currentSessionId ? null : previous);
+  }, [currentSessionId, frameEditor?.sessionId]);
+
+  const rememberFrameWorkspace = useCallback((workspace: FrameWorkspaceSnapshot) => {
+    if (frameEditor && workspace.videoUrl === frameEditor.videoUrl) {
+      frameWorkspacesRef.current.set(frameEditor.workspaceKey, workspace);
+    }
+  }, [frameEditor]);
 
 
-  const startEdit = useCallback((message: { id: string; content: string; params?: { workflow?: string; promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string; referenceImageEnd?: string; promptPreset?: PromptPreset; motionReferenceImages?: string[]; motionPrompt?: MotionPromptSnapshot | null } }) => {
+  const startEdit = useCallback((message: { id: string; content: string; params?: { workflow?: string; promptEnd?: string; referenceImage?: string; referenceImage2?: string; referenceImage3?: string; referenceImages?: (string | null)[]; referenceImageEnd?: string; promptPreset?: PromptPreset; motionReferenceImages?: string[]; motionReferenceVideo?: string; motionPrompt?: MotionPromptSnapshot | null } }) => {
     editVersionRef.current++;
     setEditingMsgId(message.id);
     setEditPreset(message.params?.promptPreset ?? null);
     setEditMotionImages([...(message.params?.motionReferenceImages ?? [])]);
+    setEditMotionVideo(message.params?.motionReferenceVideo ?? null);
     setEditMotionPrompt(message.params?.motionPrompt ?? null);
+    const legacy = [message.params?.referenceImage, message.params?.referenceImage2, message.params?.referenceImage3];
     setEditDraft(normalizeEditReferences(message.content, {
-      img1: message.params?.referenceImage ?? null,
-      img2: message.params?.referenceImage2 ?? null,
-      img3: message.params?.referenceImage3 ?? null,
+      images: message.params?.referenceImages ?? legacy.map(value => value ?? null),
       imgEnd: message.params?.referenceImageEnd ?? null,
     }, supportsImageMentions(availableWorkflows.find(item => item.key === message.params?.workflow))));
   }, [availableWorkflows]);
@@ -373,20 +431,23 @@ export default function ResultGrid() {
   const updateEditReference = useCallback((slot: EditReferenceSlot, image: string | null) => {
     setEditMotionPrompt(null);
     setEditDraft(previous => {
-      const images = { ...previous.images, [slot]: image };
-      return slot === 'imgEnd' ? { ...previous, images } : normalizeEditReferences(previous.content, images, editMentionsEnabled);
+      if (slot === 'imgEnd') return { ...previous, images: { ...previous.images, imgEnd: image } };
+      const list = [...previous.images.images];
+      while (list.length <= slot) list.push(null);
+      list[slot] = image;
+      return normalizeEditReferences(previous.content, { ...previous.images, images: list }, editMentionsEnabled);
     });
   }, [editMentionsEnabled]);
 
   const confirmEdit = useCallback(async (msgId: string) => {
     if (editMotionPreviewing) { antMessage.warning('请等待动作提示词分析完成'); return; }
-    if (editMotionUploading) { antMessage.warning('请等待动作图上传完成'); return; }
+    if (editMotionUploading) { antMessage.warning('请等待动作参考上传完成'); return; }
     if (editWorkflowMeta?.supports_motion_reference) {
-      const issue = getMotionReferenceError(editRefImages.img1, editMotionImages);
+      const issue = getMotionReferenceError(editRefImages.images[0], editMotionImages, editActiveMotionVideo);
       if (issue) { antMessage.warning(issue); return; }
     }
     if (editPreset && editPresetIssue) { antMessage.warning(`预设「${editPreset.title}」：${editPresetIssue}`); return; }
-    const error = editMentionsEnabled ? getImageMentionError(editContent, [editRefImages.img1, editRefImages.img2, editRefImages.img3]) : null;
+    const error = editMentionsEnabled ? getImageMentionError(editContent, editRefImages.images) : null;
     if (error) { antMessage.warning(error); return; }
     // 立即退出编辑模式，不等待生成完成
     const content = editContent;
@@ -394,14 +455,13 @@ export default function ResultGrid() {
     editVersionRef.current++;
     setEditingMsgId(null);
     await editAndRegenerateMessage(msgId, content, {
-      referenceImage: refImages.img1,
-      referenceImage2: refImages.img2,
-      referenceImage3: refImages.img3,
+      referenceImages: refImages.images,
       referenceImageEnd: refImages.imgEnd,
-      motionReferenceImages: editWorkflowMeta?.supports_motion_reference ? [...editMotionImages] : undefined,
+      motionReferenceImages: editWorkflowMeta?.supports_motion_reference ? (editActiveMotionVideo ? [] : [...editMotionImages]) : undefined,
+      motionReferenceVideo: editSupportsMotionVideo ? editActiveMotionVideo : undefined,
       motionPrompt: editWorkflowMeta?.supports_motion_reference ? editMotionPrompt : undefined,
     }, editPreset);
-  }, [editAndRegenerateMessage, editContent, editRefImages, editMentionsEnabled, editPreset, editPresetIssue, editMotionImages, editWorkflowMeta, editMotionUploading, editMotionPrompt, editMotionPreviewing]);
+  }, [editAndRegenerateMessage, editContent, editRefImages, editMentionsEnabled, editPreset, editPresetIssue, editMotionImages, editWorkflowMeta, editMotionUploading, editMotionPrompt, editMotionPreviewing, editActiveMotionVideo, editSupportsMotionVideo]);
 
   const handleEditFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -424,6 +484,7 @@ export default function ResultGrid() {
     referenceImage?: string;
     referenceImage2?: string;
     referenceImage3?: string;
+    referenceImages?: (string | null)[];
     referenceImageEnd?: string;
   }): Array<{ key: EditReferenceSlot; label: string }> => {
     if (!params) return [];
@@ -431,19 +492,20 @@ export default function ResultGrid() {
     const supportsEnd = Boolean(workflow?.requires_end_image || workflow?.supports_optional_keyframes);
     const supportsMulti = Boolean(workflow?.supports_multi_image);
     const supportsSketch = Boolean(workflow?.image_workflow);
-    const hasReference = Boolean(
-      params.referenceImage || params.referenceImage2 || params.referenceImage3 || params.referenceImageEnd,
-    );
+    const paramsImages = params.referenceImages ?? [params.referenceImage, params.referenceImage2, params.referenceImage3];
+    const paramsImageCount = paramsImages.filter(Boolean).length;
+    const hasReference = Boolean(paramsImageCount || params.referenceImageEnd);
     if (!hasReference && !workflow?.requires_image && !supportsEnd && !supportsMulti && !supportsSketch) return [];
 
     const slots: Array<{ key: EditReferenceSlot; label: string }> = [
-      { key: 'img1', label: workflow?.supports_motion_reference ? '角色外观图' : supportsEnd ? '首帧' : '参考图 1' },
+      { key: 0, label: workflow?.supports_motion_reference ? '角色外观图' : supportsEnd ? '首帧' : '参考图 1' },
     ];
-    if (supportsMulti || params.referenceImage2 || params.referenceImage3) {
-      slots.push(
-        { key: 'img2', label: '参考图 2' },
-        { key: 'img3', label: '参考图 3' },
-      );
+    if (supportsMulti || paramsImageCount > 1) {
+      // 展示现有图片 + 一个追加位，上限即工作流容量
+      const capacity = getReferenceImageCapacity(workflow);
+      const liveCount = compactReferenceImages(editRefImages.images).length;
+      const shown = Math.min(capacity, Math.max(paramsImageCount, liveCount) + 1);
+      for (let index = 1; index < shown; index++) slots.push({ key: index, label: `参考图 ${index + 1}` });
     }
     if (supportsEnd || params.referenceImageEnd) slots.push({ key: 'imgEnd', label: '尾帧' });
     return slots;
@@ -652,9 +714,9 @@ export default function ResultGrid() {
     const candidates: { key: string; url: string }[] = [];
     chatHistory.forEach(message => {
       if (message.type !== 'assistant' || !message.images) return;
-      message.images.forEach((image, imgIndex) => {
+      message.images.forEach(image => {
         if (typeof image !== 'string' || isVideoUrl(image) || !image.includes('/uploads/spritesheet/')) return;
-        candidates.push({ key: `${message.id}:${imgIndex}`, url: image });
+        candidates.push({ key: `${message.id}:${image}`, url: image });
       });
     });
 
@@ -724,10 +786,13 @@ export default function ResultGrid() {
   const setAsReference = (imageUrl: string) => {
     const state = useAppStore.getState();
     const workflow = state.availableWorkflows.find(item => item.key === state.currentWorkflow);
-    if (!state.referenceImage) state.setReferenceImage(imageUrl);
+    if (!state.referenceImages[0]) state.setReferenceImage(imageUrl);
     else if ((workflow?.requires_end_image || workflow?.supports_optional_keyframes) && !state.referenceImageEnd) state.setReferenceImageEnd(imageUrl);
-    else if (workflow?.supports_multi_image && !state.referenceImage2) state.setReferenceImage2(imageUrl);
-    else if (workflow?.supports_multi_image && !state.referenceImage3) state.setReferenceImage3(imageUrl);
+    else if (workflow?.supports_multi_image) {
+      const images = compactReferenceImages(state.referenceImages);
+      if (images.length < getReferenceImageCapacity(workflow)) state.setReferenceImages([...images, imageUrl]);
+      else state.setReferenceImage(imageUrl);
+    }
     else state.setReferenceImage(imageUrl);
     antMessage.success('已添加到当前输入的参考图');
   };
@@ -748,12 +813,15 @@ export default function ResultGrid() {
   };
 
   const openFrameEditor = (messageId: string, videoUrl: string) => {
-    setFrameEditor({ messageId, videoUrl });
+    const sessionId = useAppStore.getState().chatHistory.find(item => item.id === messageId)?.session_id ?? currentSessionId;
+    const workspaceKey = JSON.stringify([sessionId, messageId, videoUrl]);
+    setFrameEditor({ messageId, videoUrl, sessionId, workspaceKey, initialWorkspace: frameWorkspacesRef.current.get(workspaceKey) });
   };
 
   const handleFrameExportGenerated = (url: string) => {
     if (!frameEditor) return;
     const msg = useAppStore.getState().chatHistory.find(m => m.id === frameEditor.messageId);
+    if (!msg || msg.session_id !== frameEditor.sessionId) return;
     const idx = msg?.images?.length ?? 0;
     appendChatMedia(frameEditor.messageId, url, idx);
   };
@@ -811,7 +879,7 @@ export default function ResultGrid() {
                       {getEditReferenceSlots(message.params).length > 0 && (
                         <div className="user-reference-images edit-ref-images">
                           {getEditReferenceSlots(message.params).map((slot) => {
-                            const src = editRefImages[slot.key];
+                            const src = slot.key === 'imgEnd' ? editRefImages.imgEnd : editRefImages.images[slot.key];
                             return src ? (
                               <div key={slot.key} className="edit-ref-image-tile">
                                 <img src={src} alt={slot.label} className="edit-ref-thumb" />
@@ -856,16 +924,20 @@ export default function ResultGrid() {
 
                       {/* 提示词文本编辑 */}
                       {editWorkflowMeta?.supports_motion_reference && <MotionReferenceImages key={`motion-images-${currentSessionId}-${message.id}`}
-                        images={editMotionImages} onChange={images => { setEditMotionImages(images); setEditMotionPrompt(null); }} onUploadingChange={setEditMotionUploading}
-                        shotMode={editPreset?.motion_reference_mode === 'shot'} />}
+                        images={editMotionImages} onUploadingChange={setEditMotionUploading} mode={motionReferenceMode(editPreset?.motion_reference_mode)}
+                        onChange={images => { setEditMotionImages(images); if (images.length) setEditMotionVideo(null); setEditMotionPrompt(null); }}
+                        video={editSupportsMotionVideo ? {
+                          value: editMotionVideo, workflow: editWorkflowMeta.key, maxSeconds: editWorkflowMeta.max_motion_reference_video_seconds ?? 0,
+                          onChange: video => { setEditMotionVideo(video); if (video) setEditMotionImages([]); setEditMotionPrompt(null); },
+                        } : undefined} />}
                       {editWorkflowMeta?.supports_motion_reference && <MotionPromptPanel key={`motion-prompt-${currentSessionId}-${message.id}`}
-                        source={motionPromptSource(editRefImages.img1, editMotionImages, editContent, editPreset)} snapshot={editMotionPrompt}
+                        source={motionPromptSource(editRefImages.images[0] ?? null, editMotionImages, editContent, editPreset, editActiveMotionVideo)} snapshot={editMotionPrompt}
                         onChange={setEditMotionPrompt} onBusyChange={setEditMotionPreviewing} disabled={editMotionUploading} />}
                       <ImageMentionInput
                         className="edit-content-textarea"
                         value={editContent}
                         onChange={content => { setEditDraft(previous => ({ ...previous, content })); setEditMotionPrompt(null); }}
-                        images={[editRefImages.img1, editRefImages.img2, editRefImages.img3]}
+                        images={editRefImages.images}
                         enabled={editMentionsEnabled}
                         autoSize={{ minRows: 2, maxRows: 8 }}
                         placeholder={editMentionsEnabled ? '输入提示词，输入 @ 引用参考图…' : '输入提示词…'}
@@ -901,14 +973,13 @@ export default function ResultGrid() {
                     /* ======= 正常显示模式 ======= */
                     <>
                   {/* 参考图缩略图（可点击预览） */}
-                  {(message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
+                  {(message.params?.referenceImages?.some(Boolean) || message.params?.referenceImage || message.params?.referenceImage2 || message.params?.referenceImage3 || message.params?.referenceImageEnd) && (
                     <div className="user-reference-images">
                       {([
-                        { src: message.params.referenceImage, label: message.params.motionReferenceImages?.length ? '角色外观图' : '参考图 1' },
-                        { src: message.params.referenceImage2, label: '参考图 2' },
-                        { src: message.params.referenceImage3, label: '参考图 3' },
-                        { src: message.params.referenceImageEnd, label: '尾帧参考图' },
-                        ...(message.params.motionReferenceImages ?? []).map((src, index) => ({ src, label: `动作 ${index + 1}` })),
+                        ...(message.params!.referenceImages ?? [message.params!.referenceImage, message.params!.referenceImage2, message.params!.referenceImage3])
+                          .map((src, index) => ({ src: src ?? undefined, label: index === 0 && (message.params!.motionReferenceImages?.length || message.params!.motionReferenceVideo) ? '角色外观图' : `参考图 ${index + 1}` })),
+                        { src: message.params!.referenceImageEnd, label: '尾帧参考图' },
+                        ...(message.params!.motionReferenceImages ?? []).map((src, index) => ({ src, label: `动作 ${index + 1}` })),
                       ] as { src?: string; label: string }[]).filter(item => item.src).map((item) => (
                         <div
                           key={item.label}
@@ -948,6 +1019,12 @@ export default function ResultGrid() {
                           <span className="image-reference-caption">{item.label}</span>
                         </div>
                       ))}
+                      {message.params!.motionReferenceVideo && (
+                        <div className="user-reference-video" title="本轮的动作视频">
+                          <video src={`${message.params!.motionReferenceVideo}#t=0.1`} muted playsInline controls preload="metadata" aria-label="动作视频" />
+                          <span className="image-reference-caption">动作视频</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   {message.params?.promptPreset && (
@@ -999,13 +1076,14 @@ export default function ResultGrid() {
                       type="text"
                       size="small"
                       icon={<EditOutlined />}
-                      disabled={isGenerating || !isWorkflowAvailable(message.params?.workflow)}
+                      disabled={isGenerating || deletingMedia || !isWorkflowAvailable(message.params?.workflow)}
                       title={!isWorkflowAvailable(message.params?.workflow) ? '此生成方式已停用，请选择可用方式创建新任务。原结果已保留。' : undefined}
                       onClick={() => startEdit(message)}
                       aria-label="编辑并重新生成"
                     />
                     <Popconfirm
-                      title="确认删除这轮对话？"
+                      title="确认删除本轮全部内容？"
+                      description="会删除本轮提示词和全部结果。只删某张图片请使用图片上的删除按钮。"
                       onConfirm={() => {
                         forgetOutlineRound(message.id);
                         return deleteChatMessage(message.id);
@@ -1021,7 +1099,7 @@ export default function ResultGrid() {
                         size="small"
                         danger
                         icon={<DeleteOutlined />}
-                        disabled={isGenerating}
+                        disabled={isGenerating || deletingMedia}
                         aria-label="删除本轮对话"
                       />
                     </Popconfirm>
@@ -1040,13 +1118,13 @@ export default function ResultGrid() {
                     const seed = typeof image === 'string' ? message.mediaSeeds?.[image] : undefined;
                     return (
                     <div
-                      key={imgIndex}
-                      className={`chat-image-item ${typeof image === 'string' && stripImageKeys.has(`${message.id}:${imgIndex}`) ? 'is-strip' : ''}`}
+                      key={typeof image === 'string' ? image : imgIndex}
+                      className={`chat-image-item ${typeof image === 'string' && stripImageKeys.has(`${message.id}:${image}`) ? 'is-strip' : ''}`}
                       tabIndex={typeof image === 'string' ? 0 : undefined}
                       aria-label={typeof image === 'string' ? `生成结果 ${imgIndex + 1}${seed === undefined ? '' : `，种子 ${seed}`}` : undefined}
                     >
                       {typeof image === 'string' ? (() => {
-                        const mediaKey = `${message.id}:${imgIndex}`;
+                        const mediaKey = `${message.id}:${image}`;
                         const video = isVideoUrl(image);
                         const stripImage = stripImageKeys.has(mediaKey);
                         const failed = failedMediaKeys.has(mediaKey);
@@ -1117,6 +1195,7 @@ export default function ResultGrid() {
                                 className="chat-image-seed"
                                 title="复用此种子"
                                 aria-label={`复用种子 ${seed}`}
+                                disabled={!composerReady}
                                 onClick={() => reuseSeed(roundWorkflows.get(message.id), seed)}
                               >
                                 <span>种子 {seed}</span>
@@ -1124,7 +1203,7 @@ export default function ResultGrid() {
                             )}
                             <div className="chat-image-overlay" aria-label={`媒体 ${imgIndex + 1} 操作`}>
                               {!video && !failed && acceptsReferenceImage && (
-                                <Button type="text" size="small" icon={<PictureOutlined />} onClick={() => setAsReference(image)}>
+                                <Button type="text" size="small" icon={<PictureOutlined />} disabled={!composerReady} onClick={() => setAsReference(image)}>
                                   设为参考
                                 </Button>
                               )}
@@ -1156,6 +1235,26 @@ export default function ResultGrid() {
                                   编辑
                                 </Button>
                               )}
+                              <Popconfirm
+                                title={video ? '删除这个视频？' : '删除这张图片？'}
+                                okText="删除"
+                                cancelText="取消"
+                                okButtonProps={{ danger: true }}
+                                disabled={isGenerating || deletingMedia}
+                                onConfirm={() => deleteMedia(message.session_id, message.id, image)}
+                              >
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  aria-label={`删除第 ${imgIndex + 1} 个结果`}
+                                  disabled={isGenerating || deletingMedia}
+                                  loading={deletingMediaKey === mediaKey}
+                                >
+                                  删除
+                                </Button>
+                              </Popconfirm>
                             </div>
                           </>
                         );
@@ -1177,7 +1276,7 @@ export default function ResultGrid() {
                   >
                     <PictureOutlined aria-hidden="true" />
                     <div>
-                      <strong>{message.id === currentGeneratingMessageId ? '正在准备生成' : '本轮没有返回媒体'}</strong>
+                      <strong>{message.id === currentGeneratingMessageId ? '正在准备生成' : '本轮暂无图片或视频'}</strong>
                       <span>{message.id === currentGeneratingMessageId ? '结果会在生成后显示在这里' : '可以修改上一条提示词后重新生成'}</span>
                     </div>
                   </div>
@@ -1212,8 +1311,11 @@ export default function ResultGrid() {
       <Suspense fallback={<div className="lazy-component-loading" role="status">正在加载媒体编辑器...</div>}>
         {frameEditor && (
           <FrameExtractionModal
+            key={frameEditor.workspaceKey}
             open
             videoUrl={frameEditor.videoUrl}
+            initialWorkspace={frameEditor.initialWorkspace}
+            onWorkspaceChange={rememberFrameWorkspace}
             onClose={() => setFrameEditor(null)}
             onFrameExportGenerated={handleFrameExportGenerated}
           />

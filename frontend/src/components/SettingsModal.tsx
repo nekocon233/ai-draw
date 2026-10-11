@@ -63,10 +63,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const supportsOriginalSize = workflowMeta?.supports_original_size === true;
   // select 类型参数（如视频时长）也纳入表单草稿。
   const selectParams = workflowMeta?.parameters.filter(p => p.type === 'select') ?? [];
+  // 动作视频决定 H3 的时长，所选时长只在使用姿势图时生效
+  const motionVideoAttached = useAppStore(state => Boolean(state.motionReferenceVideo));
+  const durationFollowsVideo = motionVideoAttached && workflowMeta?.supports_motion_reference_video === true;
 
   // 获取 width 和 height 的参数配置
   const strengthParam = workflowMeta?.parameters.find(p => p.name === 'strength');
   const countParam = workflowMeta?.parameters.find(p => p.name === 'count');
+  const maxCount = getGenerationCount(workflowMeta, Number.MAX_SAFE_INTEGER);
   const widthParam = workflowMeta?.parameters.find(p => p.name === 'width');
   const heightParam = workflowMeta?.parameters.find(p => p.name === 'height');
   // 固定种子时第 n 张用 种子 + n - 1，上限随本轮数量收紧。
@@ -217,9 +221,13 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             key={param.name}
             label={param.label}
             name={['selectOptions', param.name]}
-            extra={param.name === 'h3_aspect_ratio' && !workflowMeta?.supports_motion_reference ? '自动时跟随关键帧比例；纯文本生成使用 16:9' : undefined}
+            extra={param.name === 'h3_aspect_ratio' && !workflowMeta?.supports_motion_reference ? '自动时跟随关键帧比例；纯文本生成使用 16:9'
+              : param.name === 'h3_duration' && durationFollowsVideo
+                ? `已添加动作视频：时长跟随视频，至少 4 秒，最多 ${workflowMeta?.max_motion_reference_video_seconds ?? 0} 秒；此项只在使用动作图时生效`
+                : undefined}
           >
             <Select
+              disabled={param.name === 'h3_duration' && durationFollowsVideo}
               options={(param.options || []).map(v => ({
                 label: param.option_labels?.[v] ?? (param.name === 'h3_aspect_ratio' && v === 'auto' ? '自动（跟随关键帧）' : v),
                 value: v,
@@ -267,12 +275,17 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <Slider
                     ariaLabelForHandle="生成数量"
                     min={countParam?.min ?? 1}
-                    max={countParam?.max ?? 8}
+                    max={maxCount}
                     step={countParam?.step ?? 1}
-                    marks={Object.fromEntries([1, 2, 4, 6, 8]
-                      .filter(value => value >= (countParam?.min ?? 1) && value <= (countParam?.max ?? 8))
+                    marks={Object.fromEntries([...new Set([1, 4, 8, 12, maxCount])]
+                      .filter(value => value >= (countParam?.min ?? 1) && value <= maxCount)
                       .map(value => [value, String(value)]))}
                   />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="count" noStyle>
+                  <InputNumber aria-label="生成数量数值" min={countParam?.min ?? 1} max={maxCount} step={1} precision={0} size="small" style={{ width: 70 }} />
                 </Form.Item>
               </Col>
             </Row>

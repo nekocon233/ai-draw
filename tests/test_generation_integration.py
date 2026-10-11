@@ -1,4 +1,5 @@
 """Exercise HTTP ownership and SQL result replacement without a live database/API."""
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -72,6 +73,57 @@ class GenerationIntegrationTests(unittest.TestCase):
         self.client = TestClient(self.app)
         self.addCleanup(self.client.close)
 
+    def test_append_api_keeps_existing_results_and_requires_a_persisted_round(self):
+        response = self.client.post('/api/media/generate', json={
+            'prompt': 'original prompt', 'workflow': 'test', 'session_id': 'session-a',
+            'message_id': 'message-a-reply', 'append_results': True,
+        })
+        self.assertEqual(response.status_code, 200)
+        with self.sessions() as db:
+            results = db.query(GeneratedImage).order_by(GeneratedImage.image_index).all()
+            self.assertEqual([item.file_path for item in results], ['/uploads/generated/1/old.png', '/uploads/generated/1/new.png'])
+        self.assertEqual(self.client.post('/api/media/generate', json={
+            'prompt': 'x', 'workflow': 'test', 'append_results': True,
+        }).status_code, 400)
+
+    def test_append_persistence_is_idempotent_after_selective_deletion_leaves_index_gaps(self):
+        with self.sessions() as db:
+            db.query(GeneratedImage).one().image_index = 5
+            db.commit()
+        for _ in range(2):
+            self.assertEqual(self.repository.persist(self.context, ['/uploads/generated/1/append.png'],
+                seeds=[42], append_results=True), 'persisted')
+        with self.sessions() as db:
+            results = db.query(GeneratedImage).order_by(GeneratedImage.image_index).all()
+            self.assertEqual([(item.image_index, item.seed) for item in results], [(5, None), (6, 42)])
+        self.storage.delete_file.assert_not_called()
+
+    def test_stopped_partial_results_survive_database_reload_with_previous_results(self):
+        async def scenario():
+            ready = asyncio.Event()
+
+            async def partial(parameters, context, on_artifact, check_cancelled):
+                on_artifact('/uploads/generated/1/partial.png', 0, 16, 123)
+                ready.set()
+                await asyncio.Event().wait()
+
+            self.coordinator.engine.generate = partial
+            params = GenerationParameters('original prompt', workflow='test', count=16)
+            task = self.coordinator.reserve(self.context, params)
+            running = asyncio.create_task(self.coordinator.run(task, params))
+            await ready.wait()
+            await self.coordinator.stop(1)
+            await running
+
+        asyncio.run(scenario())
+        from server.api.session import _serialize_message
+        with self.sessions() as db:
+            reply = db.query(ChatMessage).filter_by(message_id='message-a-reply').one()
+            payload = _serialize_message(reply)
+            self.assertEqual(payload['images'], ['/uploads/generated/1/old.png', '/uploads/generated/1/partial.png'])
+            self.assertEqual(payload['seeds'], [None, 123])
+        self.storage.delete_file.assert_not_called()
+
     def persisted_images(self):
         with self.sessions() as db:
             return [image.file_path for image in db.query(GeneratedImage).all()]
@@ -92,6 +144,81 @@ class GenerationIntegrationTests(unittest.TestCase):
         self.storage.delete_file.reset_mock()
         self.repository.discard(images)
         self.storage.delete_file.assert_not_called()
+
+    def test_motion_video_is_owned_persisted_and_released_when_replaced(self):
+        video = '/uploads/reference/1/' + 'a' * 32 + '.mp4'
+        for value, status in (('/uploads/reference/2/' + 'a' * 32 + '.mp4', 403), ('data:video/mp4;base64,AAAA', 422),
+                              ('/uploads/video/1/clip.mp4', 422)):
+            response = self.client.post('/api/media/generate', json={'prompt': 'dance', 'workflow': 'test', 'motion_reference_video': value})
+            self.assertEqual(response.status_code, status, value)
+        self.assertIsNone(self.coordinator.tasks.active)
+        self.assertEqual(self.repository.persist(self.context, ['/uploads/generated/1/new.png'],
+                         source_updates={'workflow': 'test', 'motion_reference_video': video}), 'persisted')
+        from server.api.session import _serialize_message
+        with self.sessions() as db:
+            source = db.query(ChatMessage).filter_by(message_id='message-a').one()
+            self.assertEqual(_serialize_message(source)['params']['motionReferenceVideo'], video)
+        self.storage.delete_file.reset_mock()
+        self.repository.discard([video])
+        self.storage.delete_file.assert_not_called()
+        # Regenerating with another clip releases the old one once the new result is committed.
+        other = '/uploads/reference/1/' + 'b' * 32 + '.mp4'
+        self.assertEqual(self.repository.persist(self.context, ['/uploads/generated/1/newer.png'],
+                         source_updates={'workflow': 'test', 'motion_reference_video': other}), 'persisted')
+        self.assertIn(video, {call.args[0] for call in self.storage.delete_file.call_args_list})
+
+    def test_motion_video_in_session_config_and_drafts_is_protected_until_removed(self):
+        from fastapi import HTTPException
+        from server.api.session import InputDraft, SessionConfigRequest, delete_session, get_session_config, update_session_config
+        from utils.motion_prompt import motion_prompt_input_hash
+        user = SimpleNamespace(id=1, username='owner')
+        character = '/uploads/reference/1/character.png'
+        video, drafted = ('/uploads/reference/1/' + letter * 32 + '.mp4' for letter in 'cd')
+        snapshot = {'version': 1, 'input_hash': motion_prompt_input_hash(character, [], '', video=video), 'prompt': '跟随视频跳舞。'}
+        with self.sessions() as db:
+            update_session_config('session-a', SessionConfigRequest(
+                prompt='', reference_images=[character], motion_reference_images=[], motion_reference_video=video,
+                motion_prompt=snapshot, input_drafts={'video': InputDraft(motion_reference_video=drafted)},
+            ), user, db)
+            config = get_session_config('session-a', user, db)
+            self.assertEqual((config['motion_reference_video'], config['motion_prompt']), (video, snapshot))
+            self.assertEqual(config['input_drafts']['video']['motion_reference_video'], drafted)
+            self.repository.discard([video, drafted])
+            self.storage.delete_file.assert_not_called()
+            for request in (SessionConfigRequest(motion_reference_video='/uploads/reference/2/' + 'c' * 32 + '.mp4'),
+                            SessionConfigRequest(input_drafts={'video': InputDraft(motion_reference_video='/uploads/reference/2/' + 'd' * 32 + '.mp4')})):
+                with self.assertRaises(HTTPException):
+                    update_session_config('session-a', request, user, db)
+            update_session_config('session-a', SessionConfigRequest(motion_reference_video=None), user, db)
+            config = get_session_config('session-a', user, db)
+            self.assertIsNone(config['motion_reference_video'])
+            self.assertIsNone(config['motion_prompt'])
+            self.storage.delete_file.assert_called_once_with(video)
+            self.storage.delete_file.reset_mock()
+            delete_session('session-a', user, db)
+        self.assertIn(drafted, {call.args[0] for call in self.storage.delete_file.call_args_list})
+
+    def test_chat_save_keeps_motion_snapshots_for_listed_subjects_and_videos(self):
+        from fastapi import HTTPException
+        from server.api.user import save_chat_message
+        from utils.motion_prompt import motion_prompt_input_hash
+        user = SimpleNamespace(id=1, username='owner')
+        character, poses = '/uploads/reference/1/character.png', ['/uploads/reference/1/a.png']
+        video = '/uploads/reference/1/' + 'a' * 32 + '.mp4'
+        pose_snapshot = {'version': 1, 'input_hash': motion_prompt_input_hash(character, poses, ''), 'prompt': '抬手。'}
+        video_snapshot = {'version': 1, 'input_hash': motion_prompt_input_hash(character, [], '', video=video), 'prompt': '跳舞。'}
+        base = {'session_id': 'session-a', 'type': 'user', 'content': '', 'workflow': 'minimax_h3_ref', 'reference_images': [character]}
+        with self.sessions() as db:
+            # The current client sends only the ordered list; the subject is its first slot.
+            save_chat_message({**base, 'id': 'pose-message', 'motion_reference_images': poses, 'motion_prompt': pose_snapshot}, user, db)
+            save_chat_message({**base, 'id': 'video-message', 'motion_reference_images': [], 'motion_reference_video': video,
+                               'motion_prompt': video_snapshot}, user, db)
+            self.assertEqual(db.query(ChatMessage).filter_by(message_id='pose-message').one().motion_prompt, pose_snapshot)
+            saved = db.query(ChatMessage).filter_by(message_id='video-message').one()
+            self.assertEqual((saved.motion_reference_video, saved.motion_prompt), (video, video_snapshot))
+            with self.assertRaises(HTTPException) as foreign:
+                save_chat_message({**base, 'id': 'foreign-message', 'motion_reference_video': '/uploads/reference/2/' + 'a' * 32 + '.mp4'}, user, db)
+            self.assertEqual(foreign.exception.status_code, 403)
 
     def test_motion_session_config_survives_clear_and_protects_shared_media(self):
         from server.api.session import SessionConfigRequest, get_session_config, update_session_config
@@ -156,6 +283,49 @@ class GenerationIntegrationTests(unittest.TestCase):
             source=db.query(ChatMessage).filter_by(message_id='message-a').one()
             self.assertEqual(source.content,'')
             self.assertEqual(_serialize_message(source)['params']['motionPrompt'],snapshot)
+
+    def test_reference_image_slots_persist_with_dual_write_and_fallback(self):
+        from fastapi import HTTPException
+        from server.api.session import SessionConfigRequest, get_session_config, update_session_config, _serialize_message
+        user = SimpleNamespace(id=1, username='owner')
+        images = [f'/uploads/reference/1/ref-{index}.png' for index in range(5)]
+        with self.sessions() as db:
+            update_session_config('session-a', SessionConfigRequest(reference_images=images), user, db)
+            config = get_session_config('session-a', user, db)
+            self.assertEqual(config['reference_images'], images)
+            # legacy 三列同步写入前 3 槽
+            self.assertEqual((config['reference_image'], config['reference_image_2'], config['reference_image_3']),
+                             (images[0], images[1], images[2]))
+            with self.assertRaises(HTTPException):
+                update_session_config('session-a', SessionConfigRequest(
+                    reference_images=['/uploads/reference/2/foreign.png']), user, db)
+        # persistence 双写列表列与 legacy 三列
+        self.assertEqual(self.repository.persist(self.context, ['/uploads/generated/1/new.png'],
+                         source_updates={'workflow': 'test', 'reference_images': images,
+                                         'reference_image': images[0], 'reference_image_2': images[1],
+                                         'reference_image_3': images[2]}), 'persisted')
+        with self.sessions() as db:
+            source = db.query(ChatMessage).filter_by(message_id='message-a').one()
+            self.assertEqual(source.reference_images, images)
+            params = _serialize_message(source)['params']
+            self.assertEqual(params['referenceImages'], images)
+            self.assertEqual(params['referenceImage'], images[0])
+            # 新列为 NULL 的历史行回退读取 legacy 三列
+            source.reference_images = None
+            db.commit()
+            self.assertEqual(_serialize_message(source)['params']['referenceImages'], images[:3])
+        # 新 JSON 列与会话配置列表都保护文件不被回收
+        self.storage.delete_file.reset_mock()
+        self.repository.discard([images[4]])
+        self.storage.delete_file.assert_not_called()
+
+    def test_generate_validates_reference_image_slot_ownership(self):
+        response = self.client.post('/api/media/generate', json={
+            'prompt': 'x', 'workflow': 'test',
+            'reference_images': ['/uploads/reference/1/ok.png', None, '/uploads/reference/2/foreign.png'],
+        })
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(self.coordinator.tasks.active)
 
     def test_placeholder_preserves_existing_result(self):
         self.assertEqual(self.repository.persist(self.context, [], replace_existing=False), "persisted")

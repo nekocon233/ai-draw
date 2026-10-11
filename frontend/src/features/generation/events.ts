@@ -38,7 +38,9 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
     const revision = port.getState().generationRevision;
     const images = await port.refreshRound(sessionId, messageId);
     if (port.getState().generationRevision !== revision) return;
-    if (task?.status === 'error') {
+    if (task?.phase === 'cancelled') {
+      port.notify('info', '生成已停止，已完成的结果已保留');
+    } else if (task?.status === 'error') {
       port.notify('error', '上次生成失败: ' + (task.error || '未知错误'));
     } else if (images.length > 0) {
       port.notify('success', completionText(images, recovered));
@@ -68,7 +70,7 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
         port.finish();
         if (lastTask.session_id === state.currentSessionId) {
           await refresh(lastTask.session_id, lastTask.message_id, true, lastTask);
-        } else if (lastTask.status === 'error') {
+        } else if (lastTask.status === 'error' && lastTask.phase !== 'cancelled') {
           port.notify('error', '上次生成失败: ' + (lastTask.error || '未知错误'));
         }
         return;
@@ -87,7 +89,15 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
     if (message.field === 'generation_progress' && typeof message.value === 'string') {
       port.progress?.(message.value);
     }
-    if (message.field === 'is_generating' && message.value === false) {
+    if (message.field === 'generation_cancelled') {
+      port.retainImages(messageId);
+      port.finish();
+      const revision = port.getState().generationRevision;
+      if (message.session_id) await port.refreshRound(message.session_id, messageId);
+      if (port.getState().generationRevision === revision) {
+        port.notify('info', typeof message.value === 'string' ? message.value : '生成已停止，已完成的结果已保留');
+      }
+    } else if (message.field === 'is_generating' && message.value === false) {
       port.finish();
       if (message.session_id) await refresh(message.session_id, messageId, false);
     } else if (message.field === 'error' && typeof message.value === 'string' && message.value) {

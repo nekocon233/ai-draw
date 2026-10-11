@@ -46,7 +46,7 @@ workflow_defaults:
       parameters: &qwen_image_21_parameters
         - {name: "prompt", label: "画面描述", type: "text", default: ""}
         - {name: "lora_prompt", label: "风格 LoRA", type: "text", default: ""}
-        - {name: "count", label: "生成数量", type: "number", min: 1, max: 4, step: 1, default: 1}
+        - {name: "count", label: "生成数量", type: "number", min: 1, max: 16, step: 1, default: 1}
         - {name: "width", label: "图片宽度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
@@ -62,7 +62,7 @@ workflow_defaults:
       parameters:
         - {name: "prompt", label: "编辑指令", type: "text", default: ""}
         - {name: "lora_prompt", label: "风格 LoRA", type: "text", default: ""}
-        - {name: "count", label: "生成数量", type: "number", min: 1, max: 4, step: 1, default: 1}
+        - {name: "count", label: "生成数量", type: "number", min: 1, max: 16, step: 1, default: 1}
         - {name: "width", label: "图片宽度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "height", label: "图片高度", type: "number", min: 256, max: 3072, step: 32, default: 1024}
         - {name: "qwen_steps", label: "采样步数", type: "select", options: ["20", "25", "40", "50"], default: "40"}
@@ -71,16 +71,18 @@ workflow_defaults:
     gpt_image:
       provider: "openai_image"
       label: "图生图（GPT Image · Codex 订阅）"
-      description: "使用 Codex 订阅额度生成或编辑图片，支持多张参考图"
+      description: "使用 Codex 订阅额度生成或编辑图片，最多 16 张参考图"
       category: "生图"
       method: "GPT Image"
       reference_image_label: "参考图"
       reference_image_description: "描述编辑或合成要求，输入 @ 选择参考图"
       requires_image: false
       supports_multi_image: true
+      max_reference_images: 16
       output_type: "image"
       prompt_template: null
       parameters:
+        - {name: "count", label: "生成数量", type: "number", min: 1, max: 16, step: 1, default: 1}
         - name: "prompt"
           label: "提示词"
           type: "text"
@@ -88,22 +90,25 @@ workflow_defaults:
     minimax_h3_ref:
       provider: "comfyui_minimax_h3_ref"
       label: "动作参考视频（MiniMax H3）"
-      description: "主体图加 1–8 张有序参考图：默认固定原图场景与镜头、只改姿势；选「参考镜头动作」时只取主体外观，镜头与动作跟随参考图"
+      description: "主体图加 1–8 张有序参考图或一段动作视频：默认固定原图场景与镜头、只改姿势；选「参考镜头动作」时只取主体外观，镜头与动作跟随参考"
       category: "图生视频"
       method: "MiniMax H3 · 动作参考"
       default_prompt_preset_id: "video_fixed_camera"
       requires_image: true
       supports_motion_reference: true
       max_motion_reference_images: 8
+      # 动作视频与姿势图二选一；时长跟随视频，上限按 16GB 显存实测（docs/minimax_h3_reference.md）
+      supports_motion_reference_video: true
+      max_motion_reference_video_seconds: 5
       reference_image_label: "主体图"
       reference_image_description: "按所选预设使用：固定镜头动作保留原图场景与镜头，参考镜头动作只取人物或元素外观"
       output_type: "video"
       # 主体外观、镜头画面要求和参考动作由服务端按预设拼接，扩写只处理用户的补充描述
-      prompt_template: "你是动作参考视频的补充描述扩写助手。主体外观、镜头与画面要求，以及按参考图顺序完成的基本动作，都由系统按所选预设自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容（包括看图得到的镜头与动作）保持原意和顺序，不删减。不得新增、替换或改变参考图给出的镜头和动作，不擅自加入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
+      prompt_template: "你是动作参考视频的补充描述扩写助手。主体外观、镜头与画面要求，以及按参考图顺序或动作视频完成的基本动作，都由系统按所选预设自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容（包括看图得到的镜头与动作）保持原意和顺序，不删减。不得新增、替换或改变参考图或动作视频给出的镜头和动作，不擅自加入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
       parameters:
         - {name: "prompt", label: "额外补充（可留空）", type: "text", default: ""}
         - {name: "h3_duration", label: "时长（秒）", type: "select", options: ["4", "5", "6", "8", "10", "12", "15"], default: "5"}
-        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "自动（固定镜头按原图，参考镜头按首张参考图）"}, default: "auto"}
+        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "自动（固定镜头按原图，参考镜头按首张参考图或参考视频）"}, default: "auto"}
         - &h3_audio {name: "h3_audio", label: "声音", type: "select", options: ["silent", "native"], option_labels: {silent: "无声", native: "原生双声道音频"}, default: "silent"}
         - &h3_fixed_seed {name: "h3_fixed_seed", label: "种子", type: "seed", min: 0, max: 9007199254740991, default: ""}
     minimax_h3:

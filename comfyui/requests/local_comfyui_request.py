@@ -20,10 +20,13 @@ from comfyui.structures.comfyui_request_state import ComfyUIRequestState
 from comfyui.structures.minimax_h3 import (
     get_minimax_h3_frame_count,
     get_minimax_h3_resolution,
+    get_minimax_h3_video_frame_count,
+    plan_minimax_h3_reference_video,
     remove_nodes_by_title,
 )
 from comfyui.structures.upscale_models import extract_upscale_model_options
 from utils.config_loader import get_comfyui_config
+from utils.reference_video import conform_reference_video, probe_reference_video
 
 
 class LocalComfyUIRequest(ComfyUIRequestInterface):
@@ -183,12 +186,13 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         input_filename: str,
         remote_filename: str,
         upload_type: str = "input",
+        content_type: str = "image/png",
     ) -> dict:
-        """上传图片并覆盖同名文件。"""
+        """上传图片或视频并覆盖同名文件；ComfyUI 的上传接口按原样保存任意文件。"""
         async with aiofiles.open(input_filename, "rb") as file:
             content = await file.read()
         form = aiohttp.FormData()
-        form.add_field("image", content, filename=remote_filename, content_type="image/png")
+        form.add_field("image", content, filename=remote_filename, content_type=content_type)
         form.add_field("type", upload_type)
         form.add_field("subfolder", "ai_draw")
         form.add_field("overwrite", "true")
@@ -406,14 +410,23 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
 
     async def generate_minimax_h3_ref(
         self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto", audio=False, canvas_image_index=0,
+        video_path=None,
     ):
-        if not 2 <= len(images) <= 9 or any(not image for image in images):
-            raise ValueError("动作参考需要一张角色图与 1 到 8 张姿势图")
-        if not 0 <= canvas_image_index < len(images):
-            raise ValueError("自动画幅依据的图片不存在")
+        """canvas_image_index 1 指第一项动作参考：姿势图或动作视频。"""
+        if video_path:
+            if len(images) != 1 or not images[0]:
+                raise ValueError("动作视频需要且只需要一张主体图")
+            if canvas_image_index not in (0, 1):
+                raise ValueError("自动画幅依据的参考不存在")
+        else:
+            if not 2 <= len(images) <= 9 or any(not image for image in images):
+                raise ValueError("动作参考需要一张角色图与 1 到 8 张姿势图")
+            if not 0 <= canvas_image_index < len(images):
+                raise ValueError("自动画幅依据的图片不存在")
         return await self.generate_minimax_h3(
             workflow, prompt_text, seed, duration=duration, aspect_ratio=aspect_ratio,
             reference_images=images, audio=audio, canvas_image_index=canvas_image_index,
+            reference_video=video_path,
         )
 
     async def generate_minimax_h3(
@@ -428,24 +441,40 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
         reference_images=None,
         audio: bool = False,
         canvas_image_index: int = 0,
+        reference_video=None,
     ):
-        """执行 H3 文生、单关键帧、首尾帧或动作参考视频工作流，按需保留音轨。"""
+        """执行 H3 文生、单关键帧、首尾帧或动作参考视频工作流，按需保留音轨。
+
+        有动作视频时，输出时长跟随视频，参考视频在显存预算内缩放并对齐到输出帧数。
+        """
         temp_paths = []
         try:
+            video_info = await asyncio.to_thread(probe_reference_video, reference_video, "mov") if reference_video else None
             source_sizes = []
             if aspect_ratio == "auto":
-                canvas_images = reference_images[canvas_image_index:canvas_image_index + 1] if reference_images else (start_image_base64, end_image_base64)
+                if video_info and canvas_image_index == 1:
+                    canvas_images = ()
+                    source_sizes.append((video_info.width, video_info.height))
+                elif reference_images:
+                    canvas_images = reference_images[canvas_image_index:canvas_image_index + 1]
+                else:
+                    canvas_images = (start_image_base64, end_image_base64)
                 for image_base64 in canvas_images:
                     if not image_base64:
                         continue
                     with Image.open(BytesIO(base64.b64decode(image_base64))) as image:
                         source_sizes.append(ImageOps.exif_transpose(image).size)
             width, height = get_minimax_h3_resolution(aspect_ratio, source_sizes)
-            frame_count = get_minimax_h3_frame_count(duration)
+            frame_count = (
+                get_minimax_h3_video_frame_count(video_info.frames) if video_info
+                else get_minimax_h3_frame_count(duration)
+            )
 
             missing_titles = []
             if reference_images:
                 missing_titles.extend(f"h3_reference_{index}" for index in range(len(reference_images) + 1, 10))
+            if not reference_video:
+                missing_titles.extend(("h3_reference_video_1", "h3_reference_video_frames_1"))
             if not start_image_base64:
                 missing_titles.append("main_image_start")
             if not end_image_base64:
@@ -478,6 +507,26 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             upload_token = uuid.uuid4().hex
             for index, image_base64 in enumerate(reference_images or [], start=1):
                 await upload_keyframe(image_base64, f"h3_reference_{index}", f"minimax_h3_{upload_token}_ref_{index}.png")
+            if video_info:
+                image_sizes = []
+                for image_base64 in reference_images or ():
+                    with Image.open(BytesIO(base64.b64decode(image_base64))) as image:
+                        image_sizes.append(ImageOps.exif_transpose(image).size)
+                video_size = plan_minimax_h3_reference_video(
+                    (width, height), frame_count, (video_info.width, video_info.height), image_sizes,
+                )
+                filename = f"minimax_h3_{upload_token}_ref_video_1.mp4"
+                temp_path = os.path.join(tempfile.gettempdir(), filename)
+                temp_paths.append(temp_path)
+                await asyncio.to_thread(conform_reference_video, reference_video, temp_path, *video_size, frame_count)
+                metadata = await self._upload_overwrite_image(
+                    temp_path, filename, upload_type="temp", content_type="video/mp4",
+                )
+                video_path = f"{metadata['subfolder']}/{metadata['name']}" if metadata.get("subfolder") else metadata["name"]
+                if metadata.get("type") and metadata["type"] != "input":
+                    video_path = f"{video_path} [{metadata['type']}]"
+                self._set_required_node_param(workflow, "h3_reference_video_1", "file", video_path)
+                print(f"[LocalComfyUIRequest] H3 动作视频 {video_info.width}x{video_info.height} → {video_size[0]}x{video_size[1]}，{frame_count} 帧")
             if start_image_base64:
                 await upload_keyframe(
                     start_image_base64,

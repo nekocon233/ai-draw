@@ -117,6 +117,31 @@ test('uses workflow capabilities for count without hardcoded workflow ids', () =
   assert.equal(getGenerationCount(metadata, 8), 1);
   assert.equal(getGenerationCount({ ...metadata, output_type: 'image', max_count: 4 }, 8), 4);
   assert.equal(getGenerationCount(metadata, Number.NaN), 1);
+  const imageMetadata = { ...metadata, output_type: 'image', max_count: 16 };
+  assert.equal(getGenerationCount(imageMetadata, 16), 16);
+  assert.equal(getGenerationCount(imageMetadata, 17), 16);
+});
+
+test('stopping retains completed media and refreshes it without reporting a generation failure', async () => {
+  const { port, notices } = setup();
+  const calls: string[] = [];
+  port.retainImages = id => { calls.push('retain:' + id); };
+  port.refreshRound = async id => { calls.push('refresh:' + id); return ['completed.png']; };
+  const handler = createGenerationEventHandler(port);
+  await handler({ type: 'state_change', field: 'generation_cancelled', value: '已停止，保留 1 个结果', task_id: 'task-a', session_id: 'session-a' });
+  assert.deepEqual(calls, ['retain:reply-a', 'refresh:session-a']);
+  assert.equal(port.getState().isGenerating, false);
+  assert.deepEqual(notices, ['info:已停止，保留 1 个结果']);
+});
+
+test('reconnecting to a cancelled task restores persisted partial results with an informational notice', async () => {
+  const { port, notices, handler } = setup();
+  await handler({ type: 'initial_state', data: { is_generating: false, last_task: {
+    message_id: 'reply-a', session_id: 'session-a', task_id: 'task-a', status: 'error', phase: 'cancelled',
+    images: ['completed.png'], seeds: [42], error: '生成任务已取消', finished_at: 123,
+  } } });
+  assert.equal(port.getState().isGenerating, false);
+  assert.match(notices[0], /^info:.*已完成的结果已保留/);
 });
 
 test('progress events remain scoped to the current task without changing images', async () => {

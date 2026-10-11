@@ -1,15 +1,21 @@
 import base64
 import json
+import shutil
+import subprocess
+import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from PIL import Image
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
+from comfyui.structures.minimax_h3 import get_minimax_h3_video_frame_count
 from server.generation.contracts import GenerationParameters, ProviderInput
 from server.generation.minimax_h3_ref import MiniMaxH3ReferenceProvider, validate_motion_references
+
+VIDEO = '/uploads/reference/1/' + 'a' * 32 + '.mp4'
 
 
 class Graph(dict):
@@ -38,6 +44,58 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
                 validate_motion_references(GenerationParameters('move', reference_image='character', motion_reference_images=images))
         with self.assertRaisesRegex(ValueError, '角色'):
             validate_motion_references(GenerationParameters('move', motion_reference_images=['pose']))
+
+    def test_a_motion_video_replaces_the_pose_images(self):
+        validate_motion_references(GenerationParameters('dance', reference_image='character', motion_reference_video=VIDEO))
+        with self.assertRaisesRegex(ValueError, '二选一'):
+            validate_motion_references(GenerationParameters(
+                'dance', reference_image='character', motion_reference_images=['pose'], motion_reference_video=VIDEO))
+        for value in ('/uploads/video/1/clip.mp4', 'data:video/mp4;base64,AAAA'):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, '地址无效'):
+                validate_motion_references(GenerationParameters('dance', reference_image='character', motion_reference_video=value))
+        with self.assertRaisesRegex(ValueError, '角色'):
+            validate_motion_references(GenerationParameters('dance', motion_reference_video=VIDEO))
+
+    async def test_provider_sends_only_the_subject_with_the_video_and_mode_specific_prompt(self):
+        async def generate(**options):
+            options['finish_callback']('video')
+        service = SimpleNamespace(generate_minimax_h3_ref=AsyncMock(side_effect=generate))
+        params = GenerationParameters('节奏轻快', workflow='minimax_h3_ref', motion_reference_video=VIDEO,
+                                      motion_prompt={'version': 1, 'input_hash': 'a' * 64, 'prompt': '先挥手后转圈'})
+        request = ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4')
+        await MiniMaxH3ReferenceProvider(service).generate(request)
+        options = service.generate_minimax_h3_ref.call_args.kwargs
+        self.assertEqual((options['images'], options['video_path'], options['canvas_image_index']), (['character'], '/data/clip.mp4', 0))
+        for text in ('<Video 1>', 'attribute_transfer', '[reference generation]', 'sole visual baseline', '先挥手后转圈', '节奏轻快'):
+            self.assertIn(text, options['prompt_text'])
+        self.assertNotIn('<Picture 2>', options['prompt_text'])
+        shot = GenerationParameters('雨夜', workflow='minimax_h3_ref', motion_reference_video=VIDEO,
+                                    prompt_preset={'prompt': '参考镜头。', 'motion_reference_mode': 'shot'}).for_provider()
+        await MiniMaxH3ReferenceProvider(service).generate(ProviderInput(shot, ('character', None, None), motion_video='/data/clip.mp4'))
+        options = service.generate_minimax_h3_ref.call_args.kwargs
+        self.assertEqual(options['canvas_image_index'], 1)
+        for text in ('[video editing]', 'source video for the target video edit', 'partially_preserved', 'only defines the appearance'):
+            self.assertIn(text, options['prompt_text'])
+        self.assertNotIn('sole visual baseline', options['prompt_text'])
+
+    async def test_face_swap_video_keeps_the_performer_and_outfit(self):
+        async def generate(**options):
+            options['finish_callback']('video')
+        service = SimpleNamespace(generate_minimax_h3_ref=AsyncMock(side_effect=generate))
+        params = GenerationParameters('雨夜', workflow='minimax_h3_ref', motion_reference_video=VIDEO,
+                                      prompt_preset={'prompt': '换脸。', 'motion_reference_mode': 'face'}).for_provider()
+        progress = Mock()
+        provider = MiniMaxH3ReferenceProvider(service)
+        with patch('server.generation.minimax_h3_ref.analyze_motion_video', return_value={'version': 1, 'input_hash': 'a' * 64, 'prompt': '换脸'}):
+            await provider.enrich(ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4'), progress)
+        progress.assert_called_once_with('正在分析参考视频的镜头、服装与动作...')
+        await provider.generate(ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4'))
+        options = service.generate_minimax_h3_ref.call_args.kwargs
+        self.assertEqual((options['images'], options['canvas_image_index'], options['video_path']), (['character'], 1, '/data/clip.mp4'))
+        for text in ('[video editing]', 'only the face and hair come from <Picture 1>', 'never change the outfit',
+                     '<Picture 1> (face and hair): attribute_transfer', 'source video for the target video edit'):
+            self.assertIn(text, options['prompt_text'])
+        self.assertNotIn('Replace the performer of <Video 1> with <Subject 1>', options['prompt_text'])
 
     async def test_provider_keeps_character_first_and_pose_order(self):
         async def generate(**options):
@@ -89,6 +147,9 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('first_frame', conditioning)
             self.assertNotIn('last_frame', conditioning)
             self.assertEqual(len([node for node in graph.values() if node['class_type'] == 'LoadImage']), count)
+            # Without a motion video its loader and the conditioning link are gone.
+            self.assertNotIn('ref_videos.ref_video_0', conditioning)
+            self.assertFalse({'110', '111'} & set(graph))
             # Silent by default: the audio decode is dropped and the video is muxed without a track.
             self.assertNotIn('14', graph)
             self.assertNotIn('audio', graph['15']['inputs'])
@@ -105,3 +166,58 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, '画幅'):
             await request.generate_minimax_h3_ref(Graph(json.loads(path.read_text())), 'motion', 42, images[:2], canvas_image_index=2)
         self.assertTrue(all(not Path(path).exists() for path in temporary_paths))
+
+
+@unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg is required')
+class MiniMaxReferenceVideoRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_video_is_conformed_uploaded_and_wired_as_the_first_reference_video(self):
+        root = Path(__file__).resolve().parents[1]
+        path = root / 'configs/workflows/minimax_h3_ref_workflow_api.json'
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        clip = Path(directory.name) / 'clip.mp4'
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=24', '-t', '4.5',
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(clip)], check=True, capture_output=True)
+        request = object.__new__(LocalComfyUIRequest)
+        uploads, temporary_paths = [], []
+
+        async def upload(path, name, upload_type, content_type='image/png'):
+            temporary_paths.append(path)
+            uploads.append((name, content_type, Path(path).read_bytes()))
+            return {'name': name, 'subfolder': 'ai_draw', 'type': 'temp'}
+
+        request._upload_overwrite_image = AsyncMock(side_effect=upload)
+        request._queue_and_poll = AsyncMock(return_value='task')
+        request.api = SimpleNamespace(
+            get_history=Mock(return_value={'task': {'outputs': {'16': {'videos': [{'filename': 'result.mp4'}]}}}}),
+            get_image=Mock(return_value=b'video'),
+        )
+        subject = png(800, 1200, 'red')
+        for canvas_index, canvas in ((0, (768, 1152)), (1, (1344, 768))):
+            graph = Graph(json.loads(path.read_text()))
+            uploads.clear()
+            result = await request.generate_minimax_h3_ref(
+                graph, 'motion', 42, [subject], duration=10, canvas_image_index=canvas_index, video_path=str(clip),
+            )
+            self.assertTrue(result.is_success, result.error)
+            conditioning = graph['7']['inputs']
+            self.assertEqual((conditioning['width'], conditioning['height']), canvas)
+            # The clip, not the duration option, sets the length.
+            self.assertEqual(conditioning['length'], get_minimax_h3_video_frame_count(108))
+            self.assertEqual(conditioning['ref_videos.ref_video_0'], ['111', 0])
+            self.assertEqual([key for key in conditioning if key.startswith('ref_images.')], ['ref_images.ref_image_0'])
+            self.assertEqual(len([node for node in graph.values() if node['class_type'] == 'LoadImage']), 1)
+            self.assertEqual(graph['111']['inputs']['video'], ['110', 0])
+            self.assertTrue(graph['110']['inputs']['file'].startswith('ai_draw/') and graph['110']['inputs']['file'].endswith('.mp4 [temp]'))
+            self.assertEqual([content_type for _, content_type, _ in uploads], ['image/png', 'video/mp4'])
+            conformed = Path(directory.name) / 'conformed.mp4'
+            conformed.write_bytes(uploads[1][2])
+            frames = subprocess.run(['ffprobe', '-v', 'error', '-count_packets', '-select_streams', 'v:0', '-show_entries',
+                                     'stream=nb_read_packets,width,height', '-of', 'csv=p=0', str(conformed)],
+                                    check=True, capture_output=True, text=True).stdout.strip().split(',')
+            width, height, count = map(int, frames)
+            self.assertEqual(count, conditioning['length'])
+            self.assertTrue(width % 32 == height % 32 == 0 and width <= 640 and height <= 384)
+        self.assertTrue(all(not Path(path).exists() for path in temporary_paths))
+        with self.assertRaisesRegex(ValueError, '一张主体图'):
+            await request.generate_minimax_h3_ref(Graph(json.loads(path.read_text())), 'motion', 42, [subject, subject], video_path=str(clip))

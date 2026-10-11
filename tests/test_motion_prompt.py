@@ -2,7 +2,9 @@ import asyncio
 import base64
 import hashlib
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
@@ -23,7 +25,11 @@ from server.generation.contracts import GenerationParameters, ProviderInput, Tas
 from server.generation.coordinator import GenerationCoordinator
 from server.generation.events import EventPublisher
 from server.generation.minimax_h3_ref import MiniMaxH3ReferenceProvider, motion_reference_prompt
-from utils.motion_prompt import analyze_motion_images, current_motion_prompt, matching_motion_prompt, motion_prompt_input_hash
+from utils.motion_prompt import (
+    analyze_motion_images, analyze_motion_video, current_motion_prompt, matching_motion_prompt, motion_prompt_input_hash,
+)
+
+VIDEO = '/uploads/reference/1/' + 'a' * 32 + '.mp4'
 
 
 class MotionPromptTests(unittest.IsolatedAsyncioTestCase):
@@ -118,6 +124,94 @@ class MotionPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('unless the user requests camera movement', prompt)
         self.assertIn('原图角色先抬手再放下', prompt)
 
+    def test_video_snapshots_have_their_own_policies(self):
+        pose = motion_prompt_input_hash('character', ['pose'], 'extra')
+        video = motion_prompt_input_hash('character', [], 'extra', video=VIDEO)
+        shot = motion_prompt_input_hash('character', [], 'extra', 'shot', video=VIDEO)
+        expected = json.dumps([1, 'reference-video-actions-v1', 'character', VIDEO, 'extra'], ensure_ascii=False, separators=(',', ':'))
+        self.assertEqual(video, hashlib.sha256(expected.encode()).hexdigest())
+        self.assertEqual(len({pose, video, shot, motion_prompt_input_hash('character', [], 'extra', video=VIDEO + 'x')}), 4)
+        snapshot = {'version': 1, 'input_hash': video, 'prompt': '跟随视频动作'}
+        self.assertEqual(matching_motion_prompt(snapshot, 'character', [], '', {'prompt': 'extra'}, video=VIDEO), snapshot)
+        self.assertIsNone(matching_motion_prompt(snapshot, 'character', ['pose'], '', {'prompt': 'extra'}, video=VIDEO))
+        self.assertIsNone(matching_motion_prompt(snapshot, 'character', [], '', {'prompt': 'extra'}))
+        self.assertIsNone(matching_motion_prompt(snapshot, 'character', [], '', {'prompt': 'extra', 'motion_reference_mode': 'shot'}, video=VIDEO))
+
+    def test_face_swap_has_its_own_policies_for_images_and_videos(self):
+        image = motion_prompt_input_hash('character', ['ref'], 'extra', 'face')
+        expected = json.dumps([1, 'reference-face-v1', 'character', ['ref'], 'extra'], ensure_ascii=False, separators=(',', ':'))
+        self.assertEqual(image, hashlib.sha256(expected.encode()).hexdigest())
+        video = motion_prompt_input_hash('character', [], 'extra', 'face', video=VIDEO)
+        expected = json.dumps([1, 'reference-video-face-v1', 'character', VIDEO, 'extra'], ensure_ascii=False, separators=(',', ':'))
+        self.assertEqual(video, hashlib.sha256(expected.encode()).hexdigest())
+        others = {motion_prompt_input_hash('character', ['ref'], 'extra', mode) for mode in ('pose', 'shot')}
+        others |= {motion_prompt_input_hash('character', [], 'extra', mode, video=VIDEO) for mode in ('pose', 'shot')}
+        self.assertEqual(len(others | {image, video}), 6)
+        snapshot = {'version': 1, 'input_hash': video, 'prompt': '只换脸'}
+        face = {'prompt': 'extra', 'motion_reference_mode': 'face'}
+        self.assertEqual(matching_motion_prompt(snapshot, 'character', [], '', face, video=VIDEO), snapshot)
+        self.assertIsNone(matching_motion_prompt(snapshot, 'character', [], '', {**face, 'motion_reference_mode': 'shot'}, video=VIDEO))
+
+    def test_face_swap_analysis_keeps_the_reference_outfit(self):
+        with patch('utils.motion_prompt.LanguageModel') as llm:
+            llm.return_value.complete.return_value = '换上主体的脸和发型，保留原服装。'
+            signature = motion_prompt_input_hash('subject', ['ref-a'], '', 'face')
+            result = analyze_motion_images('subject', ['ref-a'], '', signature, 'face')
+            args, kwargs = llm.return_value.complete.call_args
+            self.assertEqual(kwargs['images'], ['subject', 'ref-a'])
+            self.assertIn('保留原服装', args[0])
+            self.assertIn('只把参考图中人物的脸和头发换成主体的脸和发型', kwargs['system'])
+            self.assertIn('不沿用主体图的服装', kwargs['system'])
+            self.assertTrue(current_motion_prompt(result, signature))
+        frames = [(0.0, 'frame-a'), (2.0, 'frame-b')]
+        with patch('utils.reference_video.sample_reference_frames', return_value=frames), patch('utils.motion_prompt.LanguageModel') as llm:
+            llm.return_value.complete.return_value = '表演者换上主体的脸和发型。'
+            signature = motion_prompt_input_hash('subject', [], '', 'face', video=VIDEO)
+            result = analyze_motion_video('subject', '/data/clip.mp4', '', signature, 'face')
+            args, kwargs = llm.return_value.complete.call_args
+            self.assertEqual(kwargs['images'], ['subject', 'frame-a', 'frame-b'])
+            self.assertIn('第一张输入是主体图', args[0])
+            self.assertIn('只把表演者的脸和头发换成主体的脸和发型', kwargs['system'])
+            self.assertIn('保留表演者的服装', kwargs['system'])
+            self.assertTrue(current_motion_prompt(result, signature))
+
+    def test_video_analysis_sees_the_subject_then_time_ordered_frames(self):
+        frames = [(0.0, 'frame-a'), (1.5, 'frame-b'), (2.9, 'frame-c')]
+        for mode, first, rule in (('pose', '原始角色场景图', '不沿用视频中表演者的身份'), ('shot', '主体图', '源视频中的表演者一律替换为主体')):
+            with self.subTest(mode=mode), patch('utils.reference_video.sample_reference_frames', return_value=frames) as sample, \
+                    patch('utils.motion_prompt.LanguageModel') as llm:
+                llm.return_value.complete.return_value = '先挥手，再转身。'
+                signature = motion_prompt_input_hash('subject', [], '轻快', mode, video=VIDEO)
+                result = analyze_motion_video('subject', '/data/clip.mp4', '轻快', signature, mode)
+                args, kwargs = llm.return_value.complete.call_args
+                self.assertEqual(sample.call_args.args[0], '/data/clip.mp4')
+                self.assertEqual(kwargs['images'], ['subject', 'frame-a', 'frame-b', 'frame-c'])
+                self.assertIn(f'第一张输入是{first}', args[0])
+                self.assertIn('0.0 秒、1.5 秒、2.9 秒', args[0])
+                self.assertIn('轻快', args[0])
+                self.assertIn(rule, kwargs['system'])
+                self.assertTrue(current_motion_prompt(result, signature))
+
+    async def test_video_enrich_reuses_matching_snapshots_and_reanalyzes_new_clips(self):
+        params = GenerationParameters('慢慢', workflow='minimax_h3_ref', reference_image='character',
+                                      motion_reference_video=VIDEO, prompt_preset={'prompt': '固定镜头。'})
+        signature = motion_prompt_input_hash('character', [], '固定镜头。慢慢', video=VIDEO)
+        snapshot = {'version': 1, 'input_hash': signature, 'prompt': '用户修改后的视频动作'}
+        provider = MiniMaxH3ReferenceProvider(SimpleNamespace())
+        progress = Mock()
+        request = ProviderInput(replace(params, motion_prompt=snapshot), ('char-bytes', None, None), motion_video='/data/clip.mp4')
+        with patch('server.generation.minimax_h3_ref.analyze_motion_video', return_value={**snapshot, 'prompt': '新视频'}) as analyze, \
+                patch('server.generation.minimax_h3_ref.analyze_motion_images') as images:
+            self.assertEqual((await provider.enrich(request, progress)).motion_prompt['prompt'], '用户修改后的视频动作')
+            analyze.assert_not_called()
+            other = '/uploads/reference/1/' + 'b' * 32 + '.mp4'
+            changed = ProviderInput(replace(request.parameters, motion_reference_video=other), request.images, motion_video='/data/other.mp4')
+            await provider.enrich(changed, progress)
+            self.assertEqual(analyze.call_args.args[:3], ('char-bytes', '/data/other.mp4', '固定镜头。慢慢'))
+            self.assertEqual(analyze.call_args.args[3], motion_prompt_input_hash('character', [], '固定镜头。慢慢', video=other))
+            images.assert_not_called()
+        progress.assert_called_once_with('正在分析动作视频...')
+
     async def test_preparation_failure_or_cancel_never_starts_video_or_replaces_old_result(self):
         for cancel in (False, True):
             started = asyncio.Event()
@@ -170,7 +264,7 @@ class MotionPromptAPITests(unittest.TestCase):
         sessions = sessionmaker(bind=self.engine)
         def database():
             with sessions() as db: yield db
-        async def analyze(character, poses, description, signature, user_id, mode='pose'):
+        async def analyze(character, poses, description, signature, user_id, mode='pose', video_path=None):
             return {'version':1,'input_hash':signature,'prompt':'保持原图，只依次改变姿势。'}
         self.service = SimpleNamespace(analyze_motion_prompt=AsyncMock(side_effect=analyze))
         app = FastAPI(); app.include_router(router,prefix='/api')
@@ -205,6 +299,28 @@ class MotionPromptAPITests(unittest.TestCase):
         self.service.analyze_motion_prompt.assert_not_called()
         del self.app.dependency_overrides[get_current_user]
         self.assertEqual(self.client.post('/api/prompt/analyze-motion',json=body).status_code,401)
+
+    def test_motion_video_is_owned_resolved_and_hashed_by_its_url(self):
+        with tempfile.TemporaryDirectory() as root:
+            clip = Path(root) / 'reference' / '1' / f'{"a" * 32}.mp4'
+            clip.parent.mkdir(parents=True)
+            clip.write_bytes(b'clip')
+            config = SimpleNamespace(paths=SimpleNamespace(upload_dir=root))
+            with patch('server.api.prompt.get_config', return_value=config):
+                body = {'reference_image': self.image, 'motion_reference_video': VIDEO, 'description': '雨夜'}
+                response = self.client.post('/api/prompt/analyze-motion', json=body)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()['input_hash'], motion_prompt_input_hash(self.image, [], '雨夜', video=VIDEO))
+                call = self.service.analyze_motion_prompt.call_args
+                self.assertEqual((call.args[1], call.kwargs['video_path']), ([], str(clip.resolve())))
+                self.service.analyze_motion_prompt.reset_mock()
+                for extra, status in (({'motion_reference_images': [self.image]}, 422), ({'motion_reference_video': None}, 422),
+                                      ({'motion_reference_video': 'data:video/mp4;base64,AAAA'}, 422),
+                                      ({'motion_reference_video': '/uploads/reference/2/' + 'a' * 32 + '.mp4'}, 403),
+                                      ({'motion_reference_video': '/uploads/reference/1/' + 'c' * 32 + '.mp4'}, 400)):
+                    with self.subTest(extra=extra):
+                        self.assertEqual(self.client.post('/api/prompt/analyze-motion', json={**body, **extra}).status_code, status)
+                self.service.analyze_motion_prompt.assert_not_called()
 
     def test_external_urls_and_invalid_images_are_rejected_without_fetching(self):
         for image in ('https://example.com/pose.png', 'not-an-image'):

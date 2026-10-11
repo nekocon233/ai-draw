@@ -108,7 +108,7 @@ function PromptExpansionPanel({
     const state = useAppStore.getState();
     const metadata = state.availableWorkflows.find(item => item.key === workflowId);
     const error = supportsImageMentions(metadata)
-      ? getImageMentionError(content, [state.referenceImage, state.referenceImage2, state.referenceImage3]) : null;
+      ? getImageMentionError(content, state.referenceImages) : null;
     if (error) message.warning(error);
     return !error;
   };

@@ -156,6 +156,21 @@
   flex-wrap: wrap;
 }
 
+/* 动作视频与参考图同高；视频不可拖入输入框 */
+.user-reference-video {
+  display: inline-block;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.user-reference-video video {
+  display: block;
+  height: 80px;
+  max-width: 160px;
+  border-radius: 6px;
+  background: #000;
+}
+
 .chat-message-text {
   font-size: 15px;
   line-height: 1.5;
@@ -2151,9 +2166,14 @@
 }
 
 .frame-canvas-tool-switch {
-  flex: 1 1 520px;
-  max-width: 620px;
-  min-width: 320px;
+  flex: 1 1 590px;
+  max-width: 690px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.frame-canvas-tool-switch .ant-segmented-group {
+  min-width: 590px;
 }
 
 .frame-canvas-tool-switch .ant-segmented-item {
@@ -2424,6 +2444,83 @@
   pointer-events: none;
   box-shadow: none;
 }
+
+.frame-crop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.frame-crop-selection {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+  cursor: move;
+}
+
+.frame-crop-selection:focus-visible,
+.frame-crop-handle:focus-visible {
+  outline: 2px solid var(--accent-solid);
+  outline-offset: -3px;
+}
+
+.frame-crop-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.frame-crop-grid::before,
+.frame-crop-grid::after {
+  content: '';
+  position: absolute;
+  border: 0 solid rgba(255, 255, 255, 0.5);
+}
+
+.frame-crop-grid::before {
+  inset: 0 33.333333%;
+  border-left-width: 1px;
+  border-right-width: 1px;
+}
+
+.frame-crop-grid::after {
+  inset: 33.333333% 0;
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+}
+
+.frame-crop-handle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+
+.frame-crop-handle::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  background: #fff;
+}
+
+.frame-crop-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.frame-crop-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.frame-crop-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.frame-crop-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.frame-crop-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.frame-crop-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.frame-crop-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.frame-crop-handle.w { left: 0; top: 50%; cursor: ew-resize; }
 
 .frame-canvas-stage.processing canvas {
   pointer-events: none;
@@ -2816,6 +2913,7 @@
   }
 
   .frame-canvas-tool-switch {
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
     min-width: 0;
@@ -2823,14 +2921,14 @@
   }
 
   .frame-canvas-tool-switch .ant-segmented-group {
-    min-width: 520px;
+    min-width: 590px;
   }
 
   .frame-canvas-history-actions {
     width: 100%;
     margin-left: 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: max-content repeat(3, minmax(0, 1fr));
   }
 
   .frame-canvas-toolbar-row.options {

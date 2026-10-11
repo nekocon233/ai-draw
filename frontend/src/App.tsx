@@ -57,7 +57,7 @@ function AppContent() {
     const lockApplication = () => {
       setForceLoginOpen(true);
       wsManager.disconnect();
-      useAppStore.getState().finishGeneration();
+      useAppStore.getState().reset();
     };
     const handleStorage = (event: StorageEvent) => {
       if (event.key === 'access_token' && !event.newValue) lockApplication();

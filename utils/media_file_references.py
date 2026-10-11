@@ -1,3 +1,4 @@
+import time
 from typing import Iterable
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
@@ -22,8 +23,11 @@ USER_SCOPED_ROOTS = {
 }
 
 
-INPUT_DRAFT_IMAGE_FIELDS = ('reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end', 'parked_end_image')
-INPUT_DRAFT_IMAGE_LISTS = ('motion_reference_images', 'parked_images')
+INPUT_DRAFT_IMAGE_FIELDS = (
+    'reference_image', 'reference_image_2', 'reference_image_3', 'reference_image_end', 'parked_end_image',
+    'motion_reference_video',
+)
+INPUT_DRAFT_IMAGE_LISTS = ('reference_images', 'motion_reference_images', 'parked_images')
 
 
 def input_draft_media_paths(drafts) -> list[str]:
@@ -107,16 +111,36 @@ def delete_unreferenced_media(db: Session, file_paths: Iterable[str]) -> None:
                 ChatMessage.reference_image_2.in_(variants),
                 ChatMessage.reference_image_3.in_(variants),
                 ChatMessage.reference_image_end.in_(variants),
+                ChatMessage.motion_reference_video.in_(variants),
                 *(cast(ChatMessage.motion_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
+                *(cast(ChatMessage.reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
             )).first()
             or db.query(ChatSession.id).filter(or_(
                 ChatSession.config_reference_image.in_(variants),
                 ChatSession.config_reference_image_2.in_(variants),
                 ChatSession.config_reference_image_3.in_(variants),
                 ChatSession.config_reference_image_end.in_(variants),
+                ChatSession.config_motion_reference_video.in_(variants),
                 *(cast(ChatSession.config_motion_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
+                *(cast(ChatSession.config_reference_images, Text).contains(json.dumps(value), autoescape=True) for value in variants),
                 *(cast(ChatSession.config_input_drafts, Text).contains(json.dumps(value), autoescape=True) for value in variants),
             )).first()
         )
         if not referenced:
             file_storage.delete_file(file_path)
+
+
+def sweep_stale_motion_videos(db: Session, user_id: int, keep=(), max_age_seconds: int = 24 * 3600) -> None:
+    """Delete this user's stored motion videos that are a day old and referenced nowhere.
+
+    A clip uploaded and then removed before any session save is never recorded, so nothing else frees it.
+    """
+    directory = get_file_storage().reference_dir / str(user_id)
+    if not directory.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    stale = [
+        f'reference/{user_id}/{path.name}' for path in directory.glob('*.mp4')
+        if path.name not in keep and path.stat().st_mtime < cutoff
+    ]
+    delete_unreferenced_media(db, stale)

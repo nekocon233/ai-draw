@@ -25,6 +25,7 @@ class ResultRepository(Protocol):
     def persist(
         self, context: TaskContext, images: list[str], *, replace_existing: bool = True,
         source_updates: Optional[dict] = None, seeds: Optional[list[Optional[int]]] = None,
+        append_results: bool = False,
     ) -> str: ...
 
     def discard(self, images: list[str]) -> None: ...
@@ -47,7 +48,7 @@ class GenerationCoordinator:
         self.tasks.finish(task, "error", error="生成任务调度失败")
         self.events.task(task.context, "error", "生成任务调度失败")
 
-    async def _persist(self, task: GenerationTask, parameters: GenerationParameters, *, final: bool) -> None:
+    async def _persist(self, task: GenerationTask, parameters: GenerationParameters, *, final: bool, retain_cancelled: bool = False) -> None:
         if not task.context.message_id or not task.context.session_id:
             return
         status = "failed"
@@ -57,6 +58,7 @@ class GenerationCoordinator:
                 replace_existing=final,
                 source_updates=parameters.source_updates() if final else None,
                 seeds=list(task.seeds) if final else [],
+                **({"append_results": True} if final and (task.context.append_results or retain_cancelled) else {}),
             ))
             try:
                 status = await asyncio.shield(writer)
@@ -93,7 +95,7 @@ class GenerationCoordinator:
             def on_artifact(url: str, index: int, total: int, seed: Optional[int] = None):
                 task.artifacts.append(url)
                 task.seeds.append(seed)
-                self.events.task(task.context, "media_generated", {"image": url, "index": index, "total": total, "seed": seed})
+                self.events.task(task.context, "media_generated", {"image": url, "index": task.context.result_offset + index, "total": task.context.result_offset + total, "seed": seed})
                 self.events.task(task.context, "preview_update", {
                     "action": "add",
                     "data": {"id": index + 1, "image": url, "workflow": task.context.workflow, "seed": seed},
@@ -107,18 +109,37 @@ class GenerationCoordinator:
         except asyncio.CancelledError:
             phase, error = "cancelled", "生成任务已取消"
         except Exception as exception:
-            logger.exception("Generation task failed: %s", task.context.task_id)
-            phase, error = "error", str(exception)
+            if task.cancel_requested:
+                # Some providers report their native interrupt as an ordinary error
+                # before stop() can cancel our coroutine. It is still an owned stop.
+                phase, error = "cancelled", "生成任务已取消"
+            else:
+                logger.exception("Generation task failed: %s", task.context.task_id)
+                phase, error = "error", str(exception)
         finally:
             if phase != "completed":
                 try:
-                    await asyncio.to_thread(self.repository.discard, list(task.artifacts))
-                    # Preserve an existing successful round; create a placeholder only if needed.
-                    await self._persist(task, parameters, final=False)
+                    if phase == "cancelled" and task.artifacts:
+                        # Stopping abandons only the unfinished sample. Completed images
+                        # are appended durably before clients refresh this round.
+                        self.tasks.begin_persistence(task, retain_cancelled=True)
+                        await self._persist(task, parameters, final=True, retain_cancelled=True)
+                    else:
+                        await asyncio.to_thread(self.repository.discard, list(task.artifacts))
+                        await self._persist(task, parameters, final=False)
                 except Exception:
                     logger.exception("Failed to clean up generation task %s", task.context.task_id)
+                    phase, error = "error", "保存已完成结果失败，请重试"
+                    try:
+                        await asyncio.to_thread(self.repository.discard, list(task.artifacts))
+                    except Exception:
+                        logger.exception("Failed to discard unpersisted task artifacts")
             self.tasks.finish(task, phase, error=error)
-            if error:
+            if phase == "cancelled":
+                text = f"已停止生成，保留本次已完成的 {len(task.artifacts)} 个结果"
+                self.events.task(task.context, "generation_progress", text)
+                self.events.task(task.context, "generation_cancelled", text)
+            elif error:
                 self.events.task(task.context, "generation_progress", error)
                 self.events.task(task.context, "error", error)
             else:

@@ -74,8 +74,9 @@ class ComfyUIRequestInterface(metaclass=ABCMeta):
 
     async def generate_minimax_h3_ref(
         self, workflow, prompt_text, seed, images, duration=5, aspect_ratio="auto", audio=False, canvas_image_index=0,
+        video_path=None,
     ) -> ComfyUIRequestResult:
-        """canvas_image_index 指定自动画幅所依据的输入图片（0 为主体图）。"""
+        """canvas_image_index 指定自动画幅的依据（0 为主体图，1 为第一项动作参考）；video_path 为动作视频。"""
         raise NotImplementedError("此 ComfyUI 后端不支持 H3 动作参考")
 
     @abstractmethod

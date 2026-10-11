@@ -10,7 +10,7 @@ const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/ignore-x-f
 interface PoseEditorWebProps {
   open: boolean;
   onClose: () => void;
-  targetSlot?: 1 | 2 | 3;
+  targetSlot?: number;
   targetLabel?: string;
   onApplyImage?: (base64: string) => void;
 }

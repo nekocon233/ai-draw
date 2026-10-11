@@ -1,5 +1,6 @@
 """Video preset routing, keyframe requirements and native provider payloads."""
 import base64
+import tempfile
 import unittest
 from dataclasses import replace
 from io import BytesIO
@@ -40,7 +41,8 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
 
     def test_catalog_exposes_video_scope_and_explicit_keyframe_roles(self):
         videos = [preset for preset in PROMPT_PRESETS if preset.output_type == "video"]
-        self.assertEqual({preset.id for preset in videos}, {"video_motion", "video_fixed_camera", "video_reference_shot", "video_transition"})
+        self.assertEqual({preset.id for preset in videos},
+                         {"video_motion", "video_fixed_camera", "video_reference_shot", "video_reference_face", "video_transition"})
         for preset in videos:
             self.assertTrue(preset.prompt.endswith("。"))
             self.assertNotIn("@图片", preset.prompt)
@@ -70,7 +72,7 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
             params = self.parameters(workflow=workflow)
             with self.subTest(workflow=workflow), self.assertRaisesRegex(ValueError, "开始帧"):
                 self.engine.validate(params)
-            self.engine.validate(replace(params, reference_image=self.image))
+            self.engine.validate(replace(params, reference_images=[self.image]))
         # MiniMax still supports text-only generation without an image-dependent preset.
         self.engine.validate(GenerationParameters("云层流动", workflow="minimax_h3"))
 
@@ -79,7 +81,7 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
             params = self.parameters("video_transition", workflow, reference_image=self.image, reference_image_2=self.image)
             with self.subTest(workflow=workflow), self.assertRaisesRegex(ValueError, "结束帧"):
                 self.engine.validate(params)
-            self.engine.validate(replace(params, reference_image_2=None, reference_image_end=self.image))
+            self.engine.validate(replace(params, reference_images=[self.image], reference_image_end=self.image))
         with self.assertRaisesRegex(ValueError, "不适用于"):
             self.engine.validate(self.parameters("video_transition", "minimax_h3_ref", reference_image=self.image, reference_image_end=self.image))
 
@@ -96,7 +98,7 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         sent = self.comfyui.generate_minimax_h3_ref.await_args.kwargs
         self.assertEqual(len(sent['images']), 3)
         self.assertIn('reference images determine all basic actions, poses and order', sent['prompt_text'])
-        self.assertIn('文字与动作图冲突时，以动作参考图为准', sent['prompt_text'])
+        self.assertIn('文字与动作参考冲突时，以动作参考为准', sent['prompt_text'])
         self.assertEqual(sent['canvas_image_index'], 0)
         self.assertEqual(params.source_updates()['content'], '补充两声短铃')
 
@@ -106,7 +108,7 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         params = self.parameters('video_reference_shot', 'minimax_h3_ref', motion_reference_images=[self.image])
         with self.assertRaisesRegex(ValueError, '主体图'):
             self.engine.validate(params)
-        params = replace(params, reference_image=self.image, motion_reference_images=[self.image, self.image])
+        params = replace(params, reference_images=[self.image], motion_reference_images=[self.image, self.image])
         self.engine.validate(params)
         self.assertEqual(params.for_provider().motion_reference_mode, 'shot')
         self.assertEqual(self.parameters('video_fixed_camera', 'minimax_h3_ref').for_provider().motion_reference_mode, 'pose')
@@ -119,6 +121,48 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('sole visual baseline', sent['prompt_text'])
         self.assertIn(self.presets['video_reference_shot']['prompt'] + '抬起右手', sent['prompt_text'])
         self.assertEqual(params.source_updates()['content'], '抬起右手')
+
+    async def test_motion_video_is_a_declared_capability_that_satisfies_motion_presets(self):
+        self.assertTrue(self.catalog.describe('minimax_h3_ref')['supports_motion_reference_video'])
+        self.assertGreater(self.catalog.describe('minimax_h3_ref')['max_motion_reference_video_seconds'], 0)
+        self.assertFalse(self.catalog.describe('minimax_h3')['supports_motion_reference_video'])
+        video = '/uploads/reference/7/' + 'a' * 32 + '.mp4'
+        with self.assertRaisesRegex(ValueError, '不支持动作视频'):
+            self.engine.validate(GenerationParameters('跳舞', workflow='minimax_h3', motion_reference_video=video))
+        with tempfile.TemporaryDirectory() as root:
+            clip = Path(root) / 'reference' / '7' / f'{"a" * 32}.mp4'
+            clip.parent.mkdir(parents=True)
+            clip.write_bytes(b'clip')
+            engine = GenerationEngine(self.catalog, SimpleNamespace(upload_dir=root, save=self.storage.save))
+            params = self.parameters('video_fixed_camera', 'minimax_h3_ref', reference_image=self.image, motion_reference_video=video)
+            engine.validate(params)
+            await engine.generate(params, TaskContext(7, 'task', 'minimax_h3_ref'), Mock(), lambda: None)
+            sent = self.comfyui.generate_minimax_h3_ref.await_args.kwargs
+            self.assertEqual((len(sent['images']), sent['video_path']), (1, str(clip.resolve())))
+        self.assertIn('<Video 1>', sent['prompt_text'])
+        self.assertIn('动作视频则按视频中的动作、节奏和时间完成', sent['prompt_text'])
+        self.assertEqual(params.source_updates()['motion_reference_video'], video)
+
+    async def test_face_swap_keeps_the_reference_outfit_and_follows_its_framing(self):
+        self.assertEqual(self.presets['video_reference_face']['motion_reference_mode'], 'face')
+        self.assertEqual(self.presets['video_reference_face']['workflow_ids'], ['minimax_h3_ref'])
+        with self.assertRaisesRegex(ValueError, '不适用于'):
+            self.engine.validate(self.parameters('video_reference_face', 'minimax_h3', reference_image=self.image))
+        with self.assertRaisesRegex(ValueError, '动作参考图'):
+            self.engine.validate(self.parameters('video_reference_face', 'minimax_h3_ref', reference_image=self.image))
+        params = self.parameters('video_reference_face', 'minimax_h3_ref', reference_images=[self.image], motion_reference_images=[self.image])
+        self.engine.validate(params)
+        self.assertEqual(params.for_provider().motion_reference_mode, 'face')
+        self.assertNotIn('motion_reference_mode', params.source_updates())
+        await self.engine.generate(params, TaskContext(7, 'task', 'minimax_h3_ref'), Mock(), lambda: None)
+        sent = self.comfyui.generate_minimax_h3_ref.await_args.kwargs
+        self.assertEqual(sent['canvas_image_index'], 1)
+        for text in ('only defines the head of <Subject 1>', 'never change their outfit', 'attribute_transfer',
+                     'replace only the face and hair', self.presets['video_reference_face']['prompt'] + '抬起右手'):
+            self.assertIn(text, sent['prompt_text'])
+        self.assertNotIn('sole visual baseline', sent['prompt_text'])
+        # The whole-person preset still swaps clothing too.
+        self.assertIn('脸、发型和服装都换', self.presets['video_reference_shot']['description'])
 
     def test_old_fixed_camera_snapshot_without_motion_requirement_remains_valid(self):
         legacy = {'id':'video_fixed_camera','title':'固定镜头动作','output_type':'video',

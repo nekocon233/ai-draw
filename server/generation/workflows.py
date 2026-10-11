@@ -32,7 +32,7 @@ class WorkflowCatalog:
             name: metadata.get(name, False) for name in (
                 "requires_image", "requires_end_image", "supports_optional_keyframes",
                 "supports_original_size", "supports_multi_image",
-                "supports_motion_reference",
+                "supports_motion_reference", "supports_motion_reference_video",
             )
         }
         result.update(
@@ -43,6 +43,8 @@ class WorkflowCatalog:
             parameters=metadata.get("parameters", []),
             max_count=self.max_count(workflow),
             max_motion_reference_images=metadata.get("max_motion_reference_images", 0),
+            max_motion_reference_video_seconds=metadata.get("max_motion_reference_video_seconds", 0),
+            max_reference_images=metadata.get("max_reference_images", 3),
             reference_image_label=metadata.get("reference_image_label", "参考图片"),
             reference_image_description=metadata.get("reference_image_description"),
             method_group=metadata.get("method_group"),
@@ -71,14 +73,21 @@ class WorkflowCatalog:
         label = metadata.get("label", parameters.workflow)
         if parameters.motion_reference_images and not metadata.get("supports_motion_reference"):
             raise ValueError(f"{label} 不支持动作参考图")
+        if parameters.motion_reference_video and not metadata.get("supports_motion_reference_video"):
+            raise ValueError(f"{label} 不支持动作视频")
         if not 1 <= parameters.count <= self.max_count(parameters.workflow):
             raise ValueError(f"{label} 每次支持生成 1 到 {self.max_count(parameters.workflow)} 个结果")
-        if metadata.get("requires_image") and not parameters.reference_image:
+        slots = parameters.reference_slots()
+        if metadata.get("requires_image") and not (slots and slots[0]):
             raise ValueError(f"{label} 需要提供参考图")
         if metadata.get("requires_end_image") and not parameters.reference_image_end:
             raise ValueError(f"{label} 需要提供尾帧参考图")
         if metadata.get("supports_multi_image") and metadata.get("output_type") != "video":
-            validate_image_mentions(parameters.prompt, [parameters.reference_image, parameters.reference_image_2, parameters.reference_image_3])
+            references = list(slots)
+            capacity = int(metadata.get("max_reference_images", 3))
+            if sum(1 for value in references if value) > capacity:
+                raise ValueError(f"{label} 最多支持 {capacity} 张参考图")
+            validate_image_mentions(parameters.prompt, references)
         validator = self.registration(parameters.workflow).validate
         if validator:
             validator(parameters)

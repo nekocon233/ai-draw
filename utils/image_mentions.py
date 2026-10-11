@@ -15,7 +15,7 @@ def validate_image_mentions(prompt: str, references: Sequence[str | None]) -> No
         raise ValueError("引用的图片已移除，请重新选择图片或删除该引用。")
     for match in IMAGE_MENTION.finditer(prompt):
         index = int(match.group(1) or match.group(2))
-        if not 1 <= index <= min(3, len(references)) or not references[index - 1]:
+        if not 1 <= index <= len(references) or not references[index - 1]:
             raise ValueError(f"图片{index}不存在，请先添加参考图或修改引用。")
 
 

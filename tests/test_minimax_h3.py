@@ -2,10 +2,17 @@ import json
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 from comfyui.structures.minimax_h3 import (
     get_minimax_h3_frame_count,
     get_minimax_h3_resolution,
+    get_minimax_h3_video_frame_count,
+    minimax_h3_frame_tokens,
+    minimax_h3_latent_frames,
+    minimax_h3_match_image_size,
+    minimax_h3_sequence_tokens,
+    plan_minimax_h3_reference_video,
     remove_nodes_by_title,
     validate_minimax_h3_options,
 )
@@ -27,6 +34,40 @@ class MiniMaxH3Tests(unittest.TestCase):
         self.assertEqual(get_minimax_h3_frame_count(15), 362)
         for duration in (4, 5, 6, 8, 10, 12, 15):
             self.assertEqual(get_minimax_h3_frame_count(duration) % 17, 5)
+
+    def test_motion_video_sets_the_length_within_the_supported_range(self):
+        # 2 s clips still produce the 4 s minimum; longer clips round up to the frame grid.
+        self.assertEqual(get_minimax_h3_video_frame_count(48), 107)
+        self.assertEqual(get_minimax_h3_video_frame_count(107), 107)
+        self.assertEqual(get_minimax_h3_video_frame_count(108), 124)
+        self.assertEqual(get_minimax_h3_video_frame_count(120), 124)
+        self.assertEqual(get_minimax_h3_video_frame_count(500), 362)
+
+    def test_token_math_mirrors_the_packed_layout(self):
+        self.assertEqual([minimax_h3_latent_frames(frames) for frames in (5, 107, 124, 158)], [2, 32, 37, 47])
+        self.assertEqual(minimax_h3_frame_tokens(1344, 768), 1008)
+        self.assertEqual(minimax_h3_match_image_size((2688, 1536), (1344, 768)), (1344, 768))
+        self.assertEqual(minimax_h3_match_image_size((640, 360), (1344, 768)), (640, 352))
+        # Prompt reserve + stereo audio rows + target + image (Qwen and DiT) + video (DiT frames and 2 fps Qwen blocks).
+        self.assertEqual(
+            minimax_h3_sequence_tokens((1344, 768), 124, [(1344, 768)], (448, 256)),
+            3072 + 414 + 37 * 1008 + 2 * 1008 + (37 + 6) * 112,
+        )
+
+    def test_reference_video_plan_is_the_largest_size_within_budget(self):
+        with patch("comfyui.structures.minimax_h3.MINIMAX_H3_TOKEN_BUDGET", 50_000):
+            plan = plan_minimax_h3_reference_video((1344, 768), 107, (1354, 760), [(1344, 768)])
+            self.assertEqual(plan, (736, 416))
+            self.assertLessEqual(minimax_h3_sequence_tokens((1344, 768), 107, [(1344, 768)], plan), 50_000)
+            self.assertGreater(minimax_h3_sequence_tokens((1344, 768), 107, [(1344, 768)], (800, 448)), 50_000)
+            self.assertEqual(plan_minimax_h3_reference_video((768, 1344), 107, (760, 1354), [(768, 1344)]), (416, 736))
+            # Small sources are never enlarged.
+            self.assertEqual(plan_minimax_h3_reference_video((1344, 768), 107, (320, 180), [(1344, 768)]), (320, 192))
+            # A longer clip leaves less room, so the reference shrinks.
+            shorter = plan_minimax_h3_reference_video((1344, 768), 124, (1354, 760), [(1344, 768)])
+            self.assertLess(shorter[1], plan[1])
+            with self.assertRaisesRegex(ValueError, "更短"):
+                plan_minimax_h3_reference_video((1344, 768), 362, (1354, 760), [(1344, 768)])
 
     def test_duration_rejects_values_outside_trained_range(self):
         with self.assertRaisesRegex(ValueError, "4 到 15"):

@@ -15,6 +15,7 @@ import type {
   GenerateMediaRequest,
   GenerateMediaResponse,
   UploadImageResponse,
+  UploadMotionVideoResponse,
   WorkflowsResponse,
   LastTaskInfo,
   WorkflowParameterValue,
@@ -205,6 +206,9 @@ export const apiService = {
   deleteMessage: (sessionId: string, messageId: string): Promise<{ deleted: boolean }> =>
     client.delete(`/chat/sessions/${sessionId}/messages/${messageId}`),
 
+  deleteMessageMedia: (sessionId: string, messageId: string, images: string[]): Promise<{ images: string[]; seeds: (number | null)[] }> =>
+    client.delete(`/chat/sessions/${sessionId}/messages/${messageId}/media`, { data: { images } }),
+
   getMessageRound: (sessionId: string, assistantMessageId: string): Promise<{ messages: unknown[] }> =>
     client.get(`/chat/sessions/${sessionId}/rounds/${assistantMessageId}`),
 
@@ -216,8 +220,10 @@ export const apiService = {
     reference_image?: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
+    reference_images?: (string | null)[] | null;
     reference_image_end?: string | null;
     motion_reference_images?: string[] | null;
+    motion_reference_video?: string | null;
     motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
   }): Promise<{ updated: boolean }> =>
     client.patch(`/chat/messages/${messageId}`, data),
@@ -236,19 +242,21 @@ export const apiService = {
     width?: number | null;
     height?: number | null;
     use_original_size?: boolean | null;
-    workflow: string;
-    prompt: string;
-    lora_prompt: string;
-    strength: number;
-    count: number;
-    images_per_row: number;
+    workflow: string | null;
+    prompt: string | null;
+    lora_prompt: string | null;
+    strength: number | null;
+    count: number | null;
+    images_per_row: number | null;
     reference_image: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
+    reference_images?: (string | null)[] | null;
     reference_image_end?: string | null;
     workflow_options?: Record<string, WorkflowParameterValue> | null;
     motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
     motion_reference_images?: string[] | null;
+    motion_reference_video?: string | null;
     prompt_preset?: PromptPreset | null;
     prompt_preset_choices?: PromptPresetChoices | null;
     input_drafts?: import('../utils/composerDrafts').ApiInputDrafts | null;
@@ -258,6 +266,7 @@ export const apiService = {
   updateSessionConfig: (sessionId: string, config: {
     motion_prompt?: import('../types/api').MotionPromptSnapshot | null;
     motion_reference_images?: string[];
+    motion_reference_video?: string | null;
     width?: number | null;
     height?: number | null;
     use_original_size?: boolean;
@@ -270,6 +279,7 @@ export const apiService = {
     reference_image?: string | null;
     reference_image_2?: string | null;
     reference_image_3?: string | null;
+    reference_images?: (string | null)[] | null;
     reference_image_end?: string | null;
     workflow_options?: Record<string, WorkflowParameterValue>;
     prompt_preset?: PromptPreset | null;
@@ -285,6 +295,7 @@ export const apiService = {
   saveChatMessage: (data: {
     motion_prompt?: import('../types/api').MotionPromptSnapshot;
     motion_reference_images?: string[];
+    motion_reference_video?: string;
     width?: number;
     height?: number;
     use_original_size?: boolean;
@@ -302,6 +313,7 @@ export const apiService = {
     reference_image?: string;
     reference_image_2?: string;
     reference_image_3?: string;
+    reference_images?: (string | null)[];
     reference_image_end?: string;
     workflow_options?: Record<string, WorkflowParameterValue>;
     prompt_preset?: PromptPreset;
@@ -365,6 +377,19 @@ export const apiService = {
     formData.append('file', file);
     return client.post('/media/upload-reference', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+
+  // 动作视频：服务端截取开头并转码，大文件上传与转码可能较慢
+  uploadMotionVideo: (file: File, workflow: string, onProgress?: (percent: number) => void, signal?: AbortSignal): Promise<UploadMotionVideoResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('workflow', workflow);
+    return client.post('/media/upload-motion-video', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+      signal,
+      onUploadProgress: event => { if (onProgress && event.total) onProgress(Math.round((event.loaded / event.total) * 100)); },
     });
   },
 

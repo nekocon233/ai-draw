@@ -23,7 +23,8 @@ export interface GeneratePromptResponse {
 }
 
 // 服务端维护的提示词预设
-export type MotionReferenceMode = 'pose' | 'shot';
+/** pose：原图场景与固定镜头；shot：参考里的人整个换成主体；face：只换脸和发型，保留参考人物的服装。 */
+export type MotionReferenceMode = 'pose' | 'shot' | 'face';
 
 export interface PromptPresetImage {
   label: string;
@@ -60,6 +61,7 @@ export interface MotionPromptSnapshot {
 }
 
 export interface GenerateMediaRequest {
+  append_results?: boolean;
   prompt: string;
   workflow?: string;
   strength?: number;
@@ -68,7 +70,11 @@ export interface GenerateMediaRequest {
   reference_image?: string;
   reference_image_2?: string;  // 第 2 张参考图
   reference_image_3?: string;  // 第 3 张参考图
+  // 有序参考图槽位（含空位）；优先于上面三个 legacy 字段，上限由工作流元数据 max_reference_images 决定
+  reference_images?: (string | null)[];
   motion_reference_images?: string[];
+  /** 已上传的动作视频（/uploads/reference/...mp4），与 motion_reference_images 二选一 */
+  motion_reference_video?: string;
   motion_prompt?: MotionPromptSnapshot;
   width?: number;
   height?: number;
@@ -125,6 +131,17 @@ export interface UploadImageResponse {
   image: string;
 }
 
+// 动作视频上传：服务端截取开头，转成无声 24fps H.264 后保存
+export interface UploadMotionVideoResponse {
+  url: string;
+  duration: number;
+  frames: number;
+  width: number;
+  height: number;
+  source_duration: number;
+  trimmed: boolean;
+}
+
 // 工作流列表
 // 工作流元数据
 export type WorkflowParameterValue = string | number;
@@ -156,11 +173,14 @@ export interface WorkflowMetadata {
   supports_optional_keyframes?: boolean;
   supports_motion_reference?: boolean;
   max_motion_reference_images?: number;
+  supports_motion_reference_video?: boolean;  // 动作参考可改用一段视频，时长跟随视频
+  max_motion_reference_video_seconds?: number;
   supports_original_size?: boolean;
   output_type?: string;   // 'image' | 'video'
   category?: string;      // 工作流分组（同组在下拉折叠为一项，如 "图生图"）
   method?: string;        // 同组内具体方式名（设置弹窗中展示）
   supports_multi_image?: boolean;  // 是否支持多张参考图（图生图类目）
+  max_reference_images?: number;   // 多参考图工作流的槽位上限（缺省 3）
   max_count?: number;
   lora_labels?: Record<string, string>;  // LoRA 标识 → 登记的显示名称
   parameters: WorkflowParameter[];

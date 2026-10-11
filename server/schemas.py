@@ -1,8 +1,11 @@
 """
 API 请求和响应的数据模型
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Literal
+
+# Stored motion reference videos; the user id in the path is checked against the caller.
+MOTION_VIDEO_PATTERN = r"^/uploads/reference/\d+/[0-9a-f]{32}\.mp4$"
 
 
 # ============ Prompt 相关 ============
@@ -35,8 +38,9 @@ class PromptPreset(BaseModel):
     prompt: str
     output_type: Literal["image", "video"] = "image"
     requires_motion_reference: bool = False
-    # pose：主体图提供场景与固定镜头，参考图只给姿势；shot：主体图只给外观，镜头与动作跟随参考图
-    motion_reference_mode: Literal["pose", "shot"] = "pose"
+    # pose：主体图提供场景与固定镜头，参考图只给姿势；shot：主体图只给外观，镜头与动作跟随参考；
+    # face：参考里的人物与服装保留，只换成主体图的脸和发型
+    motion_reference_mode: Literal["pose", "shot", "face"] = "pose"
     workflow_ids: Optional[List[str]] = None  # None keeps historical snapshots compatible.
     hint: str = ""  # 选中后作为输入框占位提示
     images: List[PromptPresetImage] = Field(default_factory=list)
@@ -60,6 +64,16 @@ class AnalyzeImageForPromptResponse(BaseModel):
 
 # ============ 媒体生成相关 ============
 
+class DeleteMessageMediaRequest(BaseModel):
+    """Select persisted results by URL, rather than mutable display positions."""
+    images: List[str] = Field(min_length=1)
+
+
+class DeleteMessageMediaResponse(BaseModel):
+    images: List[str]
+    seeds: List[Optional[int]]
+
+
 class MotionPromptSnapshot(BaseModel):
     version: Literal[1] = 1
     input_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -68,9 +82,16 @@ class MotionPromptSnapshot(BaseModel):
 
 class AnalyzeMotionPromptRequest(BaseModel):
     reference_image: str = Field(min_length=1)
-    motion_reference_images: List[str] = Field(min_length=1, max_length=8)
+    motion_reference_images: List[str] = Field(default_factory=list, max_length=8)
+    motion_reference_video: Optional[str] = Field(default=None, pattern=MOTION_VIDEO_PATTERN)
     description: str = Field(default="", max_length=16000)
-    motion_reference_mode: Literal["pose", "shot"] = "pose"
+    motion_reference_mode: Literal["pose", "shot", "face"] = "pose"
+
+    @model_validator(mode="after")
+    def _one_motion_source(self):
+        if bool(self.motion_reference_images) == bool(self.motion_reference_video):
+            raise ValueError("请提供 1 到 8 张动作参考图或一段动作视频（二选一）")
+        return self
 
 class GenerateMediaRequest(BaseModel):
     """生成图像请求"""
@@ -82,7 +103,10 @@ class GenerateMediaRequest(BaseModel):
     reference_image: Optional[str] = None
     reference_image_2: Optional[str] = None  # 第 2 张参考图
     reference_image_3: Optional[str] = None  # 第 3 张参考图
+    # 有序参考图槽位列表（含空位）。非空时优先于上面三个 legacy 字段；上限由各工作流元数据决定，16 为全局天花板
+    reference_images: Optional[List[Optional[str]]] = Field(default=None, max_length=16)
     motion_reference_images: Optional[List[str]] = Field(default=None, max_length=8)
+    motion_reference_video: Optional[str] = Field(default=None, pattern=MOTION_VIDEO_PATTERN)  # 与动作参考图二选一
     motion_prompt: Optional[MotionPromptSnapshot] = None
     width: Optional[int] = None  # 图像宽度（部分工作流支持）
     height: Optional[int] = None  # 图像高度（部分工作流支持）
@@ -98,6 +122,7 @@ class GenerateMediaRequest(BaseModel):
     message_id: Optional[str] = Field(default=None, max_length=50)  # 助手消息 ID（{user_msg_id}-reply）
     session_id: Optional[str] = Field(default=None, max_length=50)  # 所属会话 ID
     task_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    append_results: bool = False  # Reuse an existing round without replacing its earlier results.
 
 
 class GenerateMediaResponse(BaseModel):

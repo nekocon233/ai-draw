@@ -30,19 +30,28 @@ function MotionPromptEditor({ source, snapshot, onChange, onBusyChange, disabled
       const response = await apiService.analyzeMotionPrompt(source, controller.current.signal);
       if (alive.current) onChange(response);
     } catch (error) {
-      if (alive.current && !controller.current?.signal.aborted) message.error(error instanceof Error ? error.message : '动作图分析失败，请重试');
+      if (alive.current && !controller.current?.signal.aborted) message.error(error instanceof Error ? error.message : '动作分析失败，请重试');
     } finally {
       if (alive.current) { setLoading(false); onBusyChange?.(false); }
     }
   };
 
+  const mode = source.motion_reference_mode;
+  const hasMotion = source.motion_reference_images.length > 0 || Boolean(source.motion_reference_video);
+  const heading = mode === 'face' ? '只换脸和发型，服装、镜头与动作跟随参考'
+    : mode === 'shot' ? '只取主体外观，镜头与动作跟随参考' : '保留原画面，只改变姿势';
+  const keeps = mode === 'face' ? '参考人物的服装、体型、镜头与场景保留。'
+    : mode === 'shot' ? '主体换入参考的镜头、构图与场景。' : '保持人物、背景、光照、镜头与裁切。';
   return <section className="motion-prompt-panel" aria-label="动作提示词">
     <div className="motion-reference-heading">
-      <strong>保留原画面，只改变姿势</strong>
-      <Button size="small" icon={<BulbOutlined />} loading={loading} disabled={disabled || !source.reference_image || !source.motion_reference_images.length}
+      <strong>{heading}</strong>
+      <Button size="small" icon={<BulbOutlined />} loading={loading} disabled={disabled || !source.reference_image || !hasMotion}
         onClick={() => void analyze()}>{snapshot ? '重新识别动作' : '预览动作提示词'}</Button>
     </div>
-    <p className="motion-reference-hint">保持人物、背景、光照、镜头与裁切。生成视频前自动看图分析，补充文字可留空。</p>
+    <p className="motion-reference-hint">
+      {keeps}
+      {source.motion_reference_video ? '生成视频前自动分析动作视频' : '生成视频前自动看图分析'}，补充文字可留空。
+    </p>
     {snapshot && <details className="motion-prompt-details">
       <summary>查看或修改动作提示词</summary>
       <Input.TextArea value={snapshot.prompt} aria-label="识别的动作提示词" autoSize={{minRows:3,maxRows:8}}

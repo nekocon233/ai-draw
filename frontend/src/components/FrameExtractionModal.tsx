@@ -47,7 +47,7 @@ import {
   type VideoFramePreviewItem,
   type VideoFramePreviewResponse,
 } from '../api/services';
-import { useBackgroundOptions } from '../hooks/useBackgroundOptions';
+import { useBackgroundOptions, type BackgroundOptionsState } from '../hooks/useBackgroundOptions';
 import {
   DEFAULT_COLOR_REPLACE_TOLERANCE,
   DEFAULT_FILL_TOLERANCE,
@@ -55,18 +55,34 @@ import {
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT,
   DEFAULT_TRANSPARENT_EDGE_ENHANCEMENT_MODE,
   DEFAULT_TRANSPARENT_REPLACE_MATCH_MODE,
-  applyConnectedColorReplacement,
-  applyHardTransparentReplacement,
   isHardTransparentReplacementTarget,
   type TransparentEdgeEnhancementMode,
   type TransparentReplaceMatchMode,
 } from '../utils/frameColorReplacement';
 import { getImageUpscaleTarget } from '../utils/imageUpscale';
+import {
+  FrameEditRecipe,
+  applyFramePixelOperation,
+  createFrameRestoreCanvas,
+  transformFrameCanvas,
+  paintFrameStrokeSegment,
+  restoreFrameStroke,
+  renderFrameEdits,
+  runFrameEditBatch,
+  type FrameEditOperation,
+  type FrameStrokeOperation,
+  type FrameEditPoint,
+  type WorksetFrameEdits,
+} from '../utils/frameEditOperations';
+import { centeredFrameCrop, frameCropBounds, frameCropOperation, type FrameGeometryOperation, type FrameRect } from '../utils/frameGeometry';
 import BackgroundOptionsFields from './BackgroundOptionsFields';
+import FrameCropOverlay from './FrameCropOverlay';
 
 interface FrameExtractionModalProps {
   open: boolean;
   videoUrl: string | null;
+  initialWorkspace?: FrameWorkspaceSnapshot;
+  onWorkspaceChange?: (workspace: FrameWorkspaceSnapshot) => void;
   onClose: () => void;
   onFrameExportGenerated?: (url: string, meta: { output: VideoFrameExportOutput; frames: number; cols?: number; rows?: number }) => void;
 }
@@ -76,7 +92,7 @@ type PreviewMode = 'raw' | 'final';
 type VideoSpriteMarker = 'loop' | 'jump' | 'duplicate' | 'manual';
 type SimilarityMarker = Exclude<VideoSpriteMarker, 'manual'>;
 type ReduceKeepPosition = 'first' | 'last';
-type CanvasTool = 'brush' | 'eraser' | 'fill' | 'replace' | 'background' | 'soften' | 'upscale';
+type CanvasTool = 'brush' | 'eraser' | 'fill' | 'replace' | 'background' | 'soften' | 'upscale' | 'crop';
 type EraserMode = 'restore' | 'transparent';
 const pendingUpscaleScales = ([2, 4] as const).map(scale => ({
   scale,
@@ -207,6 +223,7 @@ const MAX_CANVAS_HISTORY_BYTES = 96 * 1024 * 1024;
 interface CanvasHistoryEntry {
   image: ImageData;
   contentDirty: boolean;
+  operations: readonly FrameEditOperation[];
 }
 
 function trimCanvasHistory(entries: CanvasHistoryEntry[]) {
@@ -231,20 +248,6 @@ interface VideoSpriteFrame {
   markers: VideoSpriteMarker[];
 }
 
-interface WorksetColorReplacementOptions {
-  targetColor: readonly [number, number, number];
-  targetXRatio: number;
-  targetYRatio: number;
-  replaceWithTransparency: boolean;
-  replacementColor: string;
-  opacity: number;
-  replaceTolerance: number;
-  colorReplaceTolerance: number;
-  replaceMatchMode: TransparentReplaceMatchMode;
-  replaceEdgeCleanup: number;
-  replaceEdgeEnhancementMode: TransparentEdgeEnhancementMode;
-}
-
 interface FrameDocument {
   frames: VideoSpriteFrame[];
   activeFrameId: string | null;
@@ -259,6 +262,35 @@ interface FrameHistoryState {
   past: FrameHistoryEntry[];
   present: FrameDocument;
   future: FrameHistoryEntry[];
+}
+
+// Page-local workspace data. In-flight requests and uncommitted canvas previews are not restored.
+export interface FrameWorkspaceSnapshot {
+  videoUrl: string | null;
+  frameHistory: FrameHistoryState;
+  step: WorkbenchStep;
+  collapsedStep: WorkbenchStep | null;
+  previewId: string | null;
+  previewMode: PreviewMode;
+  fps: number;
+  startTime: number;
+  endTime: number | null;
+  videoDuration: number | null;
+  sourceFps: number | null;
+  videoSize: { width: number; height: number } | null;
+  looping: boolean;
+  playbackFps: number | null;
+  frameStep: number | null;
+  reduceKeepPosition: ReduceKeepPosition;
+  similarityThreshold: number;
+  output: VideoFrameExportOutput;
+  filename: string;
+  useVideoName: boolean;
+  rows: number | null;
+  cellWidth: number | null;
+  cellHeight: number | null;
+  nameTemplate: string;
+  backgroundOptions: BackgroundOptionsState;
 }
 
 type FrameHistoryAction =
@@ -365,97 +397,6 @@ const getFrameDisplayUrl = (frame: VideoSpriteFrame, mode: PreviewMode) => {
 
 const getFrameExportUrl = (frame: VideoSpriteFrame) => frame.editedUrl || frame.backgroundRemovedUrl || frame.sourceUrl;
 
-const findClosestReplacementPoint = (
-  source: Uint8ClampedArray,
-  width: number,
-  height: number,
-  targetColor: readonly [number, number, number],
-  expectedX: number,
-  expectedY: number,
-  tolerance: number,
-  euclidean: boolean,
-) => {
-  let closest: { x: number; y: number; distance: number } | null = null;
-  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex += 1) {
-    const offset = pixelIndex * 4;
-    if (source[offset + 3] === 0) continue;
-    const redDistance = Math.abs(source[offset] - targetColor[0]);
-    const greenDistance = Math.abs(source[offset + 1] - targetColor[1]);
-    const blueDistance = Math.abs(source[offset + 2] - targetColor[2]);
-    const colorDistance = euclidean
-      ? Math.hypot(redDistance, greenDistance, blueDistance)
-      : Math.max(redDistance, greenDistance, blueDistance);
-    if (colorDistance > tolerance) continue;
-    const x = pixelIndex % width;
-    const y = Math.floor(pixelIndex / width);
-    const distance = (x - expectedX) ** 2 + (y - expectedY) ** 2;
-    if (!closest || distance < closest.distance) closest = { x, y, distance };
-  }
-  return closest;
-};
-
-const replaceImageColors = async (url: string, options: WorksetColorReplacementOptions) => {
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const nextImage = new window.Image();
-    nextImage.crossOrigin = 'anonymous';
-    nextImage.onload = () => resolve(nextImage);
-    nextImage.onerror = () => reject(new Error('工作集图片加载失败'));
-    nextImage.src = url;
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建换色画布');
-  ctx.drawImage(image, 0, 0);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const expectedX = Math.min(canvas.width - 1, Math.max(0, Math.round(options.targetXRatio * (canvas.width - 1))));
-  const expectedY = Math.min(canvas.height - 1, Math.max(0, Math.round(options.targetYRatio * (canvas.height - 1))));
-  const matchTolerance = options.replaceWithTransparency
-    ? options.replaceTolerance * 255 / 50
-    : options.colorReplaceTolerance;
-  const targetPoint = findClosestReplacementPoint(
-    imageData.data,
-    canvas.width,
-    canvas.height,
-    options.targetColor,
-    expectedX,
-    expectedY,
-    matchTolerance,
-    options.replaceWithTransparency,
-  );
-  if (!targetPoint) return null;
-  const replacementRgb = hexToRgb(options.replacementColor);
-  const result = options.replaceWithTransparency
-    ? applyHardTransparentReplacement(
-        imageData.data,
-        canvas.width,
-        canvas.height,
-        targetPoint.x,
-        targetPoint.y,
-        options.replaceTolerance,
-        options.replaceEdgeCleanup,
-        options.replaceMatchMode,
-        options.replaceEdgeEnhancementMode,
-        options.targetColor,
-      )
-    : applyConnectedColorReplacement(
-        imageData.data,
-        canvas.width,
-        canvas.height,
-        targetPoint.x,
-        targetPoint.y,
-        options.targetColor,
-        [replacementRgb.r, replacementRgb.g, replacementRgb.b],
-        options.colorReplaceTolerance,
-        options.opacity,
-      );
-  if (!result) return null;
-  imageData.data.set(result);
-  ctx.putImageData(imageData, 0, 0);
-  return canvas.toDataURL('image/png');
-};
-
 const mapPreviewFrame = (frame: VideoFramePreviewItem): VideoSpriteFrame => ({
   id: makeFrameId('video-frame'),
   index: frame.index,
@@ -500,55 +441,59 @@ const isVisiblePopupOpen = () => {
 export default function FrameExtractionModal({
   open,
   videoUrl,
+  initialWorkspace,
+  onWorkspaceChange,
   onClose,
   onFrameExportGenerated,
 }: FrameExtractionModalProps) {
-  const [step, setStep] = useState<WorkbenchStep>(0);
-  const [collapsedStep, setCollapsedStep] = useState<WorkbenchStep | null>(null);
-  const [frameHistory, dispatchFrameHistory] = useReducer(frameHistoryReducer, undefined, createFrameHistoryState);
+  const [step, setStep] = useState<WorkbenchStep>(initialWorkspace ? initialWorkspace.step : 0);
+  const [collapsedStep, setCollapsedStep] = useState<WorkbenchStep | null>(initialWorkspace ? initialWorkspace.collapsedStep : null);
+  const [frameHistory, dispatchFrameHistory] = useReducer(frameHistoryReducer, initialWorkspace?.frameHistory, saved => saved ?? createFrameHistoryState());
   const frames = frameHistory.present.frames;
   const activeFrameId = frameHistory.present.activeFrameId;
   const canUndo = frameHistory.past.length > 0;
   const canRedo = frameHistory.future.length > 0;
   const undoActionLabel = frameHistory.past[frameHistory.past.length - 1]?.label;
   const redoActionLabel = frameHistory.future[0]?.label;
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('final');
+  const [previewId, setPreviewId] = useState<string | null>(initialWorkspace ? initialWorkspace.previewId : null);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>(initialWorkspace ? initialWorkspace.previewMode : 'final');
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [worksetEditLoading, setWorksetEditLoading] = useState(false);
+  const [worksetEditProgress, setWorksetEditProgress] = useState('');
   const [exporting, setExporting] = useState(false);
-  const [fps, setFps] = useState<number>(12);
-  const [startTime, setStartTime] = useState<number>(0);
-  const [endTime, setEndTime] = useState<number | null>(null);
-  const [videoDuration, setVideoDuration] = useState<number | null>(null);
-  const [sourceFps, setSourceFps] = useState<number | null>(null);
-  const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
-  const [looping, setLooping] = useState(true);
+  const [fps, setFps] = useState<number>(initialWorkspace ? initialWorkspace.fps : 12);
+  const [startTime, setStartTime] = useState<number>(initialWorkspace ? initialWorkspace.startTime : 0);
+  const [endTime, setEndTime] = useState<number | null>(initialWorkspace ? initialWorkspace.endTime : null);
+  const [videoDuration, setVideoDuration] = useState<number | null>(initialWorkspace ? initialWorkspace.videoDuration : null);
+  const [sourceFps, setSourceFps] = useState<number | null>(initialWorkspace ? initialWorkspace.sourceFps : null);
+  const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(initialWorkspace ? initialWorkspace.videoSize : null);
+  const [looping, setLooping] = useState(initialWorkspace ? initialWorkspace.looping : true);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
-  const [playbackFps, setPlaybackFps] = useState<number | null>(12);
-  const [frameStep, setFrameStep] = useState<number | null>(2);
-  const [reduceKeepPosition, setReduceKeepPosition] = useState<ReduceKeepPosition>('first');
+  const [playbackFps, setPlaybackFps] = useState<number | null>(initialWorkspace ? initialWorkspace.playbackFps : 12);
+  const [frameStep, setFrameStep] = useState<number | null>(initialWorkspace ? initialWorkspace.frameStep : 2);
+  const [reduceKeepPosition, setReduceKeepPosition] = useState<ReduceKeepPosition>(initialWorkspace ? initialWorkspace.reduceKeepPosition : 'first');
   const [reduceModalOpen, setReduceModalOpen] = useState(false);
-  const [similarityThreshold, setSimilarityThreshold] = useState<number>(18);
+  const [similarityThreshold, setSimilarityThreshold] = useState<number>(initialWorkspace ? initialWorkspace.similarityThreshold : 18);
   const [analyzingMarker, setAnalyzingMarker] = useState<SimilarityMarker | null>(null);
   const [similarityModalOpen, setSimilarityModalOpen] = useState(false);
   const [editorFrameId, setEditorFrameId] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; alt: string } | null>(null);
   const [workbenchCloseConfirmOpen, setWorkbenchCloseConfirmOpen] = useState(false);
-  const [output, setOutput] = useState<VideoFrameExportOutput>('spritesheet');
-  const [filename, setFilename] = useState('sprite');
-  const [useVideoName, setUseVideoName] = useState(true);
-  const [rows, setRows] = useState<number | null>(null);
-  const [cellWidth, setCellWidth] = useState<number | null>(null);
-  const [cellHeight, setCellHeight] = useState<number | null>(null);
-  const [nameTemplate, setNameTemplate] = useState('{n:03}');
+  const [output, setOutput] = useState<VideoFrameExportOutput>(initialWorkspace ? initialWorkspace.output : 'spritesheet');
+  const [filename, setFilename] = useState(initialWorkspace ? initialWorkspace.filename : 'sprite');
+  const [useVideoName, setUseVideoName] = useState(initialWorkspace ? initialWorkspace.useVideoName : true);
+  const [rows, setRows] = useState<number | null>(initialWorkspace ? initialWorkspace.rows : null);
+  const [cellWidth, setCellWidth] = useState<number | null>(initialWorkspace ? initialWorkspace.cellWidth : null);
+  const [cellHeight, setCellHeight] = useState<number | null>(initialWorkspace ? initialWorkspace.cellHeight : null);
+  const [nameTemplate, setNameTemplate] = useState(initialWorkspace ? initialWorkspace.nameTemplate : '{n:03}');
   const [exportProgress, setExportProgress] = useState<VideoFrameExportProgress | null>(null);
   const [exportPreviewViewport, setExportPreviewViewport] = useState({ width: 0, height: 0 });
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const frameGridRef = useRef<HTMLDivElement>(null);
   const exportPreviewStageRef = useRef<HTMLDivElement>(null);
   const previewTimerRef = useRef<number | null>(null);
   const previewIndexRef = useRef(0);
@@ -568,7 +513,8 @@ export default function FrameExtractionModal({
   const suppressWorksetClickRef = useRef<string | null>(null);
   const [worksetMultiSelecting, setWorksetMultiSelecting] = useState(false);
   framesRef.current = frames;
-  const bg = useBackgroundOptions();
+  const bg = useBackgroundOptions(initialWorkspace?.backgroundOptions);
+  const initializedVideoRef = useRef(videoUrl);
   const resetBackgroundOptions = bg.reset;
 
   const openStep = useCallback((index: WorkbenchStep) => {
@@ -588,7 +534,7 @@ export default function FrameExtractionModal({
   const effectivePlaybackFps = Math.min(Math.max(playbackFps || fps || 12, 0.1), 60);
   const playbackFrame = worksetFrames.length ? worksetFrames[previewIndex % worksetFrames.length] : null;
   const activeWorksetIndex = activeFrame ? worksetFrames.findIndex(frame => frame.id === activeFrame.id) : -1;
-  const motionFrame = previewPlaying ? playbackFrame : (activeWorksetIndex >= 0 ? activeFrame : worksetFrames[0]) || playbackFrame;
+  const motionFrame = previewPlaying ? playbackFrame : activeFrame || playbackFrame;
   const normalizedFrameStep = Math.max(2, Math.round(frameStep || 2));
 
   const exportPlan = useMemo(() => {
@@ -814,13 +760,10 @@ export default function FrameExtractionModal({
   }, [activeFrameId, worksetFrames]);
 
   useEffect(() => {
+    if (initializedVideoRef.current === videoUrl) return;
+    initializedVideoRef.current = videoUrl;
     workspaceEpochRef.current += 1;
     documentRevisionRef.current = 0;
-    if (!open) {
-      clearPreviewTimer();
-      clearExportProgressTimer();
-      return;
-    }
     previousOpenStepRef.current = null;
     setStep(0);
     setCollapsedStep(null);
@@ -830,6 +773,7 @@ export default function FrameExtractionModal({
     setLoadingPreview(false);
     setBackgroundLoading(false);
     setWorksetEditLoading(false);
+    setWorksetEditProgress('');
     setExporting(false);
     setFps(12);
     setStartTime(0);
@@ -859,7 +803,41 @@ export default function FrameExtractionModal({
     setNameTemplate('{n:03}');
     setExportProgress(null);
     resetBackgroundOptions();
-  }, [clearExportProgressTimer, clearPreviewTimer, open, resetBackgroundOptions, videoUrl]);
+  }, [resetBackgroundOptions, videoUrl]);
+
+  useEffect(() => {
+    if (open) return;
+    workspaceEpochRef.current += 1;
+    clearPreviewTimer();
+    clearExportProgressTimer();
+    setPreviewPlaying(false);
+    setLoadingPreview(false);
+    setBackgroundLoading(false);
+    setWorksetEditLoading(false);
+    setWorksetEditProgress('');
+    setExporting(false);
+    setExportProgress(null);
+    setAnalyzingMarker(null);
+    setReduceModalOpen(false);
+    setSimilarityModalOpen(false);
+    setEditorFrameId(null);
+    setImagePreview(null);
+    setWorkbenchCloseConfirmOpen(false);
+  }, [clearExportProgressTimer, clearPreviewTimer, open]);
+
+  const workspace = useMemo<FrameWorkspaceSnapshot>(() => ({
+    videoUrl, frameHistory, step, collapsedStep, previewId, previewMode,
+    fps, startTime, endTime, videoDuration, sourceFps, videoSize, looping, playbackFps,
+    frameStep, reduceKeepPosition, similarityThreshold, output, filename, useVideoName,
+    rows, cellWidth, cellHeight, nameTemplate, backgroundOptions: bg.state,
+  }), [videoUrl, frameHistory, step, collapsedStep, previewId, previewMode,
+    fps, startTime, endTime, videoDuration, sourceFps, videoSize, looping, playbackFps,
+    frameStep, reduceKeepPosition, similarityThreshold, output, filename, useVideoName,
+    rows, cellWidth, cellHeight, nameTemplate, bg.state]);
+
+  useEffect(() => {
+    onWorkspaceChange?.(workspace);
+  }, [onWorkspaceChange, workspace]);
 
   // 打开弹窗时探测视频真实帧率/时长，作为帧率默认值
   useEffect(() => {
@@ -873,7 +851,7 @@ export default function FrameExtractionModal({
         const probedDuration = res.source_duration ?? null;
         if (probedFps) {
           setSourceFps(probedFps);
-          setFps(Math.max(8, Math.min(24, Math.round(probedFps))));
+          if (!initialWorkspace) setFps(Math.max(8, Math.min(24, Math.round(probedFps))));
         }
         if (probedDuration) {
           const duration = Number(probedDuration.toFixed(3));
@@ -888,10 +866,11 @@ export default function FrameExtractionModal({
         if (!cancelled) setMetaLoading(false);
       });
     return () => { cancelled = true; };
-  }, [open, videoUrl]);
+  }, [initialWorkspace, open, videoUrl]);
 
   useEffect(() => clearPreviewTimer, [clearPreviewTimer]);
   useEffect(() => clearExportProgressTimer, [clearExportProgressTimer]);
+  useEffect(() => () => { workspaceEpochRef.current += 1; }, []);
 
   const onVideoLoaded = () => {
     const video = videoRef.current;
@@ -1041,12 +1020,34 @@ export default function FrameExtractionModal({
     });
   }, []);
 
-  const setActiveFrame = (frame: VideoSpriteFrame) => {
+  const setActiveFrame = useCallback((frame: VideoSpriteFrame) => {
+    clearPreviewTimer();
     setPreviewPlaying(false);
     setTransientActiveFrameId(frame.id);
     const index = worksetFrames.findIndex(item => item.id === frame.id);
     if (index >= 0) setPreviewIndex(index);
-  };
+  }, [clearPreviewTimer, setTransientActiveFrameId, worksetFrames]);
+
+  useEffect(() => {
+    if (!open || step !== 1 || collapsedStep === 1 || !activeFrameId
+      || editorFrameId || imagePreview || reduceModalOpen || similarityModalOpen || workbenchCloseConfirmOpen) return;
+    const handleFrameNavigation = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+        || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') || isVisiblePopupOpen()) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="combobox"], [role="menu"]')) return;
+      const index = frames.findIndex(frame => frame.id === activeFrameId);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = frames[Math.max(0, Math.min(frames.length - 1, index + (event.key === 'ArrowRight' ? 1 : -1)))];
+      setActiveFrame(next);
+      const tile = frameGridRef.current?.querySelector<HTMLElement>(`[data-frame-id="${CSS.escape(next.id)}"]`);
+      tile?.focus({ preventScroll: true });
+      tile?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+    window.addEventListener('keydown', handleFrameNavigation);
+    return () => window.removeEventListener('keydown', handleFrameNavigation);
+  }, [activeFrameId, collapsedStep, editorFrameId, frames, imagePreview, open, reduceModalOpen, setActiveFrame, similarityModalOpen, step, workbenchCloseConfirmOpen]);
 
   const toggleWorksetFrame = (id: string) => {
     const target = frames.find(frame => frame.id === id);
@@ -1234,109 +1235,33 @@ export default function FrameExtractionModal({
     setTransientActiveFrameId(worksetFrames[next].id);
   };
 
-  const applyBackgroundToFrames = async (targets: VideoSpriteFrame[]) => {
-    if (!targets.length) {
-      message.warning('没有可处理的帧');
-      return false;
-    }
+  const applyEditsToFrames = async (edits: WorksetFrameEdits) => {
+    const current = frames.find(frame => frame.id === edits.current.id);
+    if (!current || !worksetFrames.length || !edits.operations.length || worksetEditLoading) return false;
+    const targets = current.included ? worksetFrames : [...worksetFrames, current];
     const requestEpoch = workspaceEpochRef.current;
     const requestRevision = documentRevisionRef.current;
-    const sourceUrlByFrameId = new Map(targets.map(frame => [frame.id, getFrameExportUrl(frame)]));
-    const editedTargetIds = new Set(targets.filter(frame => frame.editedUrl).map(frame => frame.id));
-    setBackgroundLoading(true);
-    try {
-      const res = await apiService.removeVideoFrameBackgrounds({
-        frame_urls: targets.map(frame => sourceUrlByFrameId.get(frame.id)!),
-        ...bg.toRequest(),
-      });
-      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
-      const resultQueues = new Map<string, string[]>();
-      res.frames.forEach(item => {
-        const queue = resultQueues.get(item.source_url) || [];
-        queue.push(item.image_url);
-        resultQueues.set(item.source_url, queue);
-      });
-      const resultByFrameId = new Map<string, string>();
-      targets.forEach(frame => {
-        const nextUrl = resultQueues.get(sourceUrlByFrameId.get(frame.id)!)?.shift();
-        if (nextUrl) resultByFrameId.set(frame.id, nextUrl);
-      });
-      commitFrames(`处理 ${resultByFrameId.size} 帧背景`, prev => prev.map(frame => {
-        const nextUrl = resultByFrameId.get(frame.id);
-        return nextUrl ? {
-          ...frame,
-          backgroundRemovedUrl: nextUrl,
-          editedUrl: undefined,
-          width: frame.width,
-          height: frame.height,
-          markers: frame.markers.filter(marker => marker !== 'manual'),
-        } : frame;
-      }));
-      const replacedEdits = Array.from(resultByFrameId.keys()).filter(id => editedTargetIds.has(id)).length;
-      message.success(replacedEdits
-        ? `已基于当前画面处理 ${res.frames.length} 帧背景，并合并 ${replacedEdits} 个编辑结果（可撤销）`
-        : `已处理 ${res.frames.length} 帧背景`);
-      return true;
-    } catch (err: unknown) {
-      if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
-        message.error(getErrorMessage(err, '批量背景处理失败'));
-      }
-      return false;
-    } finally {
-      if (requestEpoch === workspaceEpochRef.current) setBackgroundLoading(false);
-    }
-  };
-
-  const applyUpscaleToFrames = async (
-    targets: VideoSpriteFrame[],
-    method: ImageUpscaleMethodId,
-    scale: 2 | 4,
-    colorReplacement?: WorksetColorReplacementOptions,
-  ) => {
-    if (!targets.length) {
-      message.warning('没有可处理的帧');
-      return false;
-    }
-    const requestEpoch = workspaceEpochRef.current;
-    const requestRevision = documentRevisionRef.current;
-    const sourceUrlByFrameId = new Map(targets.map(frame => [frame.id, getFrameExportUrl(frame)]));
+    const isCurrent = () => requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current;
     setWorksetEditLoading(true);
+    setWorksetEditProgress('正在准备批量编辑…');
+    clearPreviewTimer();
+    setPreviewPlaying(false);
     try {
-      let colorReplacementCount = 0;
-      if (colorReplacement) {
-        for (const frame of targets) {
-          if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
-          const sourceUrl = sourceUrlByFrameId.get(frame.id)!;
-          const image = await replaceImageColors(sourceUrl, colorReplacement);
-          if (!image) continue;
-          const saved = await apiService.saveEditedVideoFrame({
-            image,
-            base_frame_url: sourceUrl,
-            preview_id: previewId ?? undefined,
-          });
-          sourceUrlByFrameId.set(frame.id, saved.image_url);
-          colorReplacementCount += 1;
-        }
-      }
-      const res = await apiService.upscaleImageBatch({
-        frame_urls: targets.map(frame => sourceUrlByFrameId.get(frame.id)!),
-        method,
-        scale,
+      const results = await runFrameEditBatch(targets, edits, {
+        isCurrent,
+        render: (target, operations, index) => renderFrameEdits(
+          getFrameExportUrl(target), operations, apiService, isCurrent,
+          operation => setWorksetEditProgress(`第 ${index + 1}/${targets.length} 帧 · 操作 ${operation}/${operations.length}`),
+        ),
+        save: (target, rendered) => apiService.saveEditedVideoFrame({
+          image: rendered.image,
+          base_frame_url: getFrameExportUrl(target),
+          preview_id: previewId ?? undefined,
+        }),
       });
-      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
-      const resultQueues = new Map<string, typeof res.frames>();
-      res.frames.forEach(item => {
-        const queue = resultQueues.get(item.source_url) || [];
-        queue.push(item);
-        resultQueues.set(item.source_url, queue);
-      });
-      const resultByFrameId = new Map<string, (typeof res.frames)[number]>();
-      targets.forEach(frame => {
-        const result = resultQueues.get(sourceUrlByFrameId.get(frame.id)!)?.shift();
-        if (result) resultByFrameId.set(frame.id, result);
-      });
-      commitFrames(`放大增强 ${resultByFrameId.size} 帧`, prev => prev.map(frame => {
-        const result = resultByFrameId.get(frame.id);
+      if (!results || !isCurrent()) return false;
+      commitFrames(`应用 ${edits.operations.length} 项编辑到 ${results.size} 帧`, prev => prev.map(frame => {
+        const result = results.get(frame.id);
         return result ? {
           ...frame,
           editedUrl: result.image_url,
@@ -1345,73 +1270,16 @@ export default function FrameExtractionModal({
           markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
         } : frame;
       }));
-      message.success(colorReplacementCount
-        ? `已先对 ${colorReplacementCount} 帧应用换色，再将 ${scale}x 放大增强应用到 ${resultByFrameId.size} 帧`
-        : `已将 ${scale}x 放大增强应用到 ${resultByFrameId.size} 帧`);
+      message.success(`已保存当前帧，并将 ${edits.operations.length} 项编辑应用到工作集`);
       return true;
     } catch (err: unknown) {
-      if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
-        message.error(getErrorMessage(err, '批量放大增强失败'));
-      }
+      if (isCurrent()) message.error(getErrorMessage(err, '批量编辑失败，编辑内容已保留，可重试'));
       return false;
     } finally {
-      if (requestEpoch === workspaceEpochRef.current) setWorksetEditLoading(false);
-    }
-  };
-
-  const applyColorReplacementToFrames = async (
-    targets: VideoSpriteFrame[],
-    options: WorksetColorReplacementOptions,
-  ) => {
-    if (!targets.length) {
-      message.warning('没有可处理的帧');
-      return false;
-    }
-    const requestEpoch = workspaceEpochRef.current;
-    const requestRevision = documentRevisionRef.current;
-    setWorksetEditLoading(true);
-    try {
-      const results = new Map<string, { imageUrl: string; width: number; height: number }>();
-      for (const frame of targets) {
-        if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
-        const sourceUrl = getFrameExportUrl(frame);
-        const image = await replaceImageColors(sourceUrl, options);
-        if (!image) continue;
-        const saved = await apiService.saveEditedVideoFrame({
-          image,
-          base_frame_url: sourceUrl,
-          preview_id: previewId ?? undefined,
-        });
-        results.set(frame.id, {
-          imageUrl: saved.image_url,
-          width: saved.width,
-          height: saved.height,
-        });
+      if (requestEpoch === workspaceEpochRef.current) {
+        setWorksetEditLoading(false);
+        setWorksetEditProgress('');
       }
-      if (requestEpoch !== workspaceEpochRef.current || requestRevision !== documentRevisionRef.current) return false;
-      if (!results.size) {
-        message.warning('工作集中未找到匹配的目标颜色');
-        return false;
-      }
-      commitFrames(`换色 ${results.size} 帧`, prev => prev.map(frame => {
-        const result = results.get(frame.id);
-        return result ? {
-          ...frame,
-          editedUrl: result.imageUrl,
-          width: result.width,
-          height: result.height,
-          markers: frame.markers.includes('manual') ? frame.markers : [...frame.markers, 'manual'],
-        } : frame;
-      }));
-      message.success(`已将换色应用到 ${results.size} 帧`);
-      return true;
-    } catch (err: unknown) {
-      if (requestEpoch === workspaceEpochRef.current && requestRevision === documentRevisionRef.current) {
-        message.error(getErrorMessage(err, '批量换色失败'));
-      }
-      return false;
-    } finally {
-      if (requestEpoch === workspaceEpochRef.current) setWorksetEditLoading(false);
     }
   };
 
@@ -1801,7 +1669,7 @@ export default function FrameExtractionModal({
 
                 <Spin spinning={loadingPreview || backgroundLoading}>
                   {frames.length ? (
-                    <div className={`frame-editor-grid frame-organize-grid ${worksetMultiSelecting ? 'is-multi-selecting' : ''}`}>
+                    <div ref={frameGridRef} className={`frame-editor-grid frame-organize-grid ${worksetMultiSelecting ? 'is-multi-selecting' : ''}`}>
                       {frames.map(frame => {
                         const isCurrent = activeFrame?.id === frame.id;
                         return (
@@ -1809,6 +1677,8 @@ export default function FrameExtractionModal({
                             key={frame.id}
                             role="button"
                             tabIndex={0}
+                            data-frame-id={frame.id}
+                            aria-current={isCurrent ? 'true' : undefined}
                             aria-label={`第 ${frame.index + 1} 帧${frame.included ? '，已加入工作集' : '，未加入工作集'}`}
                             className={`frame-editor-tile ${frame.included ? 'workset' : ''} ${isCurrent ? 'preview-current' : ''} ${!frame.included ? 'excluded' : ''}`}
                             onClick={() => setActiveFrame(frame)}
@@ -1872,7 +1742,7 @@ export default function FrameExtractionModal({
                   <div className="frame-organize-playback">
                     <div className="frame-organize-playback-row">
                       <span>第</span>
-                      <InputNumber size="small" min={1} max={Math.max(1, worksetFrames.length)} value={activeWorksetIndex + 1 || 1} onChange={jumpToFrame} />
+                      <InputNumber size="small" min={1} max={Math.max(1, worksetFrames.length)} value={activeWorksetIndex >= 0 ? activeWorksetIndex + 1 : null} placeholder="—" disabled={!worksetFrames.length} onChange={jumpToFrame} />
                       <span>/ {worksetFrames.length || 0} 帧</span>
                     </div>
                     <Slider
@@ -2095,6 +1965,7 @@ export default function FrameExtractionModal({
         </Modal>
         {editorFrame && (
           <FrameCanvasEditor
+            key={editorFrame.id}
             frame={editorFrame}
             previewId={previewId}
             open={!!editorFrame}
@@ -2104,9 +1975,8 @@ export default function FrameExtractionModal({
             worksetFrameCount={worksetFrames.length}
             onClose={() => setEditorFrameId(null)}
             onSaved={(url, width, height) => saveEditedFrame(editorFrame.id, url, width, height)}
-            onApplyBackgroundWorkset={() => applyBackgroundToFrames(worksetFrames)}
-            onApplyUpscaleWorkset={(method, scale, colorReplacement) => applyUpscaleToFrames(worksetFrames, method, scale, colorReplacement)}
-            onApplyColorReplacementWorkset={options => applyColorReplacementToFrames(worksetFrames, options)}
+            worksetProgress={worksetEditProgress}
+            onApplyEditsWorkset={applyEditsToFrames}
             onRestoreBackgroundWorkset={() => restoreFrames(worksetFrames)}
           />
         )}
@@ -2127,16 +1997,13 @@ export default function FrameExtractionModal({
       )}
       okText="确认关闭"
       cancelText="继续编辑"
-      okButtonProps={{ danger: true }}
       maskClosable={false}
       onOk={confirmWorkbenchClose}
       onCancel={cancelWorkbenchClose}
       destroyOnHidden
     >
       <p className="image-editor-close-confirm-copy">
-        {frames.length
-          ? `关闭后，已提取的 ${frames.length} 帧、工作集整理和未导出结果都将丢失。`
-          : '关闭后，当前工作台设置将被清空。'}
+        当前视频的工作区会保留，再次点击“帧导出”即可继续。刷新页面或关闭浏览器后会清空工作区。
       </p>
     </Modal>
     </>
@@ -2170,6 +2037,7 @@ export function ImageEditorModal({ open, imageUrl, onClose, onSaved }: ImageEdit
 
   return (
     <FrameCanvasEditor
+      key={frame.id}
       frame={frame}
       previewId={null}
       open={open}
@@ -2181,9 +2049,7 @@ export function ImageEditorModal({ open, imageUrl, onClose, onSaved }: ImageEdit
       contextLabel="聊天结果"
       onClose={onClose}
       onSaved={url => onSaved?.(url)}
-      onApplyBackgroundWorkset={async () => false}
-      onApplyUpscaleWorkset={async () => false}
-      onApplyColorReplacementWorkset={async () => false}
+      onApplyEditsWorkset={async () => false}
       onRestoreBackgroundWorkset={() => undefined}
     />
   );
@@ -2229,13 +2095,8 @@ interface FrameCanvasEditorProps {
   worksetFrameCount: number;
   onClose: () => void;
   onSaved: (url: string, width: number, height: number) => void;
-  onApplyBackgroundWorkset: () => Promise<boolean>;
-  onApplyUpscaleWorkset: (
-    method: ImageUpscaleMethodId,
-    scale: 2 | 4,
-    colorReplacement?: WorksetColorReplacementOptions,
-  ) => Promise<boolean>;
-  onApplyColorReplacementWorkset: (options: WorksetColorReplacementOptions) => Promise<boolean>;
+  onApplyEditsWorkset: (edits: WorksetFrameEdits) => Promise<boolean>;
+  worksetProgress?: string;
   onRestoreBackgroundWorkset: () => void;
   showBatchActions?: boolean;
   contextLabel?: string;
@@ -2251,9 +2112,8 @@ function FrameCanvasEditor({
   worksetFrameCount,
   onClose,
   onSaved,
-  onApplyBackgroundWorkset,
-  onApplyUpscaleWorkset,
-  onApplyColorReplacementWorkset,
+  onApplyEditsWorkset,
+  worksetProgress,
   onRestoreBackgroundWorkset,
   showBatchActions = true,
   contextLabel,
@@ -2261,6 +2121,9 @@ function FrameCanvasEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokeCanvasRef = useRef<HTMLCanvasElement>(null);
   const initialCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const restoreCanvasRef = useRef<{ key: string; initial: HTMLCanvasElement; canvas: HTMLCanvasElement } | null>(null);
+  const previousCropToolRef = useRef<Exclude<CanvasTool, 'crop'>>('replace');
+  const cropOriginalAspectRef = useRef(1);
   const restoreStrokeSourceRef = useRef<ImageData | null>(null);
   const restoreStrokeMaskRef = useRef<HTMLCanvasElement | null>(null);
   const restoreStrokeLayerRef = useRef<HTMLCanvasElement | null>(null);
@@ -2276,20 +2139,20 @@ function FrameCanvasEditor({
   const backgroundPreviewSourceRef = useRef<string | null>(null);
   const observedBackgroundOptionsKeyRef = useRef('');
   const skipReloadUrlRef = useRef<string | null>(null);
+  const savedImageUrlRef = useRef<string | null>(null);
+  const recipeRef = useRef(new FrameEditRecipe());
+  const [operationCount, setOperationCount] = useState(0);
+  const pendingStrokeRef = useRef<(FrameStrokeOperation & { points: FrameEditPoint[] }) | null>(null);
+  const softenOperationIndexRef = useRef<number | null>(null);
+  const backgroundOperationIndexRef = useRef<number | null>(null);
+  const backgroundHistoryRef = useRef<CanvasHistoryEntry | null>(null);
   const historyRef = useRef<CanvasHistoryEntry[]>([]);
   const redoRef = useRef<CanvasHistoryEntry[]>([]);
   const contentDirtyRef = useRef(false);
   const parameterDirtyRef = useRef(false);
   const dirtyRef = useRef(false);
   const closeConfirmOpenRef = useRef(false);
-  const liveFloodRef = useRef<{ tool: 'fill' | 'replace'; x: number; y: number; source: ImageData } | null>(null);
-  const floodOutputRef = useRef<ImageData | null>(null);
-  const floodSeenRef = useRef<Uint8Array | null>(null);
-  const floodStackRef = useRef<Int32Array | null>(null);
-  const worksetReplaceTargetRef = useRef<Pick<
-    WorksetColorReplacementOptions,
-    'targetColor' | 'targetXRatio' | 'targetYRatio'
-  > | null>(null);
+  const liveFloodRef = useRef<{ tool: 'fill' | 'replace'; x: number; y: number; source: ImageData; operationIndex: number } | null>(null);
   const softenSourceRef = useRef<ImageData | null>(null);
   const floodRenderTimerRef = useRef<number | null>(null);
   const floodRenderFrameRef = useRef<number | null>(null);
@@ -2298,6 +2161,9 @@ function FrameCanvasEditor({
   const upscaleMethodRef = useRef<ImageUpscaleMethodId>('realesrgan_anime');
   const upscaleScaleRef = useRef<2 | 4>(2);
   const [tool, setTool] = useState<CanvasTool>('replace');
+  const [cropRect, setCropRect] = useState<FrameRect | null>(null);
+  const [cropRatio, setCropRatio] = useState('free');
+  const [cropAspect, setCropAspect] = useState<number | null>(null);
   const [color, setColor] = useState('#ffffff');
   const [replaceWithTransparency, setReplaceWithTransparency] = useState(true);
   const [eraserMode, setEraserMode] = useState<EraserMode>('restore');
@@ -2337,6 +2203,12 @@ function FrameCanvasEditor({
   const backgroundOptionsToRequest = backgroundOptions.toRequest;
   const editorBusy = imageLoading || saving || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading || worksetLoading;
   const editorInteractive = imageReady && !editorBusy;
+  const cropPixels = cropRect && canvasSize.width && canvasSize.height
+    ? frameCropBounds(canvasSize, frameCropOperation(cropRect, canvasSize)) : null;
+  const cancelCrop = useCallback(() => {
+    setCropRect(null);
+    setTool(current => current === 'crop' ? previousCropToolRef.current : current);
+  }, []);
   const selectedUpscaleMethod = upscaleMethods.find(method => method.id === upscaleMethod) ?? upscaleMethods[0];
   const selectedUpscaleScale = selectedUpscaleMethod?.scale_availability.find(item => item.scale === upscaleScale);
   const upscaleMethodOptions = useMemo(() => {
@@ -2380,18 +2252,19 @@ function FrameCanvasEditor({
       setUpscaleScale(method.supported_scales[0]);
     }
   };
-  let batchApplyDisabledReason: string | undefined;
-  if (worksetLoading) batchApplyDisabledReason = '正在处理工作集';
-  else if (tool !== 'background' && tool !== 'upscale' && tool !== 'replace') batchApplyDisabledReason = '当前工具不支持应用到工作集';
-  else if (!imageReady) batchApplyDisabledReason = '当前图片尚未载入';
-  else if (!worksetFrameCount) batchApplyDisabledReason = '工作集为空';
-  else if (saving) batchApplyDisabledReason = '正在保存当前帧';
-  else if (tool === 'replace' && (!replacePreviewActive || liveFloodRef.current?.tool !== 'replace')) batchApplyDisabledReason = '请先点击画布选择换色目标';
-  else if (tool === 'upscale' && upscaleLoading) batchApplyDisabledReason = '正在放大当前帧';
-  else if (tool === 'upscale' && upscaleMethodDisabledReason) batchApplyDisabledReason = upscaleMethodDisabledReason;
-  else if (backgroundLoading) batchApplyDisabledReason = '正在批量处理背景';
-  else if (backgroundPreviewLoading) batchApplyDisabledReason = '正在生成当前帧背景预览';
-  else if (backgroundPreviewPending) batchApplyDisabledReason = '正在等待当前帧背景预览';
+  const batchApplyDisabledReason = editorBusy ? '正在处理图片，请稍候'
+    : !imageReady ? '当前图片尚未载入'
+    : tool === 'crop' ? '请先应用或取消裁剪'
+    : !worksetFrameCount ? '工作集为空'
+    : !operationCount ? '请先在当前图片上应用编辑操作'
+    : undefined;
+
+  const recordOperation = useCallback((operation: FrameEditOperation, index?: number) => {
+    const recipe = recipeRef.current;
+    if (index !== undefined && index < recipe.operations.length) recipe.replace(index, operation);
+    else recipe.append(operation);
+    setOperationCount(recipe.operations.length);
+  }, []);
 
   const syncDirty = useCallback(() => {
     const dirty = contentDirtyRef.current || parameterDirtyRef.current;
@@ -2468,13 +2341,19 @@ function FrameCanvasEditor({
   const resetBackgroundPreview = useCallback(() => {
     cancelBackgroundPreviewActivity();
     backgroundPreviewSourceRef.current = null;
+    backgroundOperationIndexRef.current = null;
+    backgroundHistoryRef.current = null;
     observedBackgroundOptionsKeyRef.current = '';
     setBackgroundPreviewEnabled(false);
   }, [cancelBackgroundPreviewActivity]);
 
   useEffect(() => () => {
+    imageLoadIdRef.current += 1;
     backgroundPreviewRequestIdRef.current += 1;
     if (backgroundPreviewTimerRef.current !== null) window.clearTimeout(backgroundPreviewTimerRef.current);
+    if (floodRenderTimerRef.current !== null) window.clearTimeout(floodRenderTimerRef.current);
+    if (floodRenderFrameRef.current !== null) window.cancelAnimationFrame(floodRenderFrameRef.current);
+    if (softenRenderFrameRef.current !== null) window.cancelAnimationFrame(softenRenderFrameRef.current);
   }, []);
 
   const pushHistory = useCallback(() => {
@@ -2485,6 +2364,7 @@ function FrameCanvasEditor({
     historyRef.current.push({
       image,
       contentDirty: contentDirtyRef.current,
+      operations: recipeRef.current.operations,
     });
     trimCanvasHistory(historyRef.current);
     redoRef.current = [];
@@ -2512,6 +2392,7 @@ function FrameCanvasEditor({
     const canvas = canvasRef.current;
     const strokeCanvas = strokeCanvasRef.current;
     if (!canvas) return;
+    const sizeChanged = canvas.width !== entry.image.width || canvas.height !== entry.image.height;
     canvas.width = entry.image.width;
     canvas.height = entry.image.height;
     if (strokeCanvas) {
@@ -2523,15 +2404,18 @@ function FrameCanvasEditor({
     ctx.putImageData(entry.image, 0, 0);
     setCanvasSize({ width: entry.image.width, height: entry.image.height });
     updateContentDirty(entry.contentDirty);
+    recipeRef.current.restore(entry.operations);
+    setOperationCount(entry.operations.length);
+    resetBackgroundPreview();
+    softenOperationIndexRef.current = null;
     restoreStrokeSourceRef.current = null;
     restoreStrokeMaskRef.current = null;
     restoreStrokeLayerRef.current = null;
     liveFloodRef.current = null;
     setReplacePreviewActive(false);
     softenSourceRef.current = null;
-    autoFitRef.current = true;
-    window.requestAnimationFrame(fitCanvasToStage);
-  }, [fitCanvasToStage, updateContentDirty]);
+    if (sizeChanged) window.requestAnimationFrame(fitCanvasToStage);
+  }, [fitCanvasToStage, resetBackgroundPreview, updateContentDirty]);
 
   const changeCanvasZoom = useCallback((value: number, anchorClientX?: number, anchorClientY?: number) => {
     const stage = wrapRef.current;
@@ -2561,6 +2445,7 @@ function FrameCanvasEditor({
   const loadImage = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    cancelCrop();
     cancelPendingPreviewRender();
     resetBackgroundPreview();
     const loadId = imageLoadIdRef.current + 1;
@@ -2574,11 +2459,15 @@ function FrameCanvasEditor({
         image.crossOrigin = 'anonymous';
         image.onload = () => resolve(image);
         image.onerror = () => reject(new Error('图片加载失败'));
-        image.src = baseUrl;
+        image.src = savedImageUrlRef.current ?? baseUrl;
       });
       if (loadId !== imageLoadIdRef.current) return;
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
+      if (strokeCanvasRef.current) {
+        strokeCanvasRef.current.width = canvas.width;
+        strokeCanvasRef.current.height = canvas.height;
+      }
       setCanvasSize({ width: img.naturalWidth, height: img.naturalHeight });
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -2597,11 +2486,14 @@ function FrameCanvasEditor({
       setImageReady(true);
       historyRef.current = [];
       redoRef.current = [];
-      worksetReplaceTargetRef.current = null;
       restoreStrokeSourceRef.current = null;
       restoreStrokeMaskRef.current = null;
       restoreStrokeLayerRef.current = null;
-      updateContentDirty(false);
+      clearDirty();
+      recipeRef.current.restoreSaved();
+      setOperationCount(recipeRef.current.operations.length);
+      softenOperationIndexRef.current = null;
+      pendingStrokeRef.current = null;
       liveFloodRef.current = null;
       setReplacePreviewActive(false);
       softenSourceRef.current = null;
@@ -2615,75 +2507,26 @@ function FrameCanvasEditor({
     } finally {
       if (loadId === imageLoadIdRef.current) setImageLoading(false);
     }
-  }, [baseUrl, cancelPendingPreviewRender, fitCanvasToStage, resetBackgroundPreview, updateContentDirty]);
+  }, [baseUrl, cancelCrop, cancelPendingPreviewRender, clearDirty, fitCanvasToStage, resetBackgroundPreview]);
 
   const requestImageLoad = useCallback(() => {
     void loadImage().catch((err: unknown) => message.error(getErrorMessage(err, '编辑器载入图片失败')));
   }, [loadImage]);
 
-  const runBackgroundPreview = useCallback(async (request: VideoBackgroundOptions) => {
-    const source = backgroundPreviewSourceRef.current;
-    if (!source) return;
-    cancelBackgroundPreviewActivity();
-    const requestId = backgroundPreviewRequestIdRef.current + 1;
-    backgroundPreviewRequestIdRef.current = requestId;
-    setBackgroundPreviewLoading(true);
-    try {
-      const res = await apiService.removeBackground({
-        image: source,
-        ...request,
-      });
-      const imageUrl = res.image_url;
-      if (requestId !== backgroundPreviewRequestIdRef.current || !imageUrl) return;
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const nextImage = new window.Image();
-        nextImage.crossOrigin = 'anonymous';
-        nextImage.onload = () => resolve(nextImage);
-        nextImage.onerror = () => reject(new Error('背景预览加载失败'));
-        nextImage.src = imageUrl;
-      });
-      if (requestId !== backgroundPreviewRequestIdRef.current) return;
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) return;
-      cancelPendingPreviewRender();
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      const strokeCanvas = strokeCanvasRef.current;
-      if (strokeCanvas) {
-        strokeCanvas.width = image.naturalWidth;
-        strokeCanvas.height = image.naturalHeight;
-      }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0);
-      updateContentDirty(true);
-      setCanvasSize({ width: image.naturalWidth, height: image.naturalHeight });
-      liveFloodRef.current = null;
-      setReplacePreviewActive(false);
-      softenSourceRef.current = null;
-    } catch (err: unknown) {
-      if (requestId === backgroundPreviewRequestIdRef.current) {
-        message.error(getErrorMessage(err, '背景预览失败'));
-      }
-    } finally {
-      if (requestId === backgroundPreviewRequestIdRef.current) {
-        setBackgroundPreviewLoading(false);
-      }
-    }
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, updateContentDirty]);
-
-  const applyBackgroundPreview = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    cancelBackgroundPreviewActivity();
+  useEffect(() => {
+    if (open) return;
+    imageLoadIdRef.current += 1;
+    initialCanvasRef.current = null;
+    restoreCanvasRef.current = null;
+    recipeRef.current = new FrameEditRecipe();
+    setOperationCount(0);
+    skipReloadUrlRef.current = null;
+    savedImageUrlRef.current = null;
+    setSaving(false);
+    setUpscaleLoading(false);
+    resetBackgroundPreview();
     cancelPendingPreviewRender();
-    pushHistory();
-    backgroundPreviewSourceRef.current = canvas.toDataURL('image/png');
-    worksetReplaceTargetRef.current = null;
-    observedBackgroundOptionsKeyRef.current = JSON.stringify(backgroundOptionsState);
-    setBackgroundPreviewEnabled(true);
-    void runBackgroundPreview(backgroundOptionsToRequest());
-  };
+  }, [cancelPendingPreviewRender, open, resetBackgroundPreview]);
 
   useEffect(() => {
     if (!open) return;
@@ -2760,34 +2603,18 @@ function FrameCanvasEditor({
   }, [open, tool]);
 
   useEffect(() => {
-    if (!backgroundPreviewEnabled || !open || !imageReady || saving || backgroundLoading) return;
-    const key = JSON.stringify(backgroundOptionsState);
-    if (key === observedBackgroundOptionsKeyRef.current) return;
-    observedBackgroundOptionsKeyRef.current = key;
-    if (backgroundPreviewTimerRef.current !== null) window.clearTimeout(backgroundPreviewTimerRef.current);
-    backgroundPreviewRequestIdRef.current += 1;
-    setBackgroundPreviewLoading(false);
-    setBackgroundPreviewPending(true);
-    backgroundPreviewTimerRef.current = window.setTimeout(() => {
-      backgroundPreviewTimerRef.current = null;
-      setBackgroundPreviewPending(false);
-      void runBackgroundPreview(backgroundOptionsToRequest());
-    }, 350);
-    return cancelBackgroundPreviewActivity;
-  }, [backgroundLoading, backgroundOptionsState, backgroundOptionsToRequest, backgroundPreviewEnabled, cancelBackgroundPreviewActivity, imageReady, open, runBackgroundPreview, saving]);
-
-  useEffect(() => {
     if (!open) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isVisiblePopupOpen()) return;
       if (closeConfirmOpenRef.current) return;
       if (editorBusy) return;
       event.preventDefault();
+      if (tool === 'crop') { cancelCrop(); return; }
       requestClose();
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [editorBusy, open, requestClose]);
+  }, [cancelCrop, editorBusy, open, requestClose, tool]);
 
   useEffect(() => {
     if (!open || !isDirty) return;
@@ -2808,221 +2635,53 @@ function FrameCanvasEditor({
     };
   };
 
-  const renderRestoreStroke = () => {
-    const canvas = canvasRef.current;
-    const initialCanvas = initialCanvasRef.current;
-    const source = restoreStrokeSourceRef.current;
-    const maskCanvas = restoreStrokeMaskRef.current;
-    const restoreLayer = restoreStrokeLayerRef.current;
-    const ctx = canvas?.getContext('2d');
-    const layerCtx = restoreLayer?.getContext('2d');
-    if (!canvas || !initialCanvas || !source || !maskCanvas || !restoreLayer || !ctx || !layerCtx) return;
-    if (source.width !== canvas.width || source.height !== canvas.height) return;
-
-    ctx.putImageData(source, 0, 0);
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.drawImage(maskCanvas, 0, 0);
-    ctx.restore();
-
-    layerCtx.clearRect(0, 0, restoreLayer.width, restoreLayer.height);
-    layerCtx.save();
-    layerCtx.drawImage(initialCanvas, 0, 0, restoreLayer.width, restoreLayer.height);
-    layerCtx.globalCompositeOperation = 'destination-in';
-    layerCtx.drawImage(maskCanvas, 0, 0);
-    layerCtx.restore();
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(restoreLayer, 0, 0);
-    ctx.restore();
-  };
-
-  const drawAt = (x: number, y: number) => {
+  const paintStroke = (from: FrameEditPoint | null, to: FrameEditPoint) => {
     const canvas = canvasRef.current;
     const strokeCanvas = strokeCanvasRef.current;
-    if (!canvas || !strokeCanvas) return;
-    if (tool === 'eraser') {
-      if (eraserMode === 'restore') {
-        const maskCtx = restoreStrokeMaskRef.current?.getContext('2d');
-        if (!maskCtx) return;
-        maskCtx.save();
-        maskCtx.fillStyle = '#fff';
-        maskCtx.beginPath();
-        maskCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-        maskCtx.fill();
-        maskCtx.restore();
-        renderRestoreStroke();
-      } else {
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-      return;
-    }
-    const ctx = strokeCanvas.getContext('2d');
+    const operation = pendingStrokeRef.current;
+    if (!canvas || !strokeCanvas || !operation) return;
+    const restore = operation.type === 'eraser' && operation.eraserMode === 'restore';
+    const target = restore ? restoreStrokeMaskRef.current : operation.type === 'brush' ? strokeCanvas : canvas;
+    const ctx = target?.getContext('2d');
     if (!ctx) return;
     ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-    ctx.fill();
+    if (operation.type === 'eraser' && !restore) ctx.globalCompositeOperation = 'destination-out';
+    paintFrameStrokeSegment(ctx, from, to, operation.sizeRatio * Math.min(canvas.width, canvas.height),
+      operation.type === 'brush' ? operation.color : '#ffffff');
     ctx.restore();
-  };
-
-  const drawSegment = (from: { x: number; y: number }, to: { x: number; y: number }) => {
-    const canvas = canvasRef.current;
-    const strokeCanvas = strokeCanvasRef.current;
-    if (!canvas || !strokeCanvas) return;
-    if (tool === 'eraser') {
-      if (eraserMode === 'restore') {
-        const maskCtx = restoreStrokeMaskRef.current?.getContext('2d');
-        if (!maskCtx) return;
-        maskCtx.save();
-        maskCtx.strokeStyle = '#fff';
-        maskCtx.lineWidth = brushSize;
-        maskCtx.lineCap = 'round';
-        maskCtx.lineJoin = 'round';
-        maskCtx.beginPath();
-        maskCtx.moveTo(from.x, from.y);
-        maskCtx.lineTo(to.x, to.y);
-        maskCtx.stroke();
-        maskCtx.restore();
-        renderRestoreStroke();
-      } else {
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = brushSize;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#000';
-        ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.stroke();
-        ctx.restore();
-      }
-      return;
+    if (restore && restoreCanvasRef.current && restoreStrokeSourceRef.current && restoreStrokeMaskRef.current && restoreStrokeLayerRef.current) {
+      restoreFrameStroke(canvas, restoreCanvasRef.current.canvas, restoreStrokeSourceRef.current, restoreStrokeMaskRef.current, restoreStrokeLayerRef.current);
     }
-    const targetCanvas = tool === 'brush' ? strokeCanvas : canvas;
-    const ctx = targetCanvas.getContext('2d');
-    if (!ctx) return;
-    ctx.save();
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    ctx.restore();
   };
 
   const floodFill = useCallback((x: number, y: number, replaceOnly = false, source?: ImageData) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    let imageData: ImageData;
-    if (source) {
-      if (!floodOutputRef.current || floodOutputRef.current.width !== source.width || floodOutputRef.current.height !== source.height) {
-        floodOutputRef.current = new ImageData(source.width, source.height);
-      }
-      floodOutputRef.current.data.set(source.data);
-      imageData = floodOutputRef.current;
-    } else {
-      imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    }
-    const data = imageData.data;
-    const startX = Math.floor(x);
-    const startY = Math.floor(y);
-    const idx = (startY * canvas.width + startX) * 4;
-    const target = [data[idx], data[idx + 1], data[idx + 2], data[idx + 3]];
-    const rgb = hexToRgb(color);
-    const pixelCount = canvas.width * canvas.height;
-    if (replaceOnly) {
-      if (replaceWithTransparency) {
-        const result = applyHardTransparentReplacement(
-          data,
-          canvas.width,
-          canvas.height,
-          startX,
-          startY,
-          replaceTolerance,
-          replaceEdgeCleanup,
-          replaceMatchMode,
-          replaceEdgeEnhancementMode,
-        );
-        if (!result) return;
-        data.set(result);
-        ctx.putImageData(imageData, 0, 0);
-        return;
-      }
-
-      const result = applyConnectedColorReplacement(
-        data,
-        canvas.width,
-        canvas.height,
-        startX,
-        startY,
-        [target[0], target[1], target[2]],
-        [rgb.r, rgb.g, rgb.b],
-        colorReplaceTolerance,
-        opacity,
-      );
-      if (!result) return;
-      data.set(result);
-      ctx.putImageData(imageData, 0, 0);
-      return;
-    }
-
-    if (!floodSeenRef.current || floodSeenRef.current.length !== pixelCount) floodSeenRef.current = new Uint8Array(pixelCount);
-    else floodSeenRef.current.fill(0);
-    if (!floodStackRef.current || floodStackRef.current.length !== pixelCount) floodStackRef.current = new Int32Array(pixelCount);
-    const seen = floodSeenRef.current;
-    const stack = floodStackRef.current;
-    const startPoint = startY * canvas.width + startX;
-    let stackSize = 1;
-    stack[0] = startPoint;
-    seen[startPoint] = 1;
-    while (stackSize) {
-      const pointIndex = stack[--stackSize];
-      const p = pointIndex * 4;
-      const distance = Math.max(
-        Math.abs(data[p] - target[0]),
-        Math.abs(data[p + 1] - target[1]),
-        Math.abs(data[p + 2] - target[2]),
-        Math.abs(data[p + 3] - target[3]),
-      );
-      if (distance > fillTolerance) continue;
-      const sourceAlpha = opacity;
-      const destinationAlpha = data[p + 3] / 255;
-      const outputAlpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
-      if (outputAlpha > 0) {
-        data[p] = Math.round((rgb.r * sourceAlpha + data[p] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
-        data[p + 1] = Math.round((rgb.g * sourceAlpha + data[p + 1] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
-        data[p + 2] = Math.round((rgb.b * sourceAlpha + data[p + 2] * destinationAlpha * (1 - sourceAlpha)) / outputAlpha);
-      }
-      data[p + 3] = Math.round(outputAlpha * 255);
-      const cx = pointIndex % canvas.width;
-      let next = cx < canvas.width - 1 ? pointIndex + 1 : -1;
-      if (next >= 0 && !seen[next]) { seen[next] = 1; stack[stackSize++] = next; }
-      next = cx > 0 ? pointIndex - 1 : -1;
-      if (next >= 0 && !seen[next]) { seen[next] = 1; stack[stackSize++] = next; }
-      next = pointIndex < pixelCount - canvas.width ? pointIndex + canvas.width : -1;
-      if (next >= 0 && !seen[next]) { seen[next] = 1; stack[stackSize++] = next; }
-      next = pointIndex >= canvas.width ? pointIndex - canvas.width : -1;
-      if (next >= 0 && !seen[next]) { seen[next] = 1; stack[stackSize++] = next; }
-    }
-    ctx.putImageData(imageData, 0, 0);
-  }, [color, colorReplaceTolerance, fillTolerance, opacity, replaceEdgeCleanup, replaceEdgeEnhancementMode, replaceMatchMode, replaceTolerance, replaceWithTransparency]);
+    const preview = liveFloodRef.current;
+    if (!canvas || !ctx || !preview) return;
+    const pixels = source ?? ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = Math.min(pixels.width - 1, Math.max(0, Math.floor(x)));
+    const py = Math.min(pixels.height - 1, Math.max(0, Math.floor(y)));
+    const offset = (py * pixels.width + px) * 4;
+    const operation: FrameEditOperation = replaceOnly ? {
+      type: 'replace',
+      targetColor: [pixels.data[offset], pixels.data[offset + 1], pixels.data[offset + 2]],
+      targetXRatio: pixels.width > 1 ? px / (pixels.width - 1) : 0,
+      targetYRatio: pixels.height > 1 ? py / (pixels.height - 1) : 0,
+      replaceWithTransparency, replacementColor: color, opacity,
+      replaceTolerance, colorReplaceTolerance, replaceMatchMode, replaceEdgeCleanup, replaceEdgeEnhancementMode,
+    } : {
+      type: 'fill', xRatio: pixels.width > 1 ? px / (pixels.width - 1) : 0,
+      yRatio: pixels.height > 1 ? py / (pixels.height - 1) : 0,
+      color, opacity, tolerance: fillTolerance,
+    };
+    const data = applyFramePixelOperation(pixels, operation);
+    if (!data) return;
+    const result = ctx.createImageData(pixels.width, pixels.height);
+    result.data.set(data);
+    ctx.putImageData(result, 0, 0);
+    recordOperation(operation, preview.operationIndex);
+  }, [color, colorReplaceTolerance, fillTolerance, opacity, recordOperation, replaceEdgeCleanup, replaceEdgeEnhancementMode, replaceMatchMode, replaceTolerance, replaceWithTransparency]);
 
   useEffect(() => {
     const preview = liveFloodRef.current;
@@ -3038,66 +2697,178 @@ function FrameCanvasEditor({
     return cancelPendingPreviewRender;
   }, [cancelPendingPreviewRender, floodFill, open, tool]);
 
-  const renderSoftenedEdges = useCallback((source: ImageData, radiusValue: number) => {
+  const renderSoftenedEdges = useCallback((source: ImageData, radius: number) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    const radius = Math.max(1, Math.min(12, Math.round(radiusValue)));
-    const imageData = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
-    const { data, width, height } = imageData;
-    const sourceAlpha = new Uint8ClampedArray(width * height);
-    for (let i = 0; i < sourceAlpha.length; i += 1) sourceAlpha[i] = data[i * 4 + 3];
+    const index = softenOperationIndexRef.current;
+    if (!canvas || !ctx || index === null) return;
+    const operation = { type: 'soften' as const, radius };
+    const result = ctx.createImageData(source.width, source.height);
+    result.data.set(applyFramePixelOperation(source, operation)!);
+    ctx.putImageData(result, 0, 0);
+    recordOperation(operation, index);
+  }, [recordOperation]);
 
-    const horizontal = new Float32Array(width * height);
-    for (let y = 0; y < height; y += 1) {
-      let sum = 0;
-      for (let x = -radius; x <= radius; x += 1) {
-        const clamped = Math.max(0, Math.min(width - 1, x));
-        sum += sourceAlpha[y * width + clamped];
-      }
-      for (let x = 0; x < width; x += 1) {
-        horizontal[y * width + x] = sum / (radius * 2 + 1);
-        const removeX = Math.max(0, x - radius);
-        const addX = Math.min(width - 1, x + radius + 1);
-        sum += sourceAlpha[y * width + addX] - sourceAlpha[y * width + removeX];
-      }
+  const flushLivePreview = useCallback(() => {
+    cancelPendingPreviewRender();
+    const flood = liveFloodRef.current;
+    if (flood) floodFill(flood.x, flood.y, flood.tool === 'replace', flood.source);
+    if (softenSourceRef.current) renderSoftenedEdges(softenSourceRef.current, softenRadius);
+  }, [cancelPendingPreviewRender, floodFill, renderSoftenedEdges, softenRadius]);
+
+  const finishLivePreview = () => {
+    flushLivePreview();
+    resetBackgroundPreview();
+    liveFloodRef.current = null;
+    setReplacePreviewActive(false);
+    softenSourceRef.current = null;
+    softenOperationIndexRef.current = null;
+  };
+
+  const changeTool = (value: CanvasTool) => {
+    if (editorBusy || drawingRef.current) return;
+    finishLivePreview();
+    setCropRect(null);
+    if (value === 'crop') {
+      if (!imageReady || !canvasSize.width || !canvasSize.height) return;
+      if (tool !== 'crop') previousCropToolRef.current = tool;
+      cropOriginalAspectRef.current = canvasSize.width / canvasSize.height;
+      setCropRatio('free');
+      setCropAspect(null);
+      setCropRect(centeredFrameCrop(canvasSize, null));
     }
+    setTool(value);
+  };
 
-    for (let x = 0; x < width; x += 1) {
-      let sum = 0;
-      for (let y = -radius; y <= radius; y += 1) {
-        const clamped = Math.max(0, Math.min(height - 1, y));
-        sum += horizontal[clamped * width + x];
-      }
-      for (let y = 0; y < height; y += 1) {
-        data[(y * width + x) * 4 + 3] = Math.round(sum / (radius * 2 + 1));
-        const removeY = Math.max(0, y - radius);
-        const addY = Math.min(height - 1, y + radius + 1);
-        sum += horizontal[addY * width + x] - horizontal[removeY * width + x];
-      }
+  const applyGeometry = (operation: FrameGeometryOperation) => {
+    const canvas = canvasRef.current;
+    if (!editorInteractive || drawingRef.current || !canvas) return;
+    finishLivePreview();
+    pushHistory();
+    transformFrameCanvas(canvas, operation);
+    if (strokeCanvasRef.current) {
+      strokeCanvasRef.current.width = canvas.width;
+      strokeCanvasRef.current.height = canvas.height;
     }
+    recordOperation(operation);
+    updateContentDirty(true);
+    setCanvasSize({ width: canvas.width, height: canvas.height });
+    setBrushPreview(null);
+    if (operation.type === 'crop') window.requestAnimationFrame(fitCanvasToStage);
+  };
 
-    ctx.putImageData(imageData, 0, 0);
-  }, []);
+  const applyCrop = () => {
+    if (!editorInteractive || !cropPixels) return;
+    if (cropPixels.x || cropPixels.y || cropPixels.width !== canvasSize.width || cropPixels.height !== canvasSize.height) {
+      applyGeometry(frameCropOperation(cropPixels, canvasSize));
+    }
+    cancelCrop();
+  };
 
-  const previewSoftenedEdges = useCallback((radiusValue: number) => {
+  const changeCropRatio = (value: string) => {
+    const [width, height] = value.split(':').map(Number);
+    const aspect = value === 'free' ? null : value === 'original' ? cropOriginalAspectRef.current : width / height;
+    setCropRatio(value);
+    setCropAspect(aspect);
+    setCropRect(centeredFrameCrop(canvasSize, aspect));
+  };
+
+  const previewSoftenedEdges = (radius: number) => {
+    if (!editorInteractive) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     if (!softenSourceRef.current) {
-      liveFloodRef.current = null;
-      setReplacePreviewActive(false);
+      finishLivePreview();
       pushHistory();
       updateContentDirty(true);
       softenSourceRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      softenOperationIndexRef.current = recipeRef.current.operations.length;
     }
     if (softenRenderFrameRef.current !== null) window.cancelAnimationFrame(softenRenderFrameRef.current);
     const source = softenSourceRef.current;
     softenRenderFrameRef.current = window.requestAnimationFrame(() => {
-      renderSoftenedEdges(source, radiusValue);
+      renderSoftenedEdges(source, radius);
       softenRenderFrameRef.current = null;
     });
-  }, [pushHistory, renderSoftenedEdges, updateContentDirty]);
+  };
+
+  const runBackgroundPreview = useCallback(async (request: VideoBackgroundOptions) => {
+    const source = backgroundPreviewSourceRef.current;
+    const entry = backgroundHistoryRef.current;
+    if (!source || !entry) return;
+    cancelBackgroundPreviewActivity();
+    const requestId = ++backgroundPreviewRequestIdRef.current;
+    setBackgroundPreviewLoading(true);
+    try {
+      const result = await apiService.removeBackground({ image: source, ...request });
+      if (requestId !== backgroundPreviewRequestIdRef.current) return;
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const next = new Image();
+        next.crossOrigin = 'anonymous';
+        next.onload = () => resolve(next);
+        next.onerror = () => reject(new Error('背景预览加载失败'));
+        next.src = result.image_url;
+      });
+      if (requestId !== backgroundPreviewRequestIdRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (backgroundOperationIndexRef.current === null) {
+        historyRef.current.push(entry);
+        trimCanvasHistory(historyRef.current);
+        redoRef.current = [];
+        backgroundOperationIndexRef.current = recipeRef.current.operations.length;
+      }
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext('2d')!.drawImage(image, 0, 0);
+      if (strokeCanvasRef.current) {
+        strokeCanvasRef.current.width = canvas.width;
+        strokeCanvasRef.current.height = canvas.height;
+      }
+      recordOperation({ type: 'background', options: { ...request } }, backgroundOperationIndexRef.current);
+      updateContentDirty(true);
+      setCanvasSize({ width: canvas.width, height: canvas.height });
+    } catch (err: unknown) {
+      if (requestId === backgroundPreviewRequestIdRef.current) message.error(getErrorMessage(err, '背景预览失败'));
+    } finally {
+      if (requestId === backgroundPreviewRequestIdRef.current) setBackgroundPreviewLoading(false);
+    }
+  }, [cancelBackgroundPreviewActivity, recordOperation, updateContentDirty]);
+
+  const applyBackgroundPreview = () => {
+    if (!editorInteractive) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    finishLivePreview();
+    backgroundPreviewSourceRef.current = canvas.toDataURL('image/png');
+    backgroundHistoryRef.current = {
+      image: ctx.getImageData(0, 0, canvas.width, canvas.height),
+      contentDirty: contentDirtyRef.current,
+      operations: recipeRef.current.operations,
+    };
+    observedBackgroundOptionsKeyRef.current = JSON.stringify(backgroundOptionsState);
+    setBackgroundPreviewEnabled(true);
+    void runBackgroundPreview(backgroundOptionsToRequest());
+  };
+
+  useEffect(() => {
+    if (!backgroundPreviewEnabled || !open || !imageReady || saving || backgroundLoading || worksetLoading) return;
+    const key = JSON.stringify(backgroundOptionsState);
+    if (key === observedBackgroundOptionsKeyRef.current) return;
+    observedBackgroundOptionsKeyRef.current = key;
+    if (backgroundPreviewTimerRef.current !== null) window.clearTimeout(backgroundPreviewTimerRef.current);
+    backgroundPreviewRequestIdRef.current += 1;
+    setBackgroundPreviewLoading(false);
+    setBackgroundPreviewPending(true);
+    backgroundPreviewTimerRef.current = window.setTimeout(() => {
+      backgroundPreviewTimerRef.current = null;
+      setBackgroundPreviewPending(false);
+      void runBackgroundPreview(backgroundOptionsToRequest());
+    }, 350);
+    return cancelBackgroundPreviewActivity;
+  }, [backgroundLoading, backgroundOptionsState, backgroundOptionsToRequest, backgroundPreviewEnabled, cancelBackgroundPreviewActivity, imageReady, open, runBackgroundPreview, saving, worksetLoading]);
 
   const updateBrushPreview = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (tool !== 'brush' && tool !== 'eraser') return;
@@ -3111,66 +2882,43 @@ function FrameCanvasEditor({
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0 || tool === 'background' || tool === 'soften' || tool === 'upscale') return;
+    if (!editorInteractive || event.button !== 0 || tool === 'background' || tool === 'soften' || tool === 'upscale' || tool === 'crop') return;
+    finishLivePreview();
     const { x, y } = getPoint(event);
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
     if (tool === 'fill' || tool === 'replace') {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) return;
       const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
       if (tool === 'replace' && !isHardTransparentReplacementTarget(
-        source.data,
-        canvas.width,
-        canvas.height,
-        Math.floor(x),
-        Math.floor(y),
+        source.data, canvas.width, canvas.height, Math.floor(x), Math.floor(y),
       )) return;
-      if (tool === 'replace') {
-        const targetX = Math.min(source.width - 1, Math.max(0, Math.floor(x)));
-        const targetY = Math.min(source.height - 1, Math.max(0, Math.floor(y)));
-        const targetOffset = (targetY * source.width + targetX) * 4;
-        worksetReplaceTargetRef.current = {
-          targetColor: [
-            source.data[targetOffset],
-            source.data[targetOffset + 1],
-            source.data[targetOffset + 2],
-          ],
-          targetXRatio: source.width > 1 ? targetX / (source.width - 1) : 0,
-          targetYRatio: source.height > 1 ? targetY / (source.height - 1) : 0,
-        };
-      } else {
-        worksetReplaceTargetRef.current = null;
-      }
-      cancelPendingPreviewRender();
-      cancelBackgroundPreviewActivity();
       pushHistory();
       updateContentDirty(true);
-      softenSourceRef.current = null;
-      liveFloodRef.current = { tool, x, y, source };
+      liveFloodRef.current = { tool, x, y, source, operationIndex: recipeRef.current.operations.length };
       setReplacePreviewActive(tool === 'replace');
       floodFill(x, y, tool === 'replace', source);
       return;
     }
-    cancelPendingPreviewRender();
-    cancelBackgroundPreviewActivity();
-    worksetReplaceTargetRef.current = null;
     const strokeSource = pushHistory();
     updateContentDirty(true);
-    liveFloodRef.current = null;
-    setReplacePreviewActive(false);
-    softenSourceRef.current = null;
     restoreStrokeSourceRef.current = null;
     restoreStrokeMaskRef.current = null;
     restoreStrokeLayerRef.current = null;
     if (tool === 'brush') {
-      const canvas = canvasRef.current;
       const strokeCanvas = strokeCanvasRef.current;
-      if (!canvas || !strokeCanvas) return;
+      if (!strokeCanvas) return;
       strokeCanvas.width = canvas.width;
       strokeCanvas.height = canvas.height;
-    } else if (tool === 'eraser' && eraserMode === 'restore') {
-      const canvas = canvasRef.current;
-      if (!canvas || !strokeSource) return;
+    } else if (eraserMode === 'restore') {
+      if (!strokeSource) return;
+      const initial = initialCanvasRef.current;
+      if (!initial) return;
+      const geometry = recipeRef.current.operations.filter(operation => operation.type === 'crop' || operation.type === 'flip-horizontal' || operation.type === 'upscale');
+      const key = JSON.stringify(geometry);
+      if (restoreCanvasRef.current?.key !== key || restoreCanvasRef.current.initial !== initial) {
+        restoreCanvasRef.current = { key, initial, canvas: geometry.length ? createFrameRestoreCanvas(initial, geometry) : initial };
+      }
       const maskCanvas = document.createElement('canvas');
       const restoreLayer = document.createElement('canvas');
       maskCanvas.width = canvas.width;
@@ -3181,38 +2929,44 @@ function FrameCanvasEditor({
       restoreStrokeMaskRef.current = maskCanvas;
       restoreStrokeLayerRef.current = restoreLayer;
     }
+    pendingStrokeRef.current = {
+      type: tool, points: [{ x: x / canvas.width, y: y / canvas.height }],
+      sizeRatio: brushSize / Math.min(canvas.width, canvas.height), color, opacity, eraserMode,
+    };
     drawingRef.current = true;
     lastDrawPointRef.current = { x, y };
-    (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
-    drawAt(x, y);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    paintStroke(null, { x, y });
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     updateBrushPreview(event);
-    if (!drawingRef.current) return;
-    const { x, y } = getPoint(event);
-    const previous = lastDrawPointRef.current;
-    if (!previous) {
-      drawAt(x, y);
-    } else {
-      drawSegment(previous, { x, y });
-    }
-    lastDrawPointRef.current = { x, y };
+    const canvas = canvasRef.current;
+    const operation = pendingStrokeRef.current;
+    if (!drawingRef.current || !canvas || !operation) return;
+    const point = getPoint(event);
+    paintStroke(lastDrawPointRef.current, point);
+    operation.points.push({ x: point.x / canvas.width, y: point.y / canvas.height });
+    lastDrawPointRef.current = point;
   };
 
   const stopDrawing = () => {
-    if (drawingRef.current && tool === 'brush') {
+    const operation = pendingStrokeRef.current;
+    if (!drawingRef.current || !operation) return;
+    if (operation.type === 'brush') {
       const canvas = canvasRef.current;
       const strokeCanvas = strokeCanvasRef.current;
       const ctx = canvas?.getContext('2d');
       if (canvas && strokeCanvas && ctx) {
         ctx.save();
-        ctx.globalAlpha = opacity;
+        ctx.globalAlpha = operation.opacity;
         ctx.drawImage(strokeCanvas, 0, 0);
         ctx.restore();
         strokeCanvas.getContext('2d')?.clearRect(0, 0, strokeCanvas.width, strokeCanvas.height);
       }
     }
+    recordOperation({ ...operation, points: [...operation.points] });
+    pendingStrokeRef.current = null;
     drawingRef.current = false;
     lastDrawPointRef.current = null;
     restoreStrokeSourceRef.current = null;
@@ -3260,9 +3014,9 @@ function FrameCanvasEditor({
 
   const applyUpscale = async () => {
     const canvas = canvasRef.current;
-    if (!canvas || upscaleDisabledReason) return;
-    cancelPendingPreviewRender();
-    cancelBackgroundPreviewActivity();
+    if (!editorInteractive || !canvas || upscaleDisabledReason) return;
+    finishLivePreview();
+    const loadId = imageLoadIdRef.current;
     setUpscaleLoading(true);
     try {
       const response = await apiService.upscaleImage({
@@ -3278,7 +3032,7 @@ function FrameCanvasEditor({
         nextImage.src = response.image_url;
       });
       const currentCanvas = canvasRef.current;
-      if (!currentCanvas) return;
+      if (!currentCanvas || loadId !== imageLoadIdRef.current) return;
       pushHistory();
       currentCanvas.width = image.naturalWidth;
       currentCanvas.height = image.naturalHeight;
@@ -3292,6 +3046,7 @@ function FrameCanvasEditor({
       ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height);
       ctx.drawImage(image, 0, 0);
       setCanvasSize({ width: image.naturalWidth, height: image.naturalHeight });
+      recordOperation({ type: 'upscale', method: upscaleMethod, scale: upscaleScale });
       updateContentDirty(true);
       restoreStrokeSourceRef.current = null;
       restoreStrokeMaskRef.current = null;
@@ -3303,44 +3058,48 @@ function FrameCanvasEditor({
       window.requestAnimationFrame(fitCanvasToStage);
       message.success(`已放大至 ${response.width}×${response.height}`);
     } catch (err: unknown) {
-      message.error(getErrorMessage(err, '图片放大增强失败'));
+      if (loadId === imageLoadIdRef.current) message.error(getErrorMessage(err, '图片放大增强失败'));
     } finally {
-      setUpscaleLoading(false);
+      if (loadId === imageLoadIdRef.current) setUpscaleLoading(false);
     }
   };
 
   const undo = useCallback(() => {
     if (drawingRef.current) return;
+    cancelCrop();
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    cancelPendingPreviewRender();
+    flushLivePreview();
     cancelBackgroundPreviewActivity();
     const previous = historyRef.current.pop();
     if (!previous) return;
     const current: CanvasHistoryEntry = {
       image: ctx.getImageData(0, 0, canvas.width, canvas.height),
       contentDirty: contentDirtyRef.current,
+      operations: recipeRef.current.operations,
     };
     redoRef.current.push(current);
     restoreCanvasHistoryEntry(previous);
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, restoreCanvasHistoryEntry]);
+  }, [cancelBackgroundPreviewActivity, cancelCrop, flushLivePreview, restoreCanvasHistoryEntry]);
 
   const redo = useCallback(() => {
     if (drawingRef.current) return;
+    cancelCrop();
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-    cancelPendingPreviewRender();
+    flushLivePreview();
     cancelBackgroundPreviewActivity();
     const next = redoRef.current.pop();
     if (!canvas || !ctx || !next) return;
     historyRef.current.push({
       image: ctx.getImageData(0, 0, canvas.width, canvas.height),
       contentDirty: contentDirtyRef.current,
+      operations: recipeRef.current.operations,
     });
     trimCanvasHistory(historyRef.current);
     restoreCanvasHistoryEntry(next);
-  }, [cancelBackgroundPreviewActivity, cancelPendingPreviewRender, restoreCanvasHistoryEntry]);
+  }, [cancelBackgroundPreviewActivity, cancelCrop, flushLivePreview, restoreCanvasHistoryEntry]);
 
   useEffect(() => {
     if (!open) return;
@@ -3365,52 +3124,32 @@ function FrameCanvasEditor({
     if (frame.included && (!frame.backgroundRemovedUrl || frame.editedUrl)) requestImageLoad();
   };
 
-  const getWorksetColorReplacementOptions = (): WorksetColorReplacementOptions | undefined => {
-    const target = worksetReplaceTargetRef.current;
-    if (!target) return undefined;
-    return {
-      ...target,
-      replaceWithTransparency,
-      replacementColor: color,
-      opacity,
-      replaceTolerance,
-      colorReplaceTolerance,
-      replaceMatchMode,
-      replaceEdgeCleanup,
-      replaceEdgeEnhancementMode,
-    };
-  };
-
-  const applyToolToWorkset = async () => {
-    let applied = false;
-    if (tool === 'upscale') {
-      applied = await onApplyUpscaleWorkset(upscaleMethod, upscaleScale, getWorksetColorReplacementOptions());
-    } else if (tool === 'background') {
-      applied = await onApplyBackgroundWorkset();
-    } else if (tool === 'replace') {
-      const options = getWorksetColorReplacementOptions();
-      if (!options) return;
-      applied = await onApplyColorReplacementWorkset(options);
-    }
+  const applyEditsToWorkset = async () => {
+    if (batchApplyDisabledReason || drawingRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    finishLivePreview();
+    const applied = await onApplyEditsWorkset({
+      operations: recipeRef.current.operations,
+      current: { id: frame.id, image: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height },
+    });
     if (applied) onClose();
   };
 
   const save = async (closeAfter = false) => {
+    if (!editorInteractive || drawingRef.current || tool === 'crop') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    cancelPendingPreviewRender();
-    cancelBackgroundPreviewActivity();
-    const floodPreview = liveFloodRef.current;
-    if (floodPreview?.tool === tool) {
-      floodFill(floodPreview.x, floodPreview.y, floodPreview.tool === 'replace', floodPreview.source);
-    } else if (tool === 'soften' && softenSourceRef.current) {
-      renderSoftenedEdges(softenSourceRef.current, softenRadius);
-    }
+    finishLivePreview();
+    const loadId = imageLoadIdRef.current;
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setSaving(true);
     try {
       const image = canvas.toDataURL('image/png');
       const res = await apiService.saveEditedVideoFrame({ image, base_frame_url: baseUrl, preview_id: previewId ?? undefined });
+      if (loadId !== imageLoadIdRef.current) return;
+      recipeRef.current.markSaved();
+      savedImageUrlRef.current = res.image_url;
       skipReloadUrlRef.current = res.image_url;
       onSaved(res.image_url, res.width, res.height);
       resetBackgroundPreview();
@@ -3423,9 +3162,9 @@ function FrameCanvasEditor({
       message.success('图片编辑已保存');
       if (closeAfter) onClose();
     } catch (err: unknown) {
-      message.error(getErrorMessage(err, '保存图片编辑失败'));
+      if (loadId === imageLoadIdRef.current) message.error(getErrorMessage(err, '保存图片编辑失败'));
     } finally {
-      setSaving(false);
+      if (loadId === imageLoadIdRef.current) setSaving(false);
     }
   };
 
@@ -3452,18 +3191,19 @@ function FrameCanvasEditor({
         <div className="frame-canvas-footer">
           {showBatchActions ? (
             <div className="frame-canvas-footer-background-actions">
-              <Tooltip title={batchApplyDisabledReason}>
+              <Tooltip title={batchApplyDisabledReason ?? `保存当前帧，并按顺序将本次打开以来的 ${operationCount} 项编辑应用到工作集`}>
                 <span>
-                  <Button loading={worksetLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={() => void applyToolToWorkset()}>应用工作集 ({worksetFrameCount})</Button>
+                  <Button loading={worksetLoading} disabled={Boolean(batchApplyDisabledReason)} onClick={() => void applyEditsToWorkset()}>应用工作集 ({worksetFrameCount})</Button>
                 </span>
               </Tooltip>
-              <Button disabled={!editorInteractive || !worksetFrameCount} onClick={restoreBackgroundWorkset}>恢复工作集</Button>
+              <Button disabled={!editorInteractive || !worksetFrameCount || tool === 'crop'} onClick={restoreBackgroundWorkset}>恢复工作集</Button>
+              <span role="status">{worksetProgress || (operationCount ? `${operationCount} 项编辑` : '')}</span>
             </div>
           ) : <div />}
           <div className="frame-canvas-footer-save-actions">
             <Button disabled={editorBusy} onClick={requestClose}>关闭</Button>
-            <Button loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading} onClick={() => save(false)}>保存</Button>
-            <Button type="primary" loading={saving} disabled={!imageReady || backgroundLoading || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading} onClick={() => save(true)}>保存并关闭</Button>
+            <Button loading={saving} disabled={!editorInteractive || tool === 'crop'} onClick={() => save(false)}>保存</Button>
+            <Button type="primary" loading={saving} disabled={!editorInteractive || tool === 'crop'} onClick={() => save(true)}>保存并关闭</Button>
           </div>
         </div>
       )}
@@ -3475,18 +3215,21 @@ function FrameCanvasEditor({
               block
               className="frame-canvas-tool-switch"
               value={tool}
-              onChange={value => setTool(value as CanvasTool)}
+              disabled={editorBusy}
+              onChange={value => changeTool(value as CanvasTool)}
               options={[
                 { label: '画笔', value: 'brush' },
                 { label: '橡皮擦', value: 'eraser' },
                 { label: '填充', value: 'fill' },
                 { label: '换色', value: 'replace' },
+                { label: '裁剪', value: 'crop' },
                 { label: '背景处理', value: 'background' },
                 { label: '边缘柔化', value: 'soften' },
                 { label: '放大增强', value: 'upscale' },
               ]}
             />
             <div className="frame-canvas-history-actions">
+              <Button size="small" disabled={!editorInteractive || tool === 'crop'} onClick={() => applyGeometry({ type: 'flip-horizontal' })}>左右翻转</Button>
               <Button size="small" title="撤销 (Ctrl/Cmd+Z)" disabled={!editorInteractive} onClick={undo}>撤销</Button>
               <Button size="small" title="重做 (Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y)" disabled={!editorInteractive} onClick={redo}>重做</Button>
               <Button size="small" disabled={!editorInteractive} onClick={requestImageLoad}>还原</Button>
@@ -3530,6 +3273,9 @@ function FrameCanvasEditor({
                   style={{ opacity }}
                   aria-hidden="true"
                 />
+                {tool === 'crop' && cropRect && editorInteractive && (
+                  <FrameCropOverlay size={canvasSize} rect={cropRect} aspect={cropAspect} onChange={setCropRect} />
+                )}
               </div>
               {brushPreview && (tool === 'brush' || tool === 'eraser') && (
                 <div
@@ -3559,7 +3305,27 @@ function FrameCanvasEditor({
               <span>滚轮缩放 · 中键拖动 · Ctrl/Cmd+Z 撤销 · Ctrl/Cmd+Shift+Z 重做</span>
             </div>
           </div>
-          <aside className={`frame-canvas-background-panel ${saving || upscaleLoading ? 'locked' : ''}`} aria-label="工具参数" aria-busy={saving || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading}>
+          <aside className={`frame-canvas-background-panel ${saving || upscaleLoading || worksetLoading ? 'locked' : ''}`} inert={saving || upscaleLoading || worksetLoading} aria-label="工具参数" aria-busy={saving || backgroundPreviewPending || backgroundPreviewLoading || upscaleLoading || worksetLoading}>
+            {tool === 'crop' && (
+              <div className="frame-canvas-replace-settings">
+                <div className="frame-editor-section-title">裁剪</div>
+                <label className="frame-editor-field">
+                  <span>裁剪比例</span>
+                  <Select value={cropRatio} onChange={changeCropRatio} disabled={!editorInteractive} options={[
+                    { label: '自由裁剪', value: 'free' }, { label: '原比例', value: 'original' },
+                    ...['1:1', '4:3', '3:4', '16:9', '9:16'].map(value => ({ label: value, value })),
+                  ]} />
+                </label>
+                <div className="frame-canvas-upscale-size" aria-live="polite">
+                  <span>裁剪后尺寸</span><strong>{cropPixels ? `${cropPixels.width} × ${cropPixels.height}` : '—'}</strong>
+                </div>
+                <Button type="primary" className="frame-canvas-preview-action" disabled={!editorInteractive || !cropPixels} onClick={applyCrop}>应用裁剪</Button>
+                <Button disabled={editorBusy} onClick={cancelCrop}>取消裁剪</Button>
+                <p className="frame-editor-help">拖动选框移动，拖动边角调整大小；在框外拖动可重新选区。方向键微调，按住 Shift 每次移动 10 像素。</p>
+                <p className="frame-editor-help">先应用或取消裁剪，再保存图片。Esc 或切换工具会取消尚未应用的选框。</p>
+                {showBatchActions && <p className="frame-editor-help">应用工作集时，会按各帧尺寸裁剪相同的相对区域。</p>}
+              </div>
+            )}
             {tool === 'brush' && (
               <div className="frame-canvas-replace-settings">
                 <div className="frame-editor-section-title">画笔参数</div>
@@ -3598,7 +3364,7 @@ function FrameCanvasEditor({
                 </div>
                 <p className="frame-editor-help">
                   {eraserMode === 'restore'
-                    ? '擦除区域会恢复为本次打开编辑器时的图像。'
+                    ? '擦除区域会恢复为本次打开时图像的对应内容，并跟随已应用的翻转和裁剪。'
                     : '擦除区域会变为透明，适合直接移除当前图像内容。'}
                 </p>
               </div>
@@ -3693,7 +3459,7 @@ function FrameCanvasEditor({
                   type="primary"
                   className="frame-canvas-preview-action"
                   loading={backgroundPreviewLoading}
-                  disabled={!imageReady || saving || backgroundLoading}
+                  disabled={!editorInteractive}
                   onClick={applyBackgroundPreview}
                 >
                   {backgroundPreviewEnabled ? '重新应用预览' : '应用预览'}
@@ -3785,7 +3551,7 @@ function FrameCanvasEditor({
                       type="primary"
                       className="frame-canvas-preview-action"
                       loading={upscaleLoading}
-                      disabled={!imageReady || Boolean(upscaleDisabledReason)}
+                      disabled={!editorInteractive || Boolean(upscaleDisabledReason)}
                       onClick={() => void applyUpscale()}
                     >
                       应用放大增强
@@ -3793,7 +3559,7 @@ function FrameCanvasEditor({
                   </span>
                 </Tooltip>
                 {!upscaleTarget.allowed && <p className="frame-editor-help frame-canvas-upscale-error">{upscaleTarget.reason}</p>}
-                <p className="frame-editor-help">“应用放大增强”只处理当前画布，完成后需保存；底部“应用工作集”会批量保存并关闭窗口。</p>
+                <p className="frame-editor-help">先应用放大增强查看效果；底部“应用工作集”会按顺序应用本次打开以来的全部编辑，保存后关闭窗口。</p>
               </div>
             )}
           </aside>
@@ -3825,14 +3591,4 @@ function FrameCanvasEditor({
       </Modal>
     </>
   );
-}
-
-function hexToRgb(hex: string) {
-  const value = hex.replace('#', '');
-  const parsed = Number.parseInt(value.length === 3 ? value.split('').map(ch => ch + ch).join('') : value, 16);
-  return {
-    r: (parsed >> 16) & 255,
-    g: (parsed >> 8) & 255,
-    b: parsed & 255,
-  };
 }

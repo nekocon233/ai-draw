@@ -135,14 +135,18 @@ class AIDrawService:
         """查询 ComfyUI 当前可用的图片放大模型。"""
         return await self.comfyui.get_upscale_models()
 
-    async def analyze_motion_prompt(self, character, poses, description, signature, user_id: int, mode: str = "pose") -> dict:
-        from utils.motion_prompt import analyze_motion_images
+    async def analyze_motion_prompt(
+        self, character, poses, description, signature, user_id: int, mode: str = "pose", video_path=None,
+    ) -> dict:
+        from utils.motion_prompt import analyze_motion_images, analyze_motion_video
         if user_id is None:
             raise ValueError("Motion analysis requires an authenticated user")
         self._prompt_tasks[user_id] = self._prompt_tasks.get(user_id, 0) + 1
         self.events.user(user_id, 'is_generating_prompt', True)
-        self.events.user(user_id, 'prompt_generation_progress', '正在分析动作参考图...')
+        self.events.user(user_id, 'prompt_generation_progress', '正在分析动作视频...' if video_path else '正在分析动作参考图...')
         try:
+            if video_path:
+                return await asyncio.to_thread(analyze_motion_video, character, video_path, description, signature, mode)
             return await asyncio.to_thread(analyze_motion_images, character, poses, description, signature, mode)
         finally:
             remaining = self._prompt_tasks[user_id] - 1

@@ -76,14 +76,14 @@ class FakeRepository:
         self.final_release = None
         self.status = "persisted"
 
-    def persist(self, task_context, images, *, replace_existing=True, source_updates=None, seeds=None):
+    def persist(self, task_context, images, *, replace_existing=True, source_updates=None, seeds=None, append_results=False):
         if replace_existing:
             if self.final_started:
                 self.final_started.set()
                 if not self.final_release.wait(3):
                     raise RuntimeError("Test commit was not released")
             if self.status == "persisted":
-                self.images = list(images)
+                self.images = self.images + list(images) if append_results else list(images)
             return self.status
         return "persisted"
 
@@ -125,6 +125,59 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     def reserve(self):
         return self.service.reserve(context(), self.parameters)
+
+    async def test_stop_keeps_completed_images_and_seeds_before_the_terminal_event(self):
+        ready = asyncio.Event()
+
+        async def partial(parameters, task_context, on_artifact, check_cancelled):
+            on_artifact('completed-image', 0, 16, 42)
+            ready.set()
+            await asyncio.Event().wait()
+
+        self.engine.generate = partial
+        task = self.reserve()
+        running = asyncio.create_task(self.service.run(task, self.parameters))
+        await ready.wait()
+        await self.service.stop(1)
+        await running
+        self.assertEqual(self.repository.images, ['old-result', 'completed-image'])
+        self.assertEqual(self.repository.discarded, [])
+        snapshot = self.service.snapshot(1)['last_task']
+        self.assertEqual(snapshot['phase'], 'cancelled')
+        self.assertEqual(snapshot['images'], ['completed-image'])
+        self.assertEqual(snapshot['seeds'], [42])
+        self.assertEqual(self.events[-1].field, 'generation_cancelled')
+
+    async def test_appending_uses_the_existing_round_offset_and_preserves_earlier_results(self):
+        task = self.service.reserve(TaskContext(1, 'append', 'test', 'session-a', 'message-reply', True, 1), self.parameters)
+        await self.service.run(task, self.parameters)
+        self.assertEqual(self.repository.images, ['old-result', 'new-result'])
+        result = next(event for event in self.events if event.field == 'media_generated')
+        self.assertEqual((result.value['index'], result.value['total']), (1, 2))
+
+    async def test_native_interrupt_error_still_preserves_the_completed_part_of_a_stopped_task(self):
+        ready, interrupted = asyncio.Event(), asyncio.Event()
+
+        async def partial(parameters, task_context, on_artifact, check_cancelled):
+            on_artifact('completed-image', 0, 16, 42)
+            ready.set()
+            await interrupted.wait()
+            raise RuntimeError('provider interrupted the native job')
+
+        async def interrupt(*args):
+            interrupted.set()
+            await task.finished.wait()
+
+        self.engine.generate = partial
+        self.engine.interrupt.side_effect = interrupt
+        task = self.reserve()
+        running = asyncio.create_task(self.service.run(task, self.parameters))
+        await ready.wait()
+        await self.service.stop(1)
+        await running
+        self.assertEqual(self.repository.images, ['old-result', 'completed-image'])
+        self.assertEqual(self.repository.discarded, [])
+        self.assertEqual(self.service.snapshot(1)['last_task']['phase'], 'cancelled')
 
     async def test_success_persists_before_terminal_event_and_works_without_clients(self):
         task = self.reserve()

@@ -84,7 +84,7 @@ class SeedPipelineTests(unittest.IsolatedAsyncioTestCase):
         registry = ProviderRegistry()
         registry.register("custom", SimpleNamespace(generate=generate), seed_option=seed_option)
         catalog = WorkflowCatalog({
-            "demo": {"provider": "custom", "output_type": "image", "parameters": [{"name": "count", "max": 4}]},
+            "demo": {"provider": "custom", "output_type": "image", "parameters": [{"name": "count", "max": 16}]},
         }, registry)
         params = GenerationParameters("prompt", workflow="demo", count=count, workflow_options=options)
         artifacts = []
@@ -97,6 +97,13 @@ class SeedPipelineTests(unittest.IsolatedAsyncioTestCase):
         seen, reported = await self.run_engine(seed_option="demo_seed", options={"demo_seed": 100}, count=3)
         self.assertEqual(seen, [100, 101, 102])
         self.assertEqual(reported, [100, 101, 102])
+
+    async def test_sixteen_results_keep_distinct_seeds_and_every_artifact(self):
+        seen, reported = await self.run_engine(seed_option='demo_seed', options={'demo_seed': MAX_SEED - 15}, count=16)
+        self.assertEqual(seen, list(range(MAX_SEED - 15, MAX_SEED + 1)))
+        self.assertEqual(reported, seen)
+        with self.assertRaises(ValueError):
+            round_seeds({'demo_seed': MAX_SEED - 14}, 'demo_seed', 16)
 
     async def test_random_mode_draws_an_independent_seed_for_each_image(self):
         with patch("comfyui.structures.seed.random.sample", return_value=[900, 5]):

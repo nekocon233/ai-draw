@@ -1,9 +1,10 @@
 """
 媒体生成相关 API（图像 / 视频）
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 import asyncio
 import base64
+import os
 import re
 import time
 import uuid
@@ -12,13 +13,18 @@ from pathlib import Path
 from typing import List, Literal, Optional
 from PIL import Image
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from server.ai_draw_service import AIDrawService, get_ai_draw_service
 from server.auth import get_current_user
+from server.database import get_db
 from server.models import User
 from server.api.generation import router as generation_router
 from server.image_upscale_methods import build_upscale_method_registry
 from utils.config_loader import get_config, get_image_upscale_config, get_video_frames_config
+from utils.file_storage import get_file_storage
+from utils.media_file_references import sweep_stale_motion_videos
+from utils.reference_video import MOTION_VIDEO_MAX_UPLOAD_BYTES, ReferenceVideoError, normalize_motion_video
 from utils.media_processor import ImageUpscaleValidationError, decode_upscale_png_data_url, upscale_image_lanczos
 from utils.video_frames import (
     BackgroundRemovalOptions,
@@ -321,6 +327,67 @@ def _set_export_progress(
     }
 
 
+
+
+# Transcoding is CPU-bound; a couple at a time keeps the API responsive.
+_motion_video_transcodes = asyncio.Semaphore(2)
+
+
+@router.post("/upload-motion-video")
+async def upload_motion_video(
+    file: UploadFile = File(...),
+    workflow: str = Form("minimax_h3_ref"),
+    current_user: User = Depends(get_current_user),
+    service: AIDrawService = Depends(get_ai_draw_service),
+    db: Session = Depends(get_db),
+) -> dict:
+    """保存动作参考视频：截取开头，转成无声 24fps H.264，存入用户的参考目录。"""
+    try:
+        metadata = service.catalog.metadata(workflow)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    max_seconds = float(metadata.get("max_motion_reference_video_seconds") or 0)
+    if not metadata.get("supports_motion_reference_video") or max_seconds <= 0:
+        raise HTTPException(status_code=400, detail=f"{metadata.get('label', workflow)} 不支持动作视频")
+
+    user_dir = get_file_storage().reference_dir / str(current_user.id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    name = uuid.uuid4().hex
+    source = user_dir / f".{name}.upload"
+    target = user_dir / f".{name}.mp4.part"
+    try:
+        size = 0
+        with open(source, "wb") as output:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > MOTION_VIDEO_MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="动作视频不能超过 100MB")
+                output.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="视频文件为空")
+        async with _motion_video_transcodes:
+            original, stored = await asyncio.to_thread(normalize_motion_video, source, target, max_seconds)
+        os.replace(target, user_dir / f"{name}.mp4")
+    except ReferenceVideoError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        for path in (source, target):
+            path.unlink(missing_ok=True)
+
+    try:
+        # Uploaded-then-removed clips are never saved anywhere; sweep the old unreferenced ones.
+        sweep_stale_motion_videos(db, current_user.id, keep={f"{name}.mp4"})
+    except Exception as error:
+        print(f"[media] 清理旧动作视频失败: {error}")
+    return {
+        "url": f"/uploads/reference/{current_user.id}/{name}.mp4",
+        "duration": round(stored.duration, 3),
+        "frames": stored.frames,
+        "width": stored.width,
+        "height": stored.height,
+        "source_duration": round(original.duration, 3),
+        "trimmed": original.duration > stored.duration + 0.1,
+    }
 
 
 @router.post("/upload-reference")

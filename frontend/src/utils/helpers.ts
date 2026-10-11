@@ -538,9 +538,12 @@ export interface GuestSessionConfig {
   referenceImage: string | null;
   referenceImage2?: string | null;
   referenceImage3?: string | null;
+  // 有序参考图槽位（含空位）；优先于上面 legacy 字段
+  referenceImages?: (string | null)[];
   referenceImageEnd?: string | null;
   workflowOptions?: Record<string, string | number>;
   motionReferenceImages?: string[];
+  motionReferenceVideo?: string | null;
   motionPrompt?: import('../types/api').MotionPromptSnapshot | null;
   promptPreset?: PromptPreset | null;
   promptPresetChoices?: import('../types/api').PromptPresetChoices;

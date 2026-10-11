@@ -17,6 +17,15 @@ MINIMAX_H3_AUDIO_MODES = ("silent", "native")
 MINIMAX_H3_CANVAS_MULTIPLE = 32
 MINIMAX_H3_BASE_SHORT_EDGE = 768
 MINIMAX_H3_MAX_PIXELS = 768 * 1344
+MINIMAX_H3_FPS = 24
+MINIMAX_H3_AUDIO_LATENT_FPS = 40
+
+# ComfyUI sizes model offloading for the target latent only, so reference rows are unaccounted VRAM.
+# Packed DiT rows that still sampled on the RTX 5070 Ti 16 GB; see docs/minimax_h3_reference.md.
+MINIMAX_H3_TOKEN_BUDGET = 50_000
+# Prompt text, reference labels and video timestamps in the Qwen presentation.
+MINIMAX_H3_PROMPT_TOKEN_RESERVE = 3_072
+MINIMAX_H3_REFERENCE_VIDEO_MIN_SHORT_EDGE = 256
 
 
 def get_minimax_h3_resolution(
@@ -77,6 +86,79 @@ def get_minimax_h3_frame_count(duration: float) -> int:
     while frame_count % 17 != 5:
         frame_count += 1
     return frame_count
+
+
+def get_minimax_h3_video_frame_count(source_frames: int) -> int:
+    """A motion video sets the output length: at least four seconds, aligned up to the 17k+5 grid."""
+    return get_minimax_h3_frame_count(min(15.0, max(4.0, source_frames / MINIMAX_H3_FPS)))
+
+
+def minimax_h3_latent_frames(frame_count: int) -> int:
+    return 2 if frame_count <= 5 else ((frame_count - 5) // 17) * 5 + 2
+
+
+def minimax_h3_frame_tokens(width: int, height: int) -> int:
+    """DiT rows per latent frame: a 16x VAE latent split into 2x2 patches."""
+    return (width // MINIMAX_H3_CANVAS_MULTIPLE) * (height // MINIMAX_H3_CANVAS_MULTIPLE)
+
+
+def minimax_h3_match_image_size(size: tuple[int, int], canvas: tuple[int, int]) -> tuple[int, int]:
+    """`ref_image_size: match` scales a reference image down (never up) to the generation's pixel area."""
+    width, height = size
+    scale = min(1.0, math.sqrt((canvas[0] * canvas[1]) / (width * height)))
+    return tuple(
+        max(MINIMAX_H3_CANVAS_MULTIPLE, round(value * scale / MINIMAX_H3_CANVAS_MULTIPLE) * MINIMAX_H3_CANVAS_MULTIPLE)
+        for value in (width, height)
+    )
+
+
+def minimax_h3_sequence_tokens(
+    canvas: tuple[int, int], frame_count: int, image_sizes=(), video_size: tuple[int, int] | None = None,
+) -> int:
+    """Rows of the packed sequence, mirroring ComfyUI's PackedLayout for Ref2VA.
+
+    Text holds the prompt plus every reference's Qwen vision tokens; the DiT then adds reference
+    image and video rows, stereo audio rows and the target video. A reference video is assumed to be
+    conformed to exactly `frame_count` frames, so its latent length equals the target's.
+    """
+    latent_frames = minimax_h3_latent_frames(frame_count)
+    audio_rows = 2 * round(frame_count / MINIMAX_H3_FPS * MINIMAX_H3_AUDIO_LATENT_FPS)
+    tokens = MINIMAX_H3_PROMPT_TOKEN_RESERVE + audio_rows + latent_frames * minimax_h3_frame_tokens(*canvas)
+    for size in image_sizes:
+        tokens += 2 * minimax_h3_frame_tokens(*minimax_h3_match_image_size(size, canvas))
+    if video_size:
+        # Qwen sees the clip at 2 fps in blocks of two frames.
+        qwen_blocks = math.ceil(math.ceil(frame_count / (MINIMAX_H3_FPS // 2)) / 2)
+        tokens += (latent_frames + qwen_blocks) * minimax_h3_frame_tokens(*video_size)
+    return tokens
+
+
+def _reference_video_cap(width: int, height: int) -> tuple[int, int]:
+    """The node's own canvas for a reference video: adapted, or the source size when smaller."""
+    cap = _adapt_minimax_h3_canvas(width, height)
+    if width * height < cap[0] * cap[1]:
+        cap = tuple(
+            max(MINIMAX_H3_CANVAS_MULTIPLE, round(value / MINIMAX_H3_CANVAS_MULTIPLE) * MINIMAX_H3_CANVAS_MULTIPLE)
+            for value in (width, height)
+        )
+    return cap
+
+
+def plan_minimax_h3_reference_video(
+    canvas: tuple[int, int], frame_count: int, video_size: tuple[int, int], image_sizes=(),
+) -> tuple[int, int]:
+    """Largest /32 size with the clip's aspect that keeps the packed sequence within the GPU budget."""
+    cap_width, cap_height = _reference_video_cap(*video_size)
+    ratio = video_size[0] / video_size[1]
+    short = min(cap_width, cap_height)
+    floor = min(short, MINIMAX_H3_REFERENCE_VIDEO_MIN_SHORT_EDGE)
+    while short >= floor:
+        long = max(MINIMAX_H3_CANVAS_MULTIPLE, round(short * max(ratio, 1 / ratio) / MINIMAX_H3_CANVAS_MULTIPLE) * MINIMAX_H3_CANVAS_MULTIPLE)
+        size = (min(long, cap_width), min(short, cap_height)) if ratio >= 1 else (min(short, cap_width), min(long, cap_height))
+        if minimax_h3_sequence_tokens(canvas, frame_count, image_sizes, size) <= MINIMAX_H3_TOKEN_BUDGET:
+            return size
+        short -= MINIMAX_H3_CANVAS_MULTIPLE
+    raise ValueError("动作视频超出显卡可处理的长度，请换用更短的视频后重试")
 
 
 def validate_minimax_h3_options(options: dict | None) -> tuple[float, str, bool]:

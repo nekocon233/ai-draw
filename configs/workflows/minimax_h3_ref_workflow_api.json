@@ -92,6 +92,10 @@
       "ref_images.ref_image_8": [
         "108",
         0
+      ],
+      "ref_videos.ref_video_0": [
+        "111",
+        0
       ]
     },
     "class_type": "MiniMaxH3ReferenceToVideo",
@@ -320,6 +324,27 @@
     "class_type": "LoadImage",
     "_meta": {
       "title": "h3_reference_9"
+    }
+  },
+  "110": {
+    "inputs": {
+      "file": "h3_ref_video_1.mp4"
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "h3_reference_video_1"
+    }
+  },
+  "111": {
+    "inputs": {
+      "video": [
+        "110",
+        0
+      ]
+    },
+    "class_type": "GetVideoComponents",
+    "_meta": {
+      "title": "h3_reference_video_frames_1"
     }
   }
 }

@@ -8,6 +8,7 @@ from typing import Callable, Optional
 from PIL import Image
 from comfyui.structures.seed import round_seeds
 from utils.image_reference import normalize_image_reference
+from utils.reference_video import resolve_reference_video
 
 from .contracts import GenerationParameters, ProviderInput, TaskContext
 from .storage import ArtifactStorage
@@ -34,16 +35,18 @@ class GenerationEngine:
     def _provider_input(self, parameters):
         metadata = self.catalog.metadata(parameters.workflow)
         references = [
-            normalize_image_reference(value, str(self.storage.upload_dir), label) if value else None
-            for value, label in (
-                (parameters.reference_image, "参考图 1"), (parameters.reference_image_2, "参考图 2"),
-                (parameters.reference_image_3, "参考图 3"), (parameters.reference_image_end, "尾帧参考图"),
-            )
+            normalize_image_reference(value, str(self.storage.upload_dir), f"参考图 {index + 1}") if value else None
+            for index, value in enumerate(parameters.reference_images or ())
         ]
+        end_reference = (
+            normalize_image_reference(parameters.reference_image_end, str(self.storage.upload_dir), "尾帧参考图")
+            if parameters.reference_image_end else None
+        )
         size = None
         if metadata.get("supports_original_size"):
-            if parameters.use_original_size and references[0]:
-                with Image.open(BytesIO(base64.b64decode(references[0]))) as image:
+            first = references[0] if references else None
+            if parameters.use_original_size and first:
+                with Image.open(BytesIO(base64.b64decode(first))) as image:
                     size = image.size
             elif not parameters.use_original_size and parameters.width and parameters.height:
                 size = (parameters.width, parameters.height)
@@ -51,7 +54,11 @@ class GenerationEngine:
             normalize_image_reference(value, str(self.storage.upload_dir), f"动作参考 {index + 1}")
             for index, value in enumerate(parameters.motion_reference_images or ())
         )
-        return ProviderInput(parameters, tuple(references[:3]), references[3], motion_images), size
+        motion_video = (
+            str(resolve_reference_video(parameters.motion_reference_video, self.storage.upload_dir))
+            if parameters.motion_reference_video else None
+        )
+        return ProviderInput(parameters, tuple(references), end_reference, motion_images, motion_video=motion_video), size
 
     async def generate(
         self,

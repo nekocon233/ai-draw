@@ -42,6 +42,8 @@ export interface SessionConfig {
   referenceImage: string | null;
   referenceImage2?: string | null;
   referenceImage3?: string | null;
+  // 有序参考图槽位（含空位）；优先于上面 legacy 字段
+  referenceImages?: (string | null)[];
   width?: number | null;
   height?: number | null;
   useOriginalSize?: boolean;
@@ -110,6 +112,8 @@ export interface ChatMessage {
     referenceImage?: string;
     referenceImage2?: string;
     referenceImage3?: string;
+    // 有序参考图槽位（含空位）；优先于上面 legacy 字段
+    referenceImages?: (string | null)[];
     referenceImageEnd?: string;
     isLoop?: boolean;
     frameRate?: number;
@@ -118,6 +122,8 @@ export interface ChatMessage {
     frameCount?: number;   // 历史视频总帧数（只读）
     workflowOptions?: Record<string, string | number>;
     motionReferenceImages?: string[];
+    /** 本轮的动作视频，与 motionReferenceImages 二选一 */
+    motionReferenceVideo?: string;
     motionPrompt?: import('./api').MotionPromptSnapshot | null;
     promptPreset?: import('./api').PromptPreset;  // 所选预设快照，content 只含用户描述
   };

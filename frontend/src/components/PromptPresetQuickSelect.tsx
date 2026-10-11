@@ -63,7 +63,7 @@ export default function PromptPresetQuickSelect({ open, onOpenChange, preset, wo
                 <span className="prompt-preset-quick-heading">
                   <strong>{item.title}</strong>
                   {item.requires_motion_reference
-                    ? <span>{item.motion_reference_mode === 'shot' ? '主体图＋参考图' : '原图＋动作图'}</span>
+                    ? <span>{item.motion_reference_mode === 'shot' || item.motion_reference_mode === 'face' ? '主体图＋参考图' : '原图＋动作图'}{workflowMeta?.supports_motion_reference_video ? '或视频' : ''}</span>
                     : item.images.length > 0 && <span>{item.images.length} 张{item.output_type === 'video' ? '关键帧' : '参考图'}</span>}
                 </span>
                 <span className="prompt-preset-quick-description">{blocker ?? item.description}</span>

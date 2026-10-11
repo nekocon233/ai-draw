@@ -92,7 +92,7 @@ python scripts/install_qwen_image_21_lora.py CHECKPOINT.safetensors /opt/comfyui
 
 脚本需在安装 PyTorch 与 safetensors 的环境中运行。文件检查并不等于画风验收：仍需实际运行文生图和图生图，检查未匹配 LoRA 键、与无 LoRA 的固定 seed 对照及留出图片上的效果。
 
-当前状态（2026-10-07）：两种 Qwen 2.1 模式按顺序登记了 **Ameniwa**、**Sen**、**Daikei**、**CZN** 和 **Darkest Dungeon** 五个 LoRA，标识与网页显示名称相同。Darkest Dungeon 的训练和改名记录见 [战斗角色风格文档](dark_gothic_anime.md)，其余记录见文末相应小节。Daikei 是不写画风标注的 v2 重训（2026-09-30 由 DaikeiV2 改名，历史已迁移）；最初的 v1 保留为 `DaikeiV1.safetensors`，暂不登记。`lora_models` 的条目可用 `default_strength` 指定选中时的默认强度，缺省 0.8，目前所有模型的默认强度均为 0.8。`Ameniwa.safetensors` 就是双语 4000 步权重（SHA-256 `3f07795c…`），由 `AmeniwaQwen21Bilingual.safetensors` 改名而来，历史记录已一并迁移，详见文末“改名为 Ameniwa”一节。v3 的 5000 步、3000 步和最早的 `AmeniwaQwen21.safetensors` 已从 ComfyUI 删除，原件保留在 `/opt/ai-toolkit/output/` 各自的训练目录中，训练产物仍沿用原来的文件名。认证 LoRA 接口仅在登记文件实际存在时展示。其它风格权重安装后仍需在两种模式共用的 `lora_models` 中明确登记，不能直接列入其它架构的 LoRA。网页默认不选 LoRA，此时隐藏强度控件；空行首次选择模型时使用该模型的默认强度，已选模型换成另一个时保留当前强度，选择框、0–1 强度滑条与末尾的 × 位于同一行，数值仅在滑条提示中显示。直接使用静态 JSON 时默认加载 `Ameniwa.safetensors`，强度 0.8。下文保留各阶段安装与验收的历史记录，其中出现的旧文件名均为当时的状态。
+当前状态（2026-10-09）：两种 Qwen 2.1 模式按顺序登记了 **Ameniwa**、**Sen**、**Daikei**、**CZN** 和 **Darkest Dungeon** 五个 LoRA，标识与网页显示名称相同。Darkest Dungeon 的训练和改名记录见 [战斗角色风格文档](dark_gothic_anime.md)，其余记录见文末相应小节。Daikei 是不写画风标注的 v2 重训（2026-09-30 由 DaikeiV2 改名，历史已迁移）；最初的 v1 保留为 `DaikeiV1.safetensors`，暂不登记。`lora_models` 的条目可用 `default_strength` 指定选中时的默认强度，缺省 0.8，目前所有模型的默认强度均为 0.8。`Ameniwa.safetensors` 就是双语 4000 步权重（SHA-256 `3f07795c…`），由 `AmeniwaQwen21Bilingual.safetensors` 改名而来，历史记录已一并迁移，详见文末“改名为 Ameniwa”一节。v3 的 5000 步、3000 步和最早的 `AmeniwaQwen21.safetensors` 已从 ComfyUI 删除，原件保留在 `/opt/ai-toolkit/output/` 各自的训练目录中，训练产物仍沿用原来的文件名。认证 LoRA 接口仅在登记文件实际存在时展示。其它风格权重安装后仍需在两种模式共用的 `lora_models` 中明确登记，不能直接列入其它架构的 LoRA。网页默认不选 LoRA，此时隐藏强度控件；空行首次选择模型时使用该模型的默认强度，已选模型换成另一个时保留当前强度，选择框、0–1 强度滑条与末尾的 × 位于同一行，数值仅在滑条提示中显示。直接使用静态 JSON 时默认加载 `Ameniwa.safetensors`，强度 0.8。下文保留各阶段安装与验收的历史记录，其中出现的旧文件名均为当时的状态。
 
 ## 2026-09-21 验收记录
 
@@ -784,3 +784,71 @@ ssh -N -L 18675:127.0.0.1:8675 nekocon-server
     - 两个 Qwen 工作流的 LoRA 接口返回 Ameniwa、Sen、Daikei、CZN，默认强度都是 0.8；`lora_labels` 同步。`DaikeiV1`、`DaikeiV2` 都返回 422 未登记。
     - 随机模式两张的种子为 515915913 和 1032246189，不连号，与 ComfyUI 执行图一致；执行图中的 LoRA 为 `Daikei.safetensors`，强度 0.8。
     - 用新名 `<lora:Daikei:0.8>` 和种子 4089305171 重跑用户的猫娘提示词（1024×1024、40 步），结果与改名前 DaikeiV2 0.8 的图逐像素相同。这说明改名正确、ComfyUI 没有沿用缓存的 v1，固定种子也能完全复现。
+
+### 2026-10-08 Sen 文字水印遮罩准备（尚未训练）
+
+> 以下为已结束实验的历史记录。2026-10-09 用户选择保留原版 Sen，并删除 SenMasked、SenMaskOnly 两版及其专用训练材料；原 Sen 与应用生成历史保留。
+
+用户选择通过训练损失遮罩处理水印，包括「無断転載禁止／AI 学習禁止」及英文声明、禁用圆标、签名和不需要的背景文字。本轮仅准备数据、审阅材料和独立训练配置，不启动训练、不替换在用 Sen。
+
+- 数据源为 `/opt/ai-toolkit/datasets/sen_qwen21/` 当前实际保留的 31 张训练图和 5 张验证图。新副本为 `/opt/ai-toolkit/datasets/sen_masked_qwen21/`，分组及全部 72 个图片/标注文件的内容哈希保持一致；不复制旧 latent/text 缓存。训练集原有一对完全相同的图片也按本轮保留数据的范围保持原样。
+- `masks/` 中共 33 张原尺寸、单通道、二值 PNG（白色用于原图损失，黑色排除）。另 3 张未发现待处理文字的训练图不生成全白遮罩，避免空的反向先验区域。验证图及其遮罩单独保留，不加入训练数据列表。
+- 逐张视觉核对原图和红色叠加图；浅色、深色背景上的低对比度声明补充检查。禁用圆标采用圆环和斜线，背景大字使用多边形，尽量保留内部空白与字间空隙；正常衣服图案、星星、三角形等装饰保留。文字与人物重叠处仍会排除该局部的原图损失，原图像素不做修复或清除。
+- 遮罩面积最大约 24.5%。覆盖超过 20% 的 5 张图已重点复核，详细记录在 `_records/visual_review.json` 和 `annotations.json`。一张验证图的角落签名在小分辨率裁切后会失去先验区域，因此向上扩展了不涉及人物的窄条背景边距，随后实际加载检查通过。
+- 预览入口：`review/index.html`，含逐张叠加图、原图和遮罩链接；`review/masks_01.jpg` 至 `masks_04.jpg` 是四页总览。
+- 独立配置：`/opt/ai-toolkit/config/sen_masked_qwen_image_21.yaml`，任务名 `SenMaskedQwen21`，数据路径为容器内的 `/app/ai-toolkit/datasets/sen_masked_qwen21/train`。保留原 Sen 的 rank 16、Prodigy、4000 步、512/768/1024 分辨率及原来的预览提示词，仅加入遮罩路径、`mask_min_value: 0.0`、`inverted_mask_prior: true` 和默认先验强度 `0.5`。未创建任务库记录或训练输出目录，从底模新训时不可续接旧 Sen。
+- 可复现记录：`_records/source_inventory.json` 保存原文件哈希，`base_config.yaml` 保存原配置，`prepare.py` 生成副本、遮罩、配置和预览。宿主机运行 `python3 -B /opt/ai-toolkit/datasets/sen_masked_qwen21/_records/prepare.py --check` 可检查现有成果；`validation.json` 保存结果。
+- 验证通过：原文件/副本一致、尺寸和命名匹配、无全黑/全白遮罩、99 个潜空间缩放检查；另在 `ostris/aitoolkit:0.13.18` 容器中禁用 CUDA，使用真实 `FileItemDTO` 加载器进行 552 个分桶/裁切/模糊组合检查，以及 9 个无水印图加载检查。主损失及反向先验归一化均为有限值，结果在 `_records/runtime_validation.json`。此检查没有加载模型或启动训练。
+- 在用 `Sen.safetensors` 的 SHA-256 仍为 `751f71a57232c14cc262cc62e1c796b7d5a9675c70b25cbef80e0b668a977f39`。后续生成对比规范保存在 `_records/evaluation.json`（原 5 条提示词、种子 42/20261008、强度 0.8），尚未生成新结果，不能据本次准备宣称水印已从模型中消除。
+
+所有可执行准备文件和训练配置位于 AI Toolkit 目录；ai-draw 仓库本轮仅更新本准备记录，无应用镜像或服务部署变更。
+
+### 2026-10-08 启动 SenMaskedQwen21
+
+- 用户确认数据准备情况后，明确要求现在启动训练。任务 ID：`ec95f47a-14fa-46ba-a13e-6e85d61d53d3`；2026-10-08 23:16（北京时间）入队并开始运行，目标 4000 步。配置保持上一节准备的版本，每 200 步保存、每 400 步生成原有 5 条提示词的预览，从底模新训。
+- 开训前 AI Toolkit 容器出现 `Failed to initialize NVML: Unknown Error`，主机 GPU 正常。确认原有 10 个任务均已完成、队列关闭后，通过 SQLite backup API 备份为 `/opt/ai-toolkit/config/aitk-ui-before-sen-masked-20261008T150354Z.sqlite`，执行 WAL checkpoint，再重启 AI Toolkit；GPU 访问恢复，原任务记录保留。备份信息在新数据集 `_records/start_backup.json`。
+- 启动器为 `/opt/ai-toolkit/config/manage-sen-masked.py`。沿用已验证的训练服务控制/恢复逻辑，并将其快照保存至新数据集 `_records/training_service_helpers.py`。由独立系统服务 `aidraw-sen-masked-watch.service` 执行，等待 ComfyUI 连续空闲 60 秒后，通过认证接口暂停生图并停止 ComfyUI，随后通过 AI Toolkit UI API 建任务、入队和启动 GPU 0 队列。
+- 训练和缓存已正常加载，5 张训练前基准预览完成，已进入实际优化步骤。启动验收核对运行中的模型、数据、遮罩、训练和采样配置与准备版一致，loss 数值有限，监控服务运行中；快照为 `/opt/ai-toolkit/output/SenMaskedQwen21/start-verification.json`。
+- 输出目录为 `/opt/ai-toolkit/output/SenMaskedQwen21/`；数据目录中的 `training-state.json`、`training-watch.log` 记录实时监控状态。任务结束、没有其他活动训练且主机 GPU 释放后，监控自动恢复 ComfyUI 和原先可用的生图服务，助手会话结束不会终止监控。
+- 本次仅启动训练，未安装或替换 LoRA。在用 `Sen.safetensors` 哈希保持 `751f71a5…`。原数据准备清单与校验结果保留为准备阶段快照；实时训练状态以 AI Toolkit 任务和 `training-state.json` 为准。
+
+### 2026-10-09 SenMasked 上线供对比
+
+- `SenMaskedQwen21` 已完成 4000 步（epoch 43），恢复监控于北京时间 02:04 恢复生图。用户要求在 ai-draw 增加该 LoRA，自行与原 Sen 比较。
+- 使用最终 `SenMaskedQwen21.safetensors`，经现有安装脚本校验 384 个张量全部有限、192 个上投影非零，独立安装为 `SenMasked.safetensors`。SHA-256：`628de1892c806807e3b99cac737b74ba37ae8f374a89a260d765d1bbb90dabdc`，与训练原件一致；原 `Sen.safetensors`（`751f71a5…`）保持不变。
+- 两种 Qwen 模式共用的 `lora_models` 在 Sen 后新增 SenMasked，显示名和标识均为 `SenMasked`，默认强度 0.8。保持空白 LoRA 默认值及已有用户选择；没有迁移会话或历史参数。
+- 配置对应的生成管线断言已同步六个 LoRA（补上已有的 Darkest Dungeon）。后端全量 186 项检查仍有原有 2 项错误、1 项跳过：双语数据集脚本缺少 `forbidden_list`，style-free 数据集脚本缺失；其余通过。前端 132 项测试和生产构建通过，lint 仍为 `helpers.ts` / `indexedDB.ts` 原有的 24 项错误。
+- ComfyUI 连续空闲 60 秒后暂停应用生图，再通过 `DOCKER_HOST=ssh://nekocon-server` 完整执行 `deploy: remote` 等价流程：down、仅删除 `ai-draw_frontend-dist`、build、up。部署包含当前工作区；未回退用户已有的前端编辑。数据库、上传及模型缓存卷保留。
+- 部署后，公网 `/api/service/workflows` 和两个认证 `/api/service/loras` 接口均返回 Sen/SenMasked；Docker 服务健康。通过真实 `/api/media/generate` 完成一次 1024×1024、40 步、种子 42、强度 0.8 的文生图，输出 RGBA PNG。ComfyUI 历史确认加载 `SenMasked.safetensors`，日志记录 192 个补丁，耗时约 54.82 秒。
+- 检查结果保存在训练输出目录的 `installation.json`、`aidraw-smoke.json` 和 `aidraw-smoke.png`。临时校验账号及应用中的测试图片已清理。
+- 画风观察仅限少量样本：这次普通描述「一个穿蓝色外套、手持红色杯子的女孩，白色背景。」仍偏写实；4000 步训练预览中的「一个女孩」也是写实，而「一个二次元女孩」已有明显插画风格。因此此次上线证明接入可用，不代表画风保留或水印抑制效果已经通过完整对比验收。
+
+### 2026-10-09 SenMaskOnly 关闭底模先验的对照训练
+
+- 用户反馈 SenMasked 的画风比旧 Sen 弱。检查确认两次训练前的 5 张基准图逐像素一致、31 张训练图及标注的 62 个哈希与原准备记录一致；同为 4000 步、种子 42、强度 0.8，旧版 5 张预览都是插画，新版 3 张为写实。对比及诊断保存在 `output/SenMaskedQwen21/diagnostics/`。
+- 主要待验证因素是 `inverted_mask_prior`：SDK 将反向遮罩单独归一化为均值 1，再以 0.5 系数加到底模预测约束损失，约束不会随遮罩面积同比变弱。当前训练遮罩平均约 10.9%，22/31 张涉及人物局部。该机制可能压弱画风，但在完成关闭先验的对照前，不将其记为已经证实的单一原因。
+- 用户明确要求关闭 `inverted_mask_prior` 并启动对照训练。独立任务名 `SenMaskOnlyQwen21`，任务 ID `3fe11c07-f6a9-4eab-8a16-8a16d4deb6de`，北京时间 2026-10-09 03:15 开始运行。
+- 配置 `/opt/ai-toolkit/config/sen_mask_only_qwen_image_21.yaml` 从已完成的 SenMasked 配置复制；除新任务名称外，唯一训练参数变化是 `inverted_mask_prior: true → false`。保留但不启用 `inverted_mask_prior_multiplier: 0.5`；rank 16、Prodigy、4000 步、分辨率、标注丢弃率、采样及保存间隔全部一致。继续使用同一份 `sen_masked_qwen21/train`、遮罩和已有 latent/text 缓存，不续接上一版 LoRA 或优化器。
+- 实验记录位于 `/opt/ai-toolkit/datasets/sen_masked_qwen21/experiments/mask_only/`，`records/ablation.json` 保存配置和数据清单指纹。启动前通过 SQLite backup API 备份任务库为 `config/aitk-ui-before-sen-mask-only-20261008T191349Z.sqlite`（原 11 个任务保留），并完成 WAL checkpoint。
+- 启动器 `/opt/ai-toolkit/config/manage-sen-mask-only.py` 复用上一轮启动/恢复逻辑的快照，使用独立系统服务 `aidraw-sen-mask-only-watch.service` 和实验目录下的状态/日志文件。等待队列连续空闲 60 秒后暂停生图和 ComfyUI；任务结束、其他训练清空且 GPU 释放后自动恢复原先可用的服务。
+- 启动验收：运行配置的先验开关确为 false，其余训练配置与对照基线一致（框架会将 `meta.name` 占位符展开为任务名）；初始 5 张预览完成，已进入实际优化步骤，loss 数值有限，监控运行正常。快照在 `output/SenMaskOnlyQwen21/start-verification.json`，同时保存在实验记录目录。
+- 输出目录 `/opt/ai-toolkit/output/SenMaskOnlyQwen21/`。本次仅启动训练，应用中现有 Sen、SenMasked 的权重及登记项不变，新结果不会自动安装。
+
+### 2026-10-09 SenMaskOnly 上线供对比
+
+- 对照任务已完成 4000 步（epoch 43），监控于北京时间 05:46 恢复生图。用户随后要求加入 ai-draw 测试。
+- 使用最终 `SenMaskOnlyQwen21.safetensors`，经现有安装脚本校验 384 个张量有限、192 个上投影非零，独立安装为 `SenMaskOnly.safetensors`。SHA-256 为 `a2e4b317833e1caf506543b4441e68960aeec329cd7d702b781eb85a8cfe4829`，与训练原件一致。
+- 两种 Qwen 模式共用的 LoRA 列表在 SenMasked 后新增 `SenMaskOnly`，默认强度 0.8。原 Sen 和 SenMasked 的文件、登记项及用户历史参数保留，未更改默认 LoRA 选择。
+- 同步生成管线的七个 LoRA 标签断言；LoRA 目录与生成管线的 19 项相关测试通过。前端及其他应用代码没有本轮新增改动，沿用已验证的当前工作区。
+- 队列连续空闲 60 秒后暂停生图，按 `DOCKER_HOST=ssh://nekocon-server` 执行完整 `deploy: remote` 等价流程，仅删除并刷新 `frontend-dist`。Docker 构建、服务健康检查及公网工作流元数据检查通过，两个认证 LoRA 接口均列出三个 Sen 版本。
+- 通过真实生成接口验证：1024×1024、40 步、种子 42、强度 0.8，输出 RGBA PNG；ComfyUI 历史 `4fe2e6a1-7f8b-45b1-9bba-31c88e5a543d` 确认使用 `SenMaskOnly.safetensors` 并成功完成。临时验证账号及应用测试图片已清理。
+- 验证材料保存在训练输出目录的 `installation.json`、`aidraw-smoke.json`、`aidraw-smoke.png`。沿用上一次的普通描述「一个穿蓝色外套、手持红色杯子的女孩，白色背景。」，这次输出为明显的插画风格；该观察仅代表这一条提示词与种子的结果，完整画风/水印对比由后续测试判断。
+
+### 2026-10-09 删除 Sen Mask 对照实验，保留原版 Sen
+
+- 用户比较后选择原版 Sen，要求删除 Mask 相关内容。移除两个 Qwen 工作流共用列表中的 `SenMasked`、`SenMaskOnly`，同步标签断言；当前只登记 Ameniwa、Sen、Daikei、CZN、Darkest Dungeon。
+- 确认两项训练已完成、监控单元已退出、没有其他任务引用遮罩数据后，通过 AI Toolkit 的任务删除接口移除 `SenMaskedQwen21`、`SenMaskOnlyQwen21` 及其全部输出。删除专用 `sen_masked_qwen21` 数据副本、遮罩、缓存、审阅材料、两份训练配置和启动器，以及 ComfyUI 中两个 Mask 权重，文件总大小为 4,611,094,264 字节（约 4.6 GB）。
+- 原版 `Sen.safetensors`、原训练产物、原训练配置与图片/标注均通过清理前后 SHA-256 核对；其余 10 项训练记录保留。应用会话、消息、生成图片和历史参数未迁移或删除，旧会话中不可用的 LoRA 可手动改选 Sen。
+- 保留小型清理清单 `config/sen-cleanup-20261009T072508Z.json` 和删除前的共享任务库备份 `config/aitk-ui-before-sen-cleanup-20261009T072508Z.sqlite`。此前包含其他任务的共享数据库备份也保留；这些备份不含模型或图片。
+- 当前工作区验证：前端 136 项测试和生产构建通过；后端全量 192 项检查中 189 项通过、1 项跳过，另有原有 2 项脚本错误（双语数据集缺少 `forbidden_list`、style-free 准备脚本缺失）。本次涉及的 LoRA 目录和生成管线检查通过。
+- 已执行 `deploy: remote` 的完整等价流程，仅刷新 `frontend-dist`，其余持久卷保留。线上页面、服务状态、公共元数据及两个认证 LoRA 接口验证通过，两个 Mask 选项均已消失，ComfyUI 的 Sen 系列文件只剩 `Sen.safetensors`。AI Toolkit 任务库完成 WAL checkpoint，完整性检查通过；临时验收账号已删除。

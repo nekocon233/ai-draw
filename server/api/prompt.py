@@ -17,6 +17,7 @@ from utils.llm import InvalidImageError
 from utils.prompt_analysis import describe_image
 from utils.motion_prompt import motion_prompt_input_hash
 from utils.image_reference import normalize_image_reference
+from utils.reference_video import resolve_reference_video
 from utils.config_loader import get_config
 
 # Generation appends the user's description directly, so every preset ends its last sentence.
@@ -94,29 +95,30 @@ PROMPT_PRESETS = (
     PromptPreset(
         id="video_fixed_camera",
         title="固定镜头动作",
-        description="固定人物、背景和镜头，主体按动作参考图运动；文字仅补充额外细节",
+        description="固定人物、背景和镜头，主体按动作参考图或动作视频运动；文字仅补充额外细节",
         output_type="video",
         requires_motion_reference=True,
         workflow_ids=["minimax_h3_ref"],
         prompt=(
             "以原始画面中的主体和场景为基准，保持主体身份、外观、服装、画风、背景布局与光照不变，"
             "镜头位置、角度、距离、景别、取景、裁切和画面比例始终固定。"
-            "主体必须按照动作参考图中的动作与姿态运动，多张动作图按提供顺序依次完成，并自然衔接中间过程。"
-            "基本动作、肢体姿态和动作顺序由动作参考图决定，不需要用户重复描述动作。"
-            "用户手动补充的文字只描述节奏、停顿、音效等额外内容，不得替换、删减、颠倒图中动作或添加不一致的新动作；"
-            "文字与动作图冲突时，以动作参考图为准，没有补充文字时也要完成参考图给出的动作。"
-            "只借用动作图的姿势，不引入其人物外观、材质、背景或拍摄视角。"
+            "主体必须按照动作参考中的动作与姿态运动：多张动作图按提供顺序依次完成并自然衔接中间过程，"
+            "动作视频则按视频中的动作、节奏和时间完成。"
+            "基本动作、肢体姿态和动作顺序由动作参考决定，不需要用户重复描述动作。"
+            "用户手动补充的文字只描述节奏、停顿、音效等额外内容，不得替换、删减、颠倒参考中的动作或添加不一致的新动作；"
+            "文字与动作参考冲突时，以动作参考为准，没有补充文字时也要完成动作参考给出的动作。"
+            "只借用动作参考的姿势和动作，不引入其人物外观、材质、背景或拍摄视角。"
             "背景保持稳定，不推拉、摇移、缩放、抖动或切换镜头，不为展示动作改变取景；"
             "保持肢体结构稳定，避免主体外观漂移、肢体扭曲和画面闪烁。"
         ),
-        hint="仅补充节奏、停顿、音效等额外内容；动作按参考图生成，可留空",
-        images=[PromptPresetImage(label="原始画面", role="主体外观、场景与固定镜头；动作由独立的动作参考图提供", slot=1)],
+        hint="仅补充节奏、停顿、音效等额外内容；动作按动作参考生成，可留空",
+        images=[PromptPresetImage(label="原始画面", role="主体外观、场景与固定镜头；动作由独立的动作参考图或动作视频提供", slot=1)],
     ),
     # The subject image supplies only appearance; the shot mode also switches the server-side rules.
     PromptPreset(
         id="video_reference_shot",
         title="参考镜头动作",
-        description="主体图只提供人物或元素，镜头、构图、动作与姿势跟随参考图",
+        description="把参考图或参考视频里的人整个换成主体（脸、发型和服装都换），镜头、构图、动作与姿势跟随参考",
         output_type="video",
         requires_motion_reference=True,
         motion_reference_mode="shot",
@@ -124,14 +126,34 @@ PROMPT_PRESETS = (
         prompt=(
             "主体图只用于确定人物或元素的身份与外观，包括脸、发型、服装、配色、体型比例和画风，"
             "不沿用主体图的背景、镜头、取景、构图和姿势。"
-            "镜头位置、角度、距离、景别与构图，主体在画面中的位置和大小，以及动作、姿态和先后顺序都以参考图为准，"
-            "多张参考图按提供顺序依次完成，并以连续镜头平滑衔接。"
-            "参考图中的人物或主要元素替换为主体，不保留其原有身份、外貌和服装，也不引入白模材质、网格或软件界面。"
-            "场景和背景同样以参考图为准；参考图没有实际场景时，按补充描述或保持简洁背景。"
-            "用户手动补充的文字只描述场景、节奏、停顿、音效等额外内容，不得改变参考图给出的镜头和动作。"
+            "镜头位置、角度、距离、景别与构图，主体在画面中的位置和大小，以及动作、姿态和先后顺序都以参考图或参考视频为准；"
+            "多张参考图按提供顺序依次完成，并以连续镜头平滑衔接，参考视频则按视频的镜头、动作和节奏完成。"
+            "参考中的人物或主要元素替换为主体，不保留其原有身份、外貌和服装，也不引入白模材质、网格或软件界面。"
+            "场景和背景同样以参考为准；参考没有实际场景时，按补充描述或保持简洁背景。"
+            "用户手动补充的文字只描述场景、节奏、停顿、音效等额外内容，不得改变参考给出的镜头和动作。"
         ),
-        hint="可补充场景、节奏、停顿、音效等细节；镜头与动作按参考图生成，可留空",
+        hint="可补充场景、节奏、停顿、音效等细节；镜头与动作按参考图或参考视频生成，可留空",
         images=[PromptPresetImage(label="主体图", role="只提供人物或元素的外观；不沿用背景、镜头、构图和姿势", slot=1)],
+    ),
+    # Face swap keeps the reference person's outfit and body; only the face and hair come from the subject image.
+    PromptPreset(
+        id="video_reference_face",
+        title="参考镜头换脸",
+        description="只把参考图或参考视频里人物的脸和发型换成主体，服装、体型、动作、镜头与场景都保留",
+        output_type="video",
+        requires_motion_reference=True,
+        motion_reference_mode="face",
+        workflow_ids=["minimax_h3_ref"],
+        prompt=(
+            "主体图只用于确定人物的脸、五官、脸型、肤色、发型和发色，不沿用主体图的服装、配饰、体型、背景、镜头、构图和姿势。"
+            "参考图或参考视频中的人物保留原有的服装、配饰、体型和配色，只把脸和头发换成主体的脸和发型，并与原画面的画风融为一体。"
+            "镜头位置、角度、距离、景别与构图，人物在画面中的位置和大小，以及动作、姿态、表情和先后顺序都以参考为准；"
+            "多张参考图按提供顺序依次完成，并以连续镜头平滑衔接，参考视频则按视频的镜头、动作和节奏完成。"
+            "场景和背景同样以参考为准；参考没有实际场景时，按补充描述或保持简洁背景。"
+            "用户手动补充的文字只描述场景、节奏、停顿、音效等额外内容，不得改变参考给出的镜头、服装和动作。"
+        ),
+        hint="可补充场景、节奏、停顿、音效等细节；只换脸和发型，服装、镜头与动作按参考生成，可留空",
+        images=[PromptPresetImage(label="主体图", role="只提供脸和发型；不沿用服装、体型、背景、镜头和姿势", slot=1)],
     ),
     PromptPreset(
         id="video_transition",
@@ -198,21 +220,33 @@ async def analyze_motion_for_prompt(
     db: Session = Depends(get_db),
     service: AIDrawService = Depends(get_ai_draw_service),
 ) -> MotionPromptSnapshot:
-    from server.api.generation import _validate_reference_ownership
+    from server.api.generation import _validate_motion_video_ownership, _validate_reference_ownership
     references = [request.reference_image, *request.motion_reference_images]
     for index, image in enumerate(references):
         _validate_reference_ownership(image, current_user.id, db, '原始画面' if index == 0 else f'动作参考 {index}')
+    _validate_motion_video_ownership(request.motion_reference_video, current_user.id)
+    upload_dir = get_config().paths.upload_dir
     try:
         images = await asyncio.to_thread(lambda: [
-            normalize_image_reference(image, get_config().paths.upload_dir, '原始画面' if index == 0 else f'动作参考 {index}')
+            normalize_image_reference(image, upload_dir, '原始画面' if index == 0 else f'动作参考 {index}')
             for index, image in enumerate(references)
         ])
+        video_path = (
+            str(resolve_reference_video(request.motion_reference_video, upload_dir))
+            if request.motion_reference_video else None
+        )
     except (ValueError, InvalidImageError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     mode = request.motion_reference_mode
-    signature = motion_prompt_input_hash(request.reference_image, request.motion_reference_images, request.description, mode)
+    signature = motion_prompt_input_hash(
+        request.reference_image, request.motion_reference_images, request.description, mode,
+        video=request.motion_reference_video,
+    )
+    label = "动作视频" if video_path else "动作参考图"
     try:
-        snapshot = await service.analyze_motion_prompt(images[0], images[1:], request.description, signature, current_user.id, mode)
+        snapshot = await service.analyze_motion_prompt(
+            images[0], images[1:], request.description, signature, current_user.id, mode, video_path=video_path,
+        )
         return MotionPromptSnapshot(**snapshot)
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"动作参考图分析失败：{error}") from error
+        raise HTTPException(status_code=502, detail=f"{label}分析失败：{error}") from error

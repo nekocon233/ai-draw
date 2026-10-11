@@ -84,6 +84,7 @@ class ChatSession(Base):
     config_reference_image = Column(Text, nullable=True)  # base64 编码的参考图
     config_reference_image_2 = Column(Text, nullable=True)  # 第 2 张参考图
     config_reference_image_3 = Column(Text, nullable=True)  # 第 3 张参考图
+    config_reference_images = Column(JSON, nullable=True)   # 有序参考图槽位（含空位）；为 NULL 时回退上面三列
     config_prompt_end = Column(Text, nullable=True)          # 历史视频字段（只读）：结束帧提示词
     config_reference_image_end = Column(Text, nullable=True)  # 视频尾帧图片
     config_is_loop = Column(Boolean, default=False, nullable=True)          # 历史视频字段（只读）：循环
@@ -95,6 +96,7 @@ class ChatSession(Base):
     config_prompt_preset = Column(JSON, nullable=True)                      # 输入框上方所选预设的快照
     config_prompt_preset_choices = Column(JSON, nullable=True)              # 工作流 -> 快照；null 表示手动取消
     config_motion_reference_images = Column(JSON, nullable=True)           # 有序动作参考图
+    config_motion_reference_video = Column(Text, nullable=True)            # 动作视频地址，与动作参考图二选一
     config_motion_prompt = Column(JSON, nullable=True)                     # 看图分析快照，原描述独立保留
     config_input_drafts = Column(JSON, nullable=True)                      # 生图 / 生视频各自的输入栏内容
 
@@ -124,6 +126,7 @@ class ChatMessage(Base):
     reference_image = Column(Text, nullable=True)
     reference_image_2 = Column(Text, nullable=True)  # 第 2 张参考图
     reference_image_3 = Column(Text, nullable=True)  # 第 3 张参考图
+    reference_images = Column(JSON, nullable=True)   # 有序参考图槽位（含空位）；为 NULL 时回退上面三列
     reference_image_end = Column(Text, nullable=True)
     prompt_end = Column(Text, nullable=True)          # 历史视频字段（只读）：结束帧提示词
     frame_rate = Column(Float, nullable=True)          # 历史视频字段（只读）：帧率
@@ -133,6 +136,7 @@ class ChatMessage(Base):
     workflow_options = Column(JSON, nullable=True)      # 元数据驱动的工作流参数
     prompt_preset = Column(JSON, nullable=True)         # 所选预设快照；content 只存用户描述
     motion_reference_images = Column(JSON, nullable=True)  # 与本轮生成绑定的动作顺序
+    motion_reference_video = Column(Text, nullable=True)   # 本轮的动作视频地址，与动作参考图二选一
     motion_prompt = Column(JSON, nullable=True)
     
     created_at = Column(DateTime, default=datetime.now, index=True)

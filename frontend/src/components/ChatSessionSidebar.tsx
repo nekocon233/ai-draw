@@ -168,7 +168,7 @@ export default function ChatSessionSidebar() {
         </Tooltip>
         <Popconfirm
           title="确定删除这个对话吗？"
-          description="删除后无法恢复"
+          description="会删除整个会话及全部结果。只删某张图片请使用图片上的删除按钮。"
           onConfirm={(event) => handleDeleteSession(session.id, event!)}
           okText="删除"
           cancelText="取消"

@@ -5,6 +5,9 @@
 .motion-reference-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 252px; overflow-y: auto; overscroll-behavior: contain; }
 .motion-reference-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border-radius: 6px; background: rgba(128,128,128,.07); font-size: 12px; }
 .motion-reference-actions { display: flex; }
+.motion-reference-video { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.motion-reference-video video { display: block; max-width: min(100%, 360px); max-height: 200px; border-radius: 6px; background: #000; }
+.motion-reference-video-info { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; }
 .motion-reference-upload-actions { margin-top: 8px; }
 .motion-prompt-panel { padding: 4px 2px 10px; min-width: 0; font-size: 12px; }
 .motion-prompt-panel p { margin: 4px 0; }
@@ -12,3 +15,6 @@
 .motion-prompt-details textarea { margin-bottom: 5px; }
 .motion-prompt-history { margin: 8px 0; font-size: 12px; }
 .motion-prompt-history div { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .motion-reference-video video { max-height: 140px; }
+}

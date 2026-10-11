@@ -12,9 +12,10 @@ from server.database import get_db
 from server.generation.contracts import GenerationParameters, TaskContext
 from server.generation.coordinator import GenerationCoordinator
 from server.generation.tasks import TaskBusyError, TaskConflictError, TaskOwnershipError
-from server.models import ChatMessage, ChatSession, User
+from server.models import ChatMessage, ChatSession, GeneratedImage, User
 from server.schemas import GenerateMediaRequest, GenerateMediaResponse
 from utils.media_file_references import user_owns_media_path
+from utils.reference_video import motion_video_owner
 
 router = APIRouter()
 
@@ -46,6 +47,17 @@ def _validate_reference_ownership(
         raise HTTPException(status_code=403, detail=f'{label}不属于当前用户')
 
 
+def _validate_motion_video_ownership(value: Optional[str], user_id: int, label: str = '动作视频') -> None:
+    """Motion videos accept only the stored upload form, whose path already names the owner."""
+    if value is None:
+        return
+    owner = motion_video_owner(value)
+    if owner is None:
+        raise HTTPException(status_code=422, detail=f'{label}地址无效，请重新上传')
+    if owner != user_id:
+        raise HTTPException(status_code=403, detail=f'{label}不属于当前用户')
+
+
 
 @router.post("/generate", response_model=GenerateMediaResponse)
 async def generate_media(
@@ -57,6 +69,8 @@ async def generate_media(
 ) -> GenerateMediaResponse:
     if bool(request.message_id) != bool(request.session_id):
         raise HTTPException(status_code=400, detail="message_id 和 session_id 必须同时提供")
+    if request.append_results and not request.message_id:
+        raise HTTPException(status_code=400, detail="追加结果需要指定已有对话")
 
     if request.message_id and request.session_id:
         session = db.query(ChatSession).filter(
@@ -78,21 +92,25 @@ async def generate_media(
         if not source_message:
             raise HTTPException(status_code=400, detail="找不到对应的用户消息")
 
-    for value, label in (
-        (request.reference_image, '参考图 1'),
-        (request.reference_image_2, '参考图 2'),
-        (request.reference_image_3, '参考图 3'),
-        (request.reference_image_end, '尾帧参考图'),
-    ):
-        _validate_reference_ownership(value, current_user.id, db, label)
+    # 归一化参考图槽位：新列表字段优先，否则由 legacy 三字段构建
+    reference_images = (
+        list(request.reference_images) if request.reference_images is not None
+        else [request.reference_image, request.reference_image_2, request.reference_image_3]
+    )
+    for index, value in enumerate(reference_images):
+        _validate_reference_ownership(value, current_user.id, db, f'参考图 {index + 1}')
+    _validate_reference_ownership(request.reference_image_end, current_user.id, db, '尾帧参考图')
 
     for index, value in enumerate(request.motion_reference_images or []):
         _validate_reference_ownership(value, current_user.id, db, f'动作参考 {index + 1}')
+    _validate_motion_video_ownership(request.motion_reference_video, current_user.id)
 
-    parameters = GenerationParameters(**request.model_dump(exclude={"message_id", "session_id", "task_id"}))
+    parameters = GenerationParameters(**request.model_dump(exclude={"message_id", "session_id", "task_id", "append_results"}))
+    result_offset = db.query(GeneratedImage).filter(GeneratedImage.message_id == request.message_id).count() if request.append_results else 0
     context = TaskContext(
         user_id=current_user.id, task_id=request.task_id or uuid.uuid4().hex,
         workflow=request.workflow, session_id=request.session_id, message_id=request.message_id,
+        append_results=request.append_results, result_offset=result_offset,
     )
     try:
         task = generation.reserve(context, parameters)

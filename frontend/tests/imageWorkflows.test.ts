@@ -8,7 +8,7 @@ const qwen = { method_group: 'qwen_image_21_t2i', text_workflow: 'qwen_image_21_
 const workflows: WorkflowMetadata[] = [
   { ...common, ...qwen, key: 'qwen_image_21_t2i', label: 'Qwen', supports_multi_image: true, parameters: [{ name: 'lora_prompt', type: 'text', label: 'LoRA', default: '' }] },
   { ...common, ...qwen, key: 'qwen_image_21_i2i', label: 'Qwen', requires_image: true, supports_multi_image: true, parameters: [{ name: 'lora_prompt', type: 'text', label: 'LoRA', default: '' }] },
-  { ...common, key: 'gpt_image', label: 'GPT Image', supports_multi_image: true },
+  { ...common, key: 'gpt_image', label: 'GPT Image', supports_multi_image: true, max_reference_images: 16 },
   { ...common, key: 'minimax_h3_ref', label: 'MiniMax Ref', category: '图生视频', requires_image: true, output_type: 'video' },
   { ...common, key: 'minimax_h3', label: 'MiniMax', category: '图生视频', supports_optional_keyframes: true, output_type: 'video' },
 ];
@@ -66,23 +66,33 @@ test('switching between multi reference methods leaves the composer untouched', 
   const carried = carryReferenceImages(method('gpt_image'), ['a', 'b', 'c'], null);
   assert.deepEqual(carried.images, ['a', 'b', 'c']);
   assert.deepEqual(carried.parked, NO_PARKED_REFERENCES);
-  assert.deepEqual(carryReferenceImages(method('qwen_image_21_i2i'), [null, null, null], null).images, [null, null, null]);
+  assert.deepEqual(carryReferenceImages(method('qwen_image_21_i2i'), [null, null, null], null).images, []);
+});
+
+test('gpt_image keeps up to 16 references while Qwen keeps 3', () => {
+  const many = Array.from({ length: 17 }, (_, index) => `img-${index + 1}`);
+  const sixteen = carryReferenceImages(method('gpt_image'), many, null);
+  assert.equal(sixteen.images.length, 16);
+  assert.deepEqual(sixteen.parked, { images: ['img-17'], endImage: null });
+  const qwen = carryReferenceImages(method('qwen_image_21_i2i'), many, null);
+  assert.deepEqual(qwen.images, ['img-1', 'img-2', 'img-3']);
+  assert.equal(qwen.parked.images.length, 14);
 });
 
 test('a method with fewer slots keeps what fits and hands the rest back on return', () => {
   const video = carryReferenceImages(method('minimax_h3_ref'), ['a', 'b', 'c'], null);
-  assert.deepEqual(video.images, ['a', null, null]);
+  assert.deepEqual(video.images, ['a']);
   assert.deepEqual(video.parked, { images: ['b', 'c'], endImage: null });
-  const back = carryReferenceImages(method('qwen_image_21_i2i'), ['a', null, null], null, video.parked);
+  const back = carryReferenceImages(method('qwen_image_21_i2i'), ['a'], null, video.parked);
   assert.deepEqual(back.images, ['a', 'b', 'c']);
   assert.deepEqual(back.parked, NO_PARKED_REFERENCES);
 });
 
 test('text only methods park every reference instead of discarding them', () => {
   const text = carryReferenceImages({ ...common, key: 'text-only', label: 'Text only' }, ['a', 'b'], 'end');
-  assert.deepEqual(text.images, [null, null, null]);
+  assert.deepEqual(text.images, []);
   assert.deepEqual(text.parked, { images: ['a', 'b'], endImage: 'end' });
-  assert.deepEqual(carryReferenceImages(method('gpt_image'), [null, null, null], null, text.parked).images, ['a', 'b', null]);
+  assert.deepEqual(carryReferenceImages(method('gpt_image'), [], null, text.parked).images, ['a', 'b']);
 });
 
 test('the end frame only travels with methods that show one', () => {
@@ -98,7 +108,7 @@ test('the end frame only travels with methods that show one', () => {
 test('an image re-added while away is not duplicated by the parked copy', () => {
   const parked = { images: ['a', 'b'], endImage: null };
   const carried = carryReferenceImages(method('qwen_image_21_i2i'), ['b'], null, parked);
-  assert.deepEqual(carried.images, ['b', 'a', null]);
+  assert.deepEqual(carried.images, ['b', 'a']);
   assert.deepEqual(carried.parked, NO_PARKED_REFERENCES);
   const missing = carryReferenceImages(undefined, ['a'], 'end');
   assert.deepEqual(missing.parked, { images: ['a'], endImage: 'end' });
