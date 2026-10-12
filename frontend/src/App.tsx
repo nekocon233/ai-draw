@@ -9,6 +9,7 @@ import { wsManager } from './api/websocket';
 import { useAppStore } from './stores/appStore';
 import { AUTH_REQUIRED_EVENT, clearAccessToken, getAccessTokenExpiry, isLoggedIn } from './utils/helpers';
 import { useGenerationConnection } from './features/generation/useGenerationConnection';
+import ReviewGateBar from './features/agent/ReviewGateBar';
 import './App.css';
 
 const ResultGrid = lazy(() => import('./components/ResultGrid'));
@@ -159,6 +160,7 @@ function AppContent() {
                     <p className="welcome-subtitle">描述画面、添加参考图，或选择视频工作流开始创作</p>
                   </div>
                 )}
+                <ReviewGateBar />
                 <ChatInput />
               </div>
             </div>

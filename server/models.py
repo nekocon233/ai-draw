@@ -162,3 +162,43 @@ class GeneratedImage(Base):
     
     # 关系
     message = relationship("ChatMessage", back_populates="images")
+
+
+class AgentAccessToken(Base):
+    """Agent 个人访问令牌：只存 sha256，可过期、可吊销"""
+    __tablename__ = "agent_access_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    token_prefix = Column(String(16), nullable=False)  # 便于辨认，不足以复原令牌
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class ReviewGate(Base):
+    """Agent 审核关卡：agent 提出问题，用户在会话里选用结果后提交"""
+    __tablename__ = "review_gates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gate_id = Column(String(40), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # 会话删除时数据库级联删除关卡；会话模型不声明这层关系
+    session_id = Column(String(50), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
+    job = Column(String(80), nullable=True)
+    step = Column(String(80), nullable=True)
+    question = Column(Text, nullable=False)
+    min_picks = Column(Integer, nullable=False, default=1)
+    max_picks = Column(Integer, nullable=False, default=1)  # 0 表示只需确认，不选结果
+    rounds = Column(JSON, nullable=True)  # agent 建议查看的助手消息 ID
+    status = Column(String(16), nullable=False, default="open", index=True)  # open / submitted / cancelled
+    decision = Column(String(16), nullable=True)  # approve / redo
+    picks = Column(JSON, nullable=True)  # [{url, message_id, image_index, seed}]
+    note = Column(Text, nullable=True)
+    cancel_reason = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+    submitted_at = Column(DateTime, nullable=True)

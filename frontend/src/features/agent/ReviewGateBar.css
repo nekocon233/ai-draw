@@ -1,0 +1,167 @@
+.review-gate-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 8px;
+  padding: 10px 14px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--control-accent);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.review-gate-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.review-gate-tag {
+  margin-inline-end: 0;
+}
+
+.review-gate-step {
+  overflow: hidden;
+  max-width: 50%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-gate-summary {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.review-gate-expand {
+  display: none;
+}
+
+.review-gate-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-gate-question {
+  max-height: 9.6em;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.review-gate-hint {
+  margin: 0;
+  color: var(--control-accent);
+  font-size: 12px;
+}
+
+.review-gate-summary.is-empty {
+  color: var(--control-accent);
+}
+
+.review-gate-picks {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+}
+
+/* 棋盘格底，透明结果的边缘一眼可见 */
+.review-gate-pick {
+  position: relative;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background-color: #fff;
+  background-image: conic-gradient(#d9d9d9 25%, #fff 0 50%, #d9d9d9 0 75%, #fff 0);
+  background-size: 12px 12px;
+}
+
+.review-gate-pick img,
+.review-gate-pick video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.review-gate-unpick {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.review-gate-unpick:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.review-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .review-gate-bar {
+    padding: 8px 10px;
+    border-radius: 14px;
+  }
+
+  /* 手机上默认收成一行，展开后再看问题和按钮 */
+  .review-gate-expand {
+    display: inline-flex;
+  }
+
+  .review-gate-bar:not([data-expanded="true"]) .review-gate-body {
+    display: none;
+  }
+
+  .review-gate-actions > .ant-btn {
+    flex: 1 1 0;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .review-gate-unpick::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
+
+  .review-gate-actions > .ant-btn,
+  .review-gate-expand {
+    min-height: 44px;
+  }
+
+  .review-gate-expand {
+    min-width: 44px;
+  }
+}

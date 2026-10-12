@@ -5,6 +5,7 @@ import { apiService } from '../../api/services';
 import { useAppStore } from '../../stores/appStore';
 import { isLoggedIn } from '../../utils/helpers';
 import { createGenerationEventHandler } from './events';
+import { adoptRound, handleAgentBridgeMessage, startAgentBridge, syncSessionTail } from '../agent/connection';
 
 export function useGenerationConnection(messageApi: MessageInstance) {
   useEffect(() => {
@@ -22,7 +23,10 @@ export function useGenerationConnection(messageApi: MessageInstance) {
         return disposed ? [] : images;
       },
       notify: (kind, text) => { if (!disposed) void messageApi[kind](text); },
+      adoptRound: async (sessionId, messageId) => { if (!disposed) await adoptRound(sessionId, messageId); },
+      syncSession: async sessionId => { if (!disposed) await syncSessionTail(sessionId); },
     });
+    const stopAgentBridge = startAgentBridge();
 
     const unsubscribe = wsManager.subscribe(message => {
       if (disposed) return;
@@ -36,6 +40,8 @@ export function useGenerationConnection(messageApi: MessageInstance) {
         useAppStore.setState({ isGeneratingPrompt: message.data.is_generating_prompt === true });
       }
       void handleMessage(message);
+      // Shares this subscription: wsManager.disconnect() drops every handler at once.
+      void handleAgentBridgeMessage(message);
     });
 
     const loadData = async () => {
@@ -58,6 +64,7 @@ export function useGenerationConnection(messageApi: MessageInstance) {
     return () => {
       disposed = true;
       unsubscribe();
+      stopAgentBridge();
       wsManager.disconnect();
     };
   }, [messageApi]);

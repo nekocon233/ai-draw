@@ -25,6 +25,7 @@ import { useSessionOutline } from '../hooks/useSessionOutline';
 import { AUTH_REQUIRED_EVENT } from '../utils/helpers';
 import type { FrameWorkspaceSnapshot } from './FrameExtractionModal';
 import RoundNavigator from './RoundNavigator';
+import GatePickToggle from '../features/agent/GatePickToggle';
 import './ResultGrid.css';
 
 const loadFrameEditors = () => import('./FrameExtractionModal');
@@ -767,7 +768,8 @@ export default function ResultGrid() {
   const downloadImage = (imageUrl: string, index: number) => {
     const link = document.createElement('a');
     link.href = imageUrl;
-    link.download = `ai-draw-${Date.now()}-${index + 1}.${isVideoUrl(imageUrl) ? 'mp4' : 'png'}`;
+    const extension = /\.(png|jpe?g|webp|gif|mp4|webm)$/i.exec(imageUrl.split(/[?#]/)[0])?.[1].toLowerCase();
+    link.download = `ai-draw-${Date.now()}-${index + 1}.${extension ?? (isVideoUrl(imageUrl) ? 'mp4' : 'png')}`;
     link.click();
   };
 
@@ -1077,7 +1079,9 @@ export default function ResultGrid() {
                       size="small"
                       icon={<EditOutlined />}
                       disabled={isGenerating || deletingMedia || !isWorkflowAvailable(message.params?.workflow)}
-                      title={!isWorkflowAvailable(message.params?.workflow) ? '此生成方式已停用，请选择可用方式创建新任务。原结果已保留。' : undefined}
+                      title={isWorkflowAvailable(message.params?.workflow) ? undefined : message.params?.workflow
+                        ? '此生成方式已停用，请选择可用方式创建新任务。原结果已保留。'
+                        : '这一轮不是生成任务（例如 Agent 提交的处理结果），不能重新生成。'}
                       onClick={() => startEdit(message)}
                       aria-label="编辑并重新生成"
                     />
@@ -1200,6 +1204,9 @@ export default function ResultGrid() {
                               >
                                 <span>种子 {seed}</span>
                               </button>
+                            )}
+                            {!failed && (
+                              <GatePickToggle sessionId={message.session_id} messageId={message.id} url={image} strip={stripImage} />
                             )}
                             <div className="chat-image-overlay" aria-label={`媒体 ${imgIndex + 1} 操作`}>
                               {!video && !failed && acceptsReferenceImage && (

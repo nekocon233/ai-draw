@@ -1,6 +1,7 @@
 """Own the single generation slot without mixing it with provider or HTTP state."""
 import asyncio
 import time
+from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
@@ -37,12 +38,19 @@ class GenerationTask:
 class TaskManager:
     """All slot transitions are synchronous and run on the FastAPI event loop."""
 
-    def __init__(self, *, clock: Callable[[], float] = time.time, retention: float = 1800, limit: int = 256):
+    def __init__(
+        self, *, clock: Callable[[], float] = time.time, retention: float = 1800, limit: int = 256,
+        history_retention: float = 24 * 3600, history_limit: int = 512,
+    ):
         self._active: Optional[GenerationTask] = None
         self._recent: dict[int, dict] = {}
+        # Finished tasks by (owner, task_id), so a client can follow its own task after newer ones ran.
+        self._history: OrderedDict[tuple[int, str], dict] = OrderedDict()
         self._clock = clock
         self._retention = retention
         self._limit = limit
+        self._history_retention = history_retention
+        self._history_limit = history_limit
 
     @property
     def active(self) -> Optional[GenerationTask]:
@@ -99,6 +107,9 @@ class TaskManager:
         snapshot.update(error=error, finished_at=self._clock())
         self._recent.pop(task.context.user_id, None)
         self._recent[task.context.user_id] = snapshot
+        key = (task.context.user_id, task.context.task_id)
+        self._history.pop(key, None)
+        self._history[key] = deepcopy(snapshot)
         self._active = None
         task.runner = None
         task.finished.set()
@@ -109,6 +120,14 @@ class TaskManager:
             return self._snapshot(self._active)
         self._prune()
         return deepcopy(self._recent.get(user_id))
+
+    def task(self, user_id: int, task_id: str) -> Optional[dict]:
+        """One task's snapshot, visible only to its owner, while active or retained in history."""
+        active = self._active
+        if active is not None and active.context.task_id == task_id and active.context.user_id == user_id:
+            return self._snapshot(active)
+        self._prune()
+        return deepcopy(self._history.get((user_id, task_id)))
 
     def _snapshot(self, task: GenerationTask) -> dict:
         context = task.context
@@ -125,6 +144,7 @@ class TaskManager:
             "phase": task.phase,
             "images": list(task.artifacts) if task.phase in ("completed", "cancelled") else [],
             "seeds": list(task.seeds) if task.phase in ("completed", "cancelled") else [],
+            "artifact_count": len(task.artifacts),
             "error": None,
             "finished_at": None,
         }
@@ -140,3 +160,8 @@ class TaskManager:
             del self._recent[user]
         while len(self._recent) > self._limit:
             del self._recent[next(iter(self._recent))]
+        while self._history and (
+            len(self._history) > self._history_limit
+            or now - next(iter(self._history.values()))["finished_at"] >= self._history_retention
+        ):
+            self._history.popitem(last=False)

@@ -156,3 +156,45 @@ test('progress events remain scoped to the current task without changing images'
   assert.deepEqual(media, []);
   assert.equal(port.getState().isGenerating, true);
 });
+
+function idleSetup() {
+  const context = setup();
+  context.port.finish();
+  const calls: string[] = [];
+  context.port.adoptRound = async (sessionId, messageId) => { calls.push(`adopt:${sessionId}:${messageId}`); };
+  context.port.syncSession = async sessionId => { calls.push(`sync:${sessionId}`); };
+  return { ...context, calls, handler: createGenerationEventHandler(context.port) };
+}
+
+test('an idle tab follows a task started elsewhere, showing its round when it is in view', async () => {
+  const { port, calls, handler, media } = idleSetup();
+  await handler({ type: 'state_change', field: 'is_generating', value: true, task_id: 'agent-task', session_id: 'session-a', message_id: 'agent-reply' });
+  assert.deepEqual(calls, ['adopt:session-a:agent-reply']);
+  assert.equal(port.getState().currentGenerationTaskId, 'agent-task');
+  await handler({ type: 'state_change', field: 'media_generated', value: { image: 'agent.png', index: 0 }, task_id: 'agent-task', message_id: 'agent-reply' });
+  assert.deepEqual(media, ['agent.png']);
+
+  const elsewhere = idleSetup();
+  await elsewhere.handler({ type: 'state_change', field: 'is_generating', value: true, task_id: 't', session_id: 'session-b', message_id: 'other-reply' });
+  assert.deepEqual(elsewhere.calls, [], 'rounds of other sessions are not loaded');
+  assert.equal(elsewhere.port.getState().currentGeneratingMessageId, 'other-reply');
+});
+
+test('a busy tab never adopts another task', async () => {
+  const { port, handler } = setup();
+  let adopted = false;
+  port.adoptRound = async () => { adopted = true; };
+  const handle = createGenerationEventHandler(port);
+  await handle({ type: 'state_change', field: 'is_generating', value: true, task_id: 'agent-task', session_id: 'session-a', message_id: 'agent-reply' });
+  await handler({ type: 'state_change', field: 'is_generating', value: true, task_id: 'agent-task', session_id: 'session-a', message_id: 'agent-reply' });
+  assert.equal(adopted, false);
+  assert.equal(port.getState().currentGenerationTaskId, 'task-a');
+});
+
+test('foreign tasks ending in the visible session refresh it', async () => {
+  const { calls, handler } = idleSetup();
+  await handler({ type: 'state_change', field: 'is_generating', value: false, task_id: 'gone', session_id: 'session-a', message_id: 'x-reply' });
+  await handler({ type: 'state_change', field: 'error', value: 'boom', task_id: 'gone', session_id: 'session-b', message_id: 'y-reply' });
+  await handler({ type: 'state_change', field: 'generation_cancelled', value: 'stop', task_id: 'gone', session_id: 'session-a', message_id: 'x-reply' });
+  assert.deepEqual(calls, ['sync:session-a', 'sync:session-a']);
+});

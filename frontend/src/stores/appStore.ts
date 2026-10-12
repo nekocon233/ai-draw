@@ -27,6 +27,7 @@ import type { MotionPromptSnapshot, PromptPreset, PromptPresetChoices, WorkflowM
 import { rememberWorkflowPromptPreset, resolveWorkflowPromptPreset, restorePromptPresetChoices } from '../utils/promptPresets';
 import { motionPromptSource, resolveMotionPrompt } from '../utils/motionPrompt';
 import { alignSeeds, buildMediaSeeds, clearFixedSeeds } from '../utils/generationSeed';
+import { consumeSessionLink } from '../features/agent/deepLink';
 import { carryReferenceImages, compactReferenceImages, getImageGenerationSettings, getGenerationCount, getWorkflowOptions, NO_PARKED_REFERENCES, resolveAvailableWorkflow, restoreWorkflowSelection, getWorkflowMethodKey, rememberWorkflowMethod, resolveInputWorkflow, resolveInputLora, type ParkedReferences } from '../utils/workflowOptions';
 import { compactImageReferences, getImageMentionError, getPresetBlocker, supportsImageMentions } from '../utils/imageMentions';
 import { getMotionReferenceError, isMotionVideoUrl, MAX_MOTION_REFERENCES } from '../utils/motionReferences';
@@ -1310,6 +1311,9 @@ export const useAppStore = create<AppState>((set, get, store) => ({
         console.error('获取用户配置失败:', error);
       }
       if (sequence !== sessionSwitchSequence) return;
+      // 链接里的 ?session=（例如 Agent 给的审核链接）优先于上次打开的会话
+      const linkedSessionId = consumeSessionLink();
+      if (linkedSessionId && sessions.some(s => s.id === linkedSessionId)) restoredSessionId = linkedSessionId;
       
       // 验证恢复的 sessionId 是否存在
       if (restoredSessionId && sessions.some(s => s.id === restoredSessionId)) {

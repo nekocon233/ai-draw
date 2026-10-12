@@ -1,0 +1,6 @@
+interface:
+  display_name: "ai-draw 游戏美术"
+  short_description: "用本机 ai-draw 生成游戏素材，在网页里让用户挑图审核"
+  default_prompt: "使用 $aidraw 为当前项目生成素材，关键步骤在 ai-draw 网页里让我挑选。"
+policy:
+  allow_implicit_invocation: true

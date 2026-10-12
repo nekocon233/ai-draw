@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from server.api import media, prompt, service
 from server.api.user import router as user_router
 from server.api.session import router as session_router
+from server.api.agent import router as agent_router
 
 # 创建主路由
 router = APIRouter()
@@ -18,5 +19,6 @@ router.include_router(prompt.router)
 router.include_router(service.router)
 router.include_router(user_router)
 router.include_router(session_router)
+router.include_router(agent_router)
 
 __all__ = ['router']

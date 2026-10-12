@@ -8,6 +8,7 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from server.agent_bridge.tokens import PAT_PREFIX, user_for_access_token
 from server.database import get_db
 from server.models import User
 from utils.config_loader import get_auth_config
@@ -41,7 +42,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def get_user_from_token(token: str, db: Session) -> Optional[User]:
-    """验证 JWT 并返回仍处于启用状态的用户。"""
+    """验证 JWT 或 Agent 访问令牌，返回仍处于启用状态的用户。"""
+    if token.startswith(PAT_PREFIX):
+        return user_for_access_token(db, token)
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")

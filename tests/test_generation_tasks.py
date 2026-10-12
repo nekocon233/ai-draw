@@ -49,6 +49,27 @@ class TaskManagerTests(unittest.IsolatedAsyncioTestCase):
         clock[0] += 30
         self.assertIsNone(manager.last_task(1))
 
+    async def test_finished_tasks_stay_queryable_by_owner_and_task_id(self):
+        clock = [10.0]
+        manager = TaskManager(clock=lambda: clock[0], history_retention=60, history_limit=2)
+        for name in ("a", "b", "c"):
+            task = manager.reserve(context(task=name))
+            task.artifacts.append(f"/uploads/generated/1/{name}.png")
+            manager.finish(task, "completed")
+            clock[0] += 1
+        self.assertIsNone(manager.task(1, "a"), "history keeps only the newest tasks")
+        snapshot = manager.task(1, "b")
+        snapshot["images"].clear()
+        self.assertEqual(manager.task(1, "b")["images"], ["/uploads/generated/1/b.png"])
+        self.assertIsNone(manager.task(2, "c"))
+        active = manager.reserve(context(task="d"))
+        self.assertEqual(manager.task(1, "d")["phase"], "reserved")
+        self.assertIsNone(manager.task(2, "d"))
+        manager.finish(active, "error", error="boom")
+        self.assertEqual(manager.task(1, "d")["error"], "boom")
+        clock[0] += 60
+        self.assertIsNone(manager.task(1, "c"))
+
     async def test_old_task_cannot_release_a_new_reservation(self):
         manager = TaskManager()
         old = manager.reserve(context())

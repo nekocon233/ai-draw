@@ -1,0 +1,93 @@
+/* 种子在左上，选用在右上；审核打开时常驻，用强调色和种子标签区分 */
+.gate-pick-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--control-accent);
+  border-radius: 13px;
+  background: #fff;
+  color: var(--control-accent);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  line-height: 26px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.gate-pick-toggle:hover {
+  background: #eef4ff;
+}
+
+.gate-pick-toggle.is-picked,
+.gate-pick-toggle.is-picked:hover {
+  background: var(--control-accent);
+  color: #fff;
+}
+
+.gate-pick-toggle.is-nudged-0 {
+  animation: gate-pick-nudge-a 0.5s ease-in-out 3;
+}
+
+.gate-pick-toggle.is-nudged-1 {
+  animation: gate-pick-nudge-b 0.5s ease-in-out 3;
+}
+
+@keyframes gate-pick-nudge-a {
+  50% { transform: scale(1.18); box-shadow: 0 0 0 4px var(--accent-subtle), 0 1px 4px rgba(0, 0, 0, 0.28); }
+}
+
+@keyframes gate-pick-nudge-b {
+  50% { transform: scale(1.18); box-shadow: 0 0 0 4px var(--accent-subtle), 0 1px 4px rgba(0, 0, 0, 0.28); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-pick-toggle.is-nudged-0,
+  .gate-pick-toggle.is-nudged-1 {
+    animation: none;
+  }
+}
+
+.gate-pick-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 长条图的操作栏在顶部，种子在左下，选用放右下 */
+.gate-pick-toggle.is-strip {
+  top: auto;
+  bottom: 8px;
+}
+
+.gate-pick-outline {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border: 2px solid var(--control-accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .gate-pick-toggle {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 32px;
+  }
+
+  /* 视觉保持小巧，触控区域扩到 44px */
+  .gate-pick-toggle::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
+}

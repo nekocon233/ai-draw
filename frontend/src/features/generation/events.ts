@@ -18,7 +18,13 @@ export interface GenerationEventPort {
   appendMedia(messageId: string, image: string, index: number, seed: number | null): void;
   refreshRound(sessionId: string, messageId: string): Promise<string[]>;
   notify(kind: 'info' | 'success' | 'warning' | 'error', text: string): void;
+  /** Bring a round started elsewhere (an agent or another tab) into the visible session before following it. */
+  adoptRound?(sessionId: string, messageId: string): Promise<void>;
+  /** Reload the visible session after a task this tab was not following has ended. */
+  syncSession?(sessionId: string): Promise<void>;
 }
+
+const TERMINAL_FIELDS = new Set(['error', 'generation_cancelled']);
 
 export function matchesGeneration(message: WSMessage, state: GenerationState): boolean {
   if (!state.currentGeneratingMessageId) return false;
@@ -44,6 +50,23 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
       port.notify('error', '上次生成失败: ' + (task.error || '未知错误'));
     } else if (images.length > 0) {
       port.notify('success', completionText(images, recovered));
+    }
+  };
+
+  // Same-account tasks started elsewhere are followed live while this tab is idle, as a reconnect would.
+  const followForeignTask = async (message: WSMessage, state: GenerationState): Promise<void> => {
+    const sessionId = message.session_id ?? null;
+    if (message.field === 'is_generating' && message.value === true && message.message_id && message.task_id) {
+      if (state.isGenerating || state.currentGeneratingMessageId) return;
+      if (sessionId && sessionId === state.currentSessionId) await port.adoptRound?.(sessionId, message.message_id);
+      const latest = port.getState();
+      if (latest.isGenerating || latest.currentGeneratingMessageId) return;
+      port.start(message.message_id, message.task_id);
+      return;
+    }
+    const ended = TERMINAL_FIELDS.has(message.field ?? '') || (message.field === 'is_generating' && message.value === false);
+    if (ended && message.task_id && sessionId && sessionId === state.currentSessionId) {
+      await port.syncSession?.(sessionId);
     }
   };
 
@@ -84,7 +107,11 @@ export function createGenerationEventHandler(port: GenerationEventPort) {
     }
 
     const state = port.getState();
-    if (message.type !== 'state_change' || !matchesGeneration(message, state)) return;
+    if (message.type !== 'state_change') return;
+    if (!matchesGeneration(message, state)) {
+      await followForeignTask(message, state);
+      return;
+    }
     const messageId = state.currentGeneratingMessageId!;
     if (message.field === 'generation_progress' && typeof message.value === 'string') {
       port.progress?.(message.value);

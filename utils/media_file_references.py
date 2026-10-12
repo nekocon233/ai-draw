@@ -20,6 +20,7 @@ USER_SCOPED_ROOTS = {
     'gif',
     'apng',
     'upscaled',
+    'agent',  # agent 上传的原始文件，见 server/agent_bridge/uploads.py
 }
 
 
@@ -64,6 +65,11 @@ def canonical_upload_url(file_path: str) -> str | None:
 def _storage_path_variants(file_path: str) -> tuple[str, ...]:
     relative = _relative_storage_path(file_path)
     return tuple({file_path, relative, f'uploads/{relative}', f'/uploads/{relative}'})
+
+
+def storage_path_variants(file_path: str) -> tuple[str, ...]:
+    """All spellings a stored media path may have in the database."""
+    return _storage_path_variants(file_path)
 
 
 def user_owns_media_path(db: Session, user_id: int, file_path: str) -> bool:
