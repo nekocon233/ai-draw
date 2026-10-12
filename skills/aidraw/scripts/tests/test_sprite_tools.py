@@ -1,4 +1,4 @@
-"""sprite_tools on synthetic images: keying, edges, sizing, tiling and previews."""
+"""sprite_tools on synthetic images: edges, sizing, tiling, frames and previews."""
 import contextlib
 import io
 import json
@@ -40,18 +40,17 @@ class SpriteToolTests(unittest.TestCase):
         image.save(self.path("figure.png"))
         return self.path("figure.png")
 
-    def test_key_removes_only_background_connected_to_the_border(self):
-        code, result = run("key", self.character_on_white(), "-o", self.path("keyed.png"), "--feather", "0")
-        self.assertEqual(code, 0)
-        self.assertEqual(result["color"], "#ffffff")
-        with Image.open(self.path("keyed.png")) as keyed:
-            self.assertEqual(keyed.getpixel((5, 5))[3], 0)
-            self.assertEqual(keyed.getpixel((100, 140))[3], 255, "white inside the subject stays opaque")
-            self.assertEqual(keyed.getpixel((80, 200))[3], 255)
+    def cutout_figure(self):
+        """What a background-removal algorithm hands back: the same figure on a transparent canvas."""
+        image = Image.new("RGBA", (200, 300), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((70, 40, 130, 280), fill=(40, 40, 60, 255))
+        draw.rectangle((90, 120, 110, 160), fill=(255, 255, 255, 255))
+        image.save(self.path("cutout.png"))
+        return self.path("cutout.png")
 
     def test_fit_height_puts_the_feet_on_the_bottom_edge(self):
-        run("key", self.character_on_white(), "-o", self.path("keyed.png"), "--feather", "0")
-        code, result = run("fit", self.path("keyed.png"), "-o", self.path("fit.png"), "--height", "120", "--side-pad", "3")
+        code, result = run("fit", self.cutout_figure(), "-o", self.path("fit.png"), "--height", "120", "--side-pad", "3")
         self.assertEqual(code, 0)
         with Image.open(self.path("fit.png")) as fitted:
             fitted.load()
@@ -126,6 +125,65 @@ class SpriteToolTests(unittest.TestCase):
             self.assertEqual(mock.size, (1280 * 2 + 8, 720))
             unlit, lit = mock.getpixel((1000, 100)), mock.getpixel((1280 + 8 + 1000, 100))
         self.assertLess(sum(lit), sum(unlit) / 3, "ambient light darkens what the lights do not reach")
+
+    def test_rectify_straightens_a_perspective_quad_into_an_upright_rectangle(self):
+        image = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        quad = [(70, 40), (330, 30), (360, 270), (40, 262)]  # wider at the bottom, like looking up at it
+        draw.polygon(quad, fill=(200, 210, 190, 255))
+        draw.line((200, 35, 200, 266), fill=(20, 20, 20, 255), width=6)  # the middle mullion
+        image.save(self.path("quad.png"))
+        code, result = run("rectify", self.path("quad.png"), "-o", self.path("rect.png"), "--erode", "3")
+        self.assertEqual(code, 0)
+        for (x, y), (ex, ey) in zip(result["corners"], quad):
+            self.assertLess(abs(x - ex) + abs(y - ey), 8)
+        with Image.open(self.path("rect.png")) as rect:
+            rect.load()
+        alpha = rect.getchannel("A")
+        self.assertEqual(alpha.getbbox(), (0, 0, rect.width, rect.height))
+        inner = [alpha.getpixel((x, y)) for x in (4, rect.width - 5) for y in (4, rect.height - 5)]
+        self.assertTrue(all(value > 200 for value in inner), "the corners are filled: the quad became the rectangle")
+        column_darkness = [sum(rect.getpixel((x, y))[0] < 80 for y in range(10, rect.height - 10)) for x in range(rect.width)]
+        mullion = max(range(rect.width), key=lambda x: column_darkness[x])
+        self.assertGreater(column_darkness[mullion], (rect.height - 20) * 0.9, "the mullion is vertical after rectifying")
+        code, result = run("rectify", self.path("quad.png"), "-o", self.path("x.png"), "--corners", "1,2;3,4")
+        self.assertEqual(code, 1)
+
+    def test_video_frames_become_an_aligned_sprite_sheet(self):
+        import shutil
+        import subprocess
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg is required")
+        video = self.path("clip.mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=white:size=96x128:rate=24", "-t", "1",
+                        "-vf", "drawbox=x=40+5*sin(2*PI*t):y=30:w=20:h=90:color=0x283048:t=fill", "-pix_fmt", "yuv420p", str(video)], check=True)
+        code, result = run("extract", video, "-o", self.path("frames"), "--fps", "8")
+        self.assertEqual((code, result["frames"]), (0, 8))
+        frames = sorted((self.root / "frames").glob("frame_*.png"))
+        self.assertEqual(frames[0].name, "frame_000.png")
+        (self.root / "cut").mkdir()
+        for frame in frames:  # stand-in for `aidraw rmbg --variant …`: the white backdrop becomes transparent
+            with Image.open(frame) as source:
+                cut_frame = source.convert("RGBA")
+            cut_frame.putalpha(cut_frame.convert("L").point(lambda value: 0 if value > 200 else 255))
+            cut_frame.save(self.root / "cut" / frame.name)
+        cut = sorted((self.root / "cut").glob("frame_*.png"))
+        code, result = run("crop-frames", *cut, "-o", self.path("crop"), "--height", "60", "--pad", "2")
+        self.assertEqual(code, 0)
+        self.assertEqual(result["size"][1], 60)
+        self.assertEqual(result["feet_bottom"][0], result["feet_bottom"][1], "one box for all frames keeps the feet still")
+        cropped = sorted((self.root / "crop").glob("frame_*.png"))
+        code, result = run("loop-scan", *cropped, "--min-length", "4", "--top", "3")
+        self.assertEqual((code, result["frames"]), (0, 8))
+        self.assertEqual(len(result["best"]), 3)
+        self.assertTrue(all(item["length"] >= 4 for item in result["best"]))
+        code, result = run("pack-sheet", *cropped, "-o", self.path("sheet.png"), "--json", self.path("sheet.json"), "--columns", "4")
+        self.assertEqual((code, result["columns"], result["rows"], result["frames"]), (0, 4, 2, 8))
+        meta = json.loads(self.path("sheet.json").read_text())
+        with Image.open(self.path("sheet.png")) as sheet:
+            self.assertEqual(sheet.size, (meta["frameWidth"] * 4, meta["frameHeight"] * 2))
+        Image.new("RGBA", (5, 5)).save(self.path("odd.png"))
+        self.assertEqual(run("pack-sheet", cropped[0], self.path("odd.png"), "-o", self.path("bad.png"))[0], 1)
 
     def test_info_reports_background_and_alpha(self):
         code, result = run("info", self.character_on_white())

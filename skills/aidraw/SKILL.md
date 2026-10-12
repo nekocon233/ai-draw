@@ -1,6 +1,6 @@
 ---
 name: aidraw
-description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他项目生成、处理图片素材，并在 ai-draw 网页里让用户预览、选用、写意见后再继续。覆盖文生图、参考图生图（可叠 LoRA）、GPT Image 编辑、抠图、放大、把处理结果发回会话、按项目规格交付。用户说“用 ai-draw 出图”“AI 生图”“做立绘/道具/图标/可平铺背景”“换正式美术”“用 LoRA 画”“在 ai-draw 里挑图”时使用。"
+description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他项目生成、处理图片和动画素材，并在 ai-draw 网页里让用户预览、选用、写意见后再继续。覆盖文生图、参考图生图（可叠 LoRA）、GPT Image 编辑、首尾帧视频转序列帧、抠图、放大、把处理结果发回会话、按项目规格交付。用户说“用 ai-draw 出图”“AI 生图”“做立绘/道具/图标/可平铺背景”“做待机/动作动画”“序列帧”“换正式美术”“用 LoRA 画”“在 ai-draw 里挑图”时使用。"
 ---
 
 # ai-draw 生图工作流
@@ -9,8 +9,8 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 
 ## 1. 适用范围
 
-- 能做：Qwen-Image-2.1 文生图和参考图生图（可叠 LoRA）、GPT Image 编辑、后端抠图和放大、本地后处理（`scripts/`）、把成品和预览图发回会话、开审核关卡等用户决定。
-- 暂不提供命令：视频和序列帧（MiniMax H3 首尾帧、动作参考、抽帧）。这部分属于第二阶段；用户急需时，说明可以先在网页里用 H3 和「帧导出」手动做。
+- 能做：Qwen-Image-2.1 文生图和参考图生图（可叠 LoRA）、GPT Image 编辑、MiniMax H3 首尾帧视频（`aidraw video`）及抽帧做序列帧、后端抠图（背景处理算法）和放大、本地后处理（`scripts/`）、把成品和预览图发回会话、开审核关卡等用户决定。
+- 暂不提供命令：H3 动作参考视频（`minimax_h3_ref`）。需要时可以先在网页里手动做，再用 `aidraw round get` 下载结果。
 - 不在本技能里做：修改或部署 ai-draw。部署会重启后端、中断正在跑的生成，必须先问用户。
 
 ## 2. 开工检查
@@ -39,9 +39,12 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 2. **风格定调**（项目还没有 `art/style.md` 时才做）：同一描述分别用不挂 LoRA 和两三个候选 LoRA 各出 2 张，开关卡请用户选，把结论（LoRA、强度、风格描述、禁用词）写进 `art/style.md`。
 3. **出候选**：`aidraw gen`，每批不超过 4 张。参考图、LoRA、种子见 [workflows-loras.md](references/workflows-loras.md)，具体素材看对应配方。
 4. **自查**：结果下载到本地后，先用 `scripts/sprite_tools.py contact` 拼成编号图自己看一遍。剔掉朝向错、缺手脚、多余文字、背景不干净的；全部不合格就调整后重出，不要把废片交给用户挑。
-5. **开关卡**：`aidraw gate open --session S --question "…" --max N`，告诉用户链接、要选几个、看什么。等待方式见 [review-gates.md](references/review-gates.md)。
+5. **开关卡**：结果一出来就要开。在 `aidraw gen` / `aidraw video` 上加 `--gate "问题"`，或者在同一条后台命令里紧接着运行 `aidraw gate open`，不要等自己被唤醒后再开，也不要先做完后处理再让用户挑。告诉用户链接、要选几个、看什么。等待方式见 [review-gates.md](references/review-gates.md)。
 6. **按结果走**：`approve` 就用选中的图继续；`redo` 读 `note` 调整后重来；关卡被撤销或用户在对话里改了主意，以对话为准。
-7. **后处理**：抠图、去白边、缩放到规格尺寸，做棋盘格和游戏光照预览（[alpha-and-cleanup.md](references/alpha-and-cleanup.md)）。用 `aidraw post` 把成品和预览发回会话，再开一个只需确认的关卡（`--max 0`）。
+7. **后处理**：
+   1. 抠图只用后端的背景处理算法：先用 `scripts/cutout_compare.py` 让全部算法各抠一次，自己看对比图，挑出最好的一种。挑选标准见 [alpha-and-cleanup.md](references/alpha-and-cleanup.md)。
+   2. 需要时做 `rectify`，再缩放到规格尺寸，做棋盘格和游戏光照预览。
+   3. 用 `aidraw post` 发回会话：成品、预览、抠图对比图，文字里写明选了几号算法、为什么。然后开一个只需确认的关卡（`--max 0`）。
 8. **交付**：按项目流程写入文件、更新规格和 asset pack、自检，再交给用户在项目里验收（[phaser-delivery.md](references/phaser-delivery.md)）。
 
 ## 5. 和用户协作
@@ -60,7 +63,9 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 ## 7. 质量红线（游戏素材）
 
 - 朝向、锚点、尺寸以项目规格为准；角色脚底贴画布底边，左右居中。
+- 门窗、柜子、告示牌等平面道具要正交：边框横平竖直，没有透视和倾斜（必要时 `sprite_tools.py rectify` 校正）。
 - 只画固有色：不画投影、光斑、暗角、雾气、颗粒（游戏的光照和后期会叠加上去）。
+- 抠图只用背景处理算法（`aidraw rmbg` / `cutout_compare.py`），不用换色或颜色键：被主体围住的空隙（手臂和身体之间、两腿之间）会残留背景。
 - 透明边缘干净：没有白边、灰边、残留背景块。要在亮、暗两种底上都检查。
 - 缩到交付尺寸后线宽一致（通常 2 px 左右）；同一场景的道具缩放倍数要接近。
 - 不用 `sketch_finish`（参考图成品化）预设做游戏素材：它要求画明暗和接触阴影。
@@ -93,9 +98,17 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 | 角色立绘 | [recipe-character.md](references/recipe-character.md) |
 | 道具与图标 | [recipe-props-icons.md](references/recipe-props-icons.md) |
 | 横向可平铺的墙、地、天花板 | [recipe-tileable.md](references/recipe-tileable.md) |
+| 序列帧动画（待机、动作） | [animation.md](references/animation.md) |
 | 交付到 Phaser 项目 | [phaser-delivery.md](references/phaser-delivery.md) |
 
-本地脚本在 `scripts/`：`sprite_tools.py`（后处理和预览）、`asset_pack.py`（asset pack 与规格）。两者都只依赖 Pillow，运行 `python3 <脚本> -h` 查看子命令。
+本地脚本在 `scripts/`，运行 `python3 <脚本> -h` 查看参数：
+
+- `sprite_tools.py`：后处理和预览。
+- `cutout_compare.py`：全部抠图算法各跑一次，拼出对比图。
+- `asset_pack.py`：asset pack 与规格。
+- `video_to_sheet.py`：一条命令把视频做成对齐好的精灵图，并登记进项目。
+
+这些脚本都只依赖 Pillow；抽帧另需 ffmpeg，抠图通过 `aidraw` 命令调用后端。
 
 ## 10. 禁止事项
 

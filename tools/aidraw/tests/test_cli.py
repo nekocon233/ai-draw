@@ -48,6 +48,7 @@ class FakeAiDraw:
         self.gates = [(200, {"status": "open"})]
         self.uploads = []
         self.files = {"/uploads/generated/1/a.png": png_bytes(), "/uploads/generated/1/b.png": png_bytes()}
+        self.rmbg_broken = set()
 
     @staticmethod
     def take(queue):
@@ -87,6 +88,12 @@ class FakeAiDraw:
                                       {"id": reply, "type": "assistant", "images": images, "seeds": seeds}]}
         if method == "DELETE" and "/messages/" in path:
             return 200, {"success": True}
+        if path == "/api/media/remove-background":
+            if (body.get("birefnet_model") or body.get("rembg_model") or body.get("inspyrenet_mode")) in self.rmbg_broken:
+                return 500, {"detail": "移除背景失败: model download failed"}
+            url = f"/uploads/transparent/1/t{len(self.files)}.png"
+            self.files[url] = png_bytes()
+            return 200, {"success": True, "image_url": url, "background_mode": body["background_mode"]}
         if path == "/api/agent/uploads":
             message = email.message_from_bytes(b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body)
             data = next(part.get_payload(decode=True) for part in message.walk() if part.get_filename())
@@ -232,6 +239,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertTrue(result["resume"].startswith("aidraw wait "))
 
+    def test_video_loops_the_first_frame_and_downloads_the_clip(self):
+        frame = self.root / "base.png"
+        frame.write_bytes(png_bytes())
+        self.fake.round_images = (["/uploads/video/1/clip.mp4"], [99])
+        self.fake.files["/uploads/video/1/clip.mp4"] = b"\x00\x00\x00\x18ftypmp42fake-video"
+        code, result, err = self.run_cli("video", "--session", "session-1", "--prompt", "原地待机，轻微呼吸", "--first", str(frame),
+                                         "--loop", "--seed", "7", "--out", str(self.root / "v"), "--job", str(self.root / "idle.jsonl"))
+        self.assertEqual(code, 0, err)
+        body = self.calls("/api/media/generate")[0]
+        url = body["reference_images"][0]
+        self.assertEqual((body["workflow"], body["count"], body["reference_image_end"]), ("minimax_h3", 1, url))
+        self.assertEqual(body["workflow_options"], {"h3_duration": "4", "h3_aspect_ratio": "auto", "h3_audio": "silent", "h3_fixed_seed": 7})
+        self.assertEqual(self.calls("/api/chat/save")[0]["reference_image_end"], url)
+        self.assertEqual([Image.open(io.BytesIO(data)).mode for data in self.fake.uploads], ["RGB"], "uploaded once, flattened")
+        self.assertTrue(result["images"][0]["file"].endswith(".mp4"))
+        self.assertNotIn("gate", result)
+        code, result, _ = self.run_cli("video", "--session", "session-1", "--prompt", "待机", "--first", str(frame), "--loop",
+                                       "--out", str(self.root / "v2"), "--gate", "选一段视频")
+        self.assertEqual((code, result["gate"]["gate_id"]), (0, "gate-1"), "the gate opens as soon as the clip is ready")
+        self.assertEqual(self.calls("/api/agent/gates")[-1]["rounds"], [result["reply_id"]])
+        self.assertTrue(Path(result["images"][0]["file"]).exists())
+        code, result, _ = self.run_cli("video", "--session", "session-1", "--prompt", "x", "--first", str(frame), "--loop", "--last", str(frame))
+        self.assertEqual(code, 1)
+
     def test_post_uploads_files_unchanged_and_creates_a_round(self):
         image = self.root / "sheet.png"
         data = png_bytes()
@@ -242,6 +273,44 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.fake.uploads, [data])
         self.assertEqual(self.calls("/api/agent/rounds")[0]["media"][1], "/uploads/generated/1/a.png")
         self.assertEqual(result["reply_id"], "msg-r-reply")
+
+    def test_rmbg_all_tries_every_web_algorithm_and_survives_a_broken_one(self):
+        image = self.root / "frame.png"
+        image.write_bytes(png_bytes("RGB", (255, 255, 255)))
+        self.fake.rmbg_broken = {"ZhengPeng7/BiRefNet_dynamic"}
+        code, result, _ = self.run_cli("rmbg", str(image), "--all", "--out", str(self.root / "cut"), "--job", str(self.root / "job.jsonl"))
+        self.assertEqual(code, 0)
+        bodies = self.calls("/api/media/remove-background")
+        self.assertEqual(len(bodies), 13)
+        self.assertEqual({body["background_mode"] for body in bodies}, {"inspyrenet", "birefnet", "ai"}, "no colour keying")
+        self.assertTrue(all(body["image"].startswith("data:image/png;base64,") and "image_url" not in body for body in bodies))
+        self.assertEqual(self.fake.uploads, [], "nothing is left under /uploads/agent")
+        rembg = next(body for body in bodies if body["background_mode"] == "ai")
+        self.assertEqual((rembg["alpha_matting"], rembg["post_process_mask"]), (True, True), "same defaults as the web form")
+        failed = [item for item in result["results"] if "error" in item]
+        self.assertEqual([item["variant"] for item in failed], ["birefnet-dynamic"])
+        done = [item for item in result["results"] if "error" not in item]
+        self.assertEqual(len(done), 12)
+        self.assertTrue(all(Path(item["file"]).name == f"frame.{item['variant']}.png" and Path(item["file"]).exists() for item in done))
+        self.assertIn('"failed": ["birefnet-dynamic"]', (self.root / "job.jsonl").read_text())
+
+    def test_rmbg_one_algorithm_keeps_frame_names_and_server_paths(self):
+        frames = []
+        for name in ("frame_000.png", "frame_001.png"):
+            frames.append(self.root / name)
+            frames[-1].write_bytes(png_bytes("RGB", (255, 255, 255)))
+        code, result, _ = self.run_cli("rmbg", *map(str, frames), "/uploads/generated/1/a.png", "--variant", "rembg-u2netp",
+                                       "--out", str(self.root / "cut"))
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(path.name for path in (self.root / "cut").iterdir()), ["a.png", "frame_000.png", "frame_001.png"])
+        bodies = self.calls("/api/media/remove-background")
+        self.assertEqual({body["rembg_model"] for body in bodies}, {"u2netp"})
+        self.assertEqual(bodies[2]["image_url"], "/uploads/generated/1/a.png")
+        self.fake.rmbg_broken = {"u2netp"}
+        self.assertEqual(self.run_cli("rmbg", str(frames[0]), "--variant", "rembg-u2netp")[0], 3)
+        self.assertEqual(self.run_cli("rmbg", str(frames[0]), "--variant", "edge")[0], 1)
+        code, listed, _ = self.run_cli("rmbg", "--list")
+        self.assertEqual((code, listed["default"], len(listed["variants"])), (0, "birefnet-toonout", 13))
 
     def test_gate_wait_returns_the_choice_and_downloads_picks(self):
         pick = {"url": "/uploads/generated/1/b.png", "message_id": "m-reply", "image_index": 1, "seed": 12}

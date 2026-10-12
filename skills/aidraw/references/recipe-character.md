@@ -22,10 +22,10 @@
 2. **自查**：`sprite_tools.py contact art/work/heroine/candidates/*.png -o art/work/heroine/contact.png`，自己看过之后剔除下列废片：朝向错、缺手缺脚、比例怪、服装和原型不一致、有文字、背景不干净。
 3. **关卡（选 1）**：问题写清楚“朝右、全身、和原型一致”，告诉用户可以在同一会话里自己改提示词重画。
 4. **细化**（可选）：在选中的图上，用同种子小改提示词；或者把它作为参考图 1 做编辑（修手、修脸、统一线宽）。
-5. **后处理**（见 alpha-and-cleanup.md）：`key` 或 `rmbg` → `clean-alpha` → `defringe` → `fit --height <规格高度> --side-pad 2`。
+5. **后处理**（见 alpha-and-cleanup.md）：`cutout_compare.py`（全部算法各抠一次，自己看对比图挑最好的；结果已经做过 clean-alpha 和 defringe）→ `fit --height <规格高度> --side-pad 2`。
    - 脚底必须贴底边。如果头发向后飘，导致身体偏离中线，用 `fit --offset-x` 把身体中线调到画布中心。
    - 朝向不对时，先水平翻转再交付（翻转后检查衣服上的文字或徽章）。
-6. **确认关卡（`--max 0`）**：`aidraw post` 发回四张图：成品、浅色棋盘格预览、深色底预览、`mock` 游戏光照预览。
+6. **确认关卡（`--max 0`）**：`aidraw post` 发回五张图：成品、浅色棋盘格预览、深色底预览、`mock` 游戏光照预览、抠图对比图。文字里写明选了几号算法、为什么。
 7. **交付**：见 phaser-delivery.md。
 
 ## 检查清单

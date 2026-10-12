@@ -18,6 +18,9 @@ from .media import describe, flatten, guess_mime, url_extension
 
 WORKFLOW_ALIASES = {"t2i": "qwen_image_21_t2i", "i2i": "qwen_image_21_i2i", "gpt": "gpt_image"}
 QWEN_WORKFLOWS = {"qwen_image_21_t2i", "qwen_image_21_i2i"}
+# ComfyUI's LoadImage drops alpha, so transparent inputs of these workflows are flattened first.
+COMFY_WORKFLOWS = QWEN_WORKFLOWS | {"minimax_h3", "minimax_h3_ref"}
+H3_DURATIONS = (4, 5, 6, 8, 10, 12, 15)
 MIN_EDGE, MAX_EDGE, MAX_PIXELS = 256, 3072, 3072 * 1536
 SUBMIT_ATTEMPTS = 3
 
@@ -122,7 +125,7 @@ def prepare_refs(client: Client, refs: list[str], workflow: str, flatten_color: 
         facts = describe(path) if path.is_file() else None
         if facts is None:
             raise CliError(f"参考图不是可读取的图片：{ref}")
-        if facts["has_alpha"] and workflow in QWEN_WORKFLOWS and flatten_color:
+        if facts["has_alpha"] and workflow in COMFY_WORKFLOWS and flatten_color:
             log(f"参考图 {path.name} 带透明通道，先铺到 {flatten_color} 底上再上传", quiet)
             path = flatten(path, flatten_color, workdir)
         urls.append(upload_file(client, path)["url"])
@@ -263,7 +266,7 @@ def run_gen(args, config: dict, client: Client) -> tuple[dict, int]:
     workflow = resolve_workflow(args.workflow, bool(refs))
     meta = workflow_meta(client, workflow)
     if meta.get("output_type") != "image":
-        raise CliError(f"{workflow} 输出视频；视频命令在第二阶段提供，目前请在网页里操作")
+        raise CliError(f"{workflow} 输出视频，请用 aidraw video")
     if not 1 <= args.count <= int(meta.get("max_count", 1)):
         raise CliError(f"{workflow} 每次只能生成 1–{meta.get('max_count')} 个结果")
     if refs and not meta.get("supports_multi_image") and len(refs) > 1:
@@ -314,8 +317,17 @@ def run_gen(args, config: dict, client: Client) -> tuple[dict, int]:
         "use_original_size": use_original_size, "workflow_options": options or None,
         "prompt_preset": preset,
     }
-    out_dir = Path(args.out).expanduser() if args.out else default_out(args.session)
+    message = {
+        "content": prompt, "workflow": workflow, "count": args.count, "lora_prompt": lora or None,
+        "width": width, "height": height, "use_original_size": use_original_size,
+        "reference_images": ref_urls or None, "workflow_options": options or None, "prompt_preset": preset,
+    }
+    return submit_and_collect(args, config, client, request=request, message=message, total=args.count)
 
+
+def submit_and_collect(args, config: dict, client: Client, *, request: dict, message: dict, total: int) -> tuple[dict, int]:
+    """Record the round like the web UI (user message first), generate, follow, then download the results."""
+    out_dir = Path(args.out).expanduser() if args.out else default_out(args.session)
     started = time.time()
     message_id = f"msg-{uuid.uuid4()}"
     reply_id = f"{message_id}-reply"
@@ -325,14 +337,9 @@ def run_gen(args, config: dict, client: Client) -> tuple[dict, int]:
         honor_yield(config, args.quiet)
         wait_for_slot(client, config, args.slot_wait, args.quiet)
         if not saved:
-            message = {key: value for key, value in {
-                "session_id": args.session, "message_id": message_id, "type": "user", "content": prompt,
-                "workflow": workflow, "count": args.count, "lora_prompt": lora or None,
-                "width": width, "height": height, "use_original_size": use_original_size,
-                "reference_images": ref_urls or None, "workflow_options": options or None,
-                "prompt_preset": preset,
-            }.items() if value is not None}
-            client.json("POST", "/api/chat/save", json=message)
+            fields = {key: value for key, value in message.items() if value is not None}
+            fields.update(session_id=args.session, message_id=message_id, type="user")
+            client.json("POST", "/api/chat/save", json=fields)
             saved = True
         body = {key: value for key, value in request.items() if value is not None}
         body.update(session_id=args.session, message_id=reply_id, task_id=task_id)
@@ -353,12 +360,61 @@ def run_gen(args, config: dict, client: Client) -> tuple[dict, int]:
                 reply_id=reply_id, task_id=task_id, request=request)
 
     status = follow_and_record(client, config, args, task_id=task_id, session_id=args.session,
-                               reply_id=reply_id, total=args.count)
+                               reply_id=reply_id, total=total)
     payload = finish_round(client, config, status=status, session_id=args.session, message_id=message_id,
                            reply_id=reply_id, task_id=task_id, out_dir=out_dir, request=request, started=started)
     jobs.append(args.job, "gen", step=args.step, **{key: payload[key] for key in (
         "status", "session_id", "message_id", "reply_id", "task_id", "request", "images")})
+    if getattr(args, "gate", None) and status == "completed":
+        open_gate_now(args, client, payload)
     return payload, exit_code_for(status)
+
+
+def open_gate_now(args, client: Client, payload: dict) -> None:
+    """--gate: ask the user right away, so picking never waits for the agent to wake up."""
+    body = {"session_id": args.session, "question": args.gate, "min_picks": 1 if args.gate_max else 0,
+            "max_picks": args.gate_max, "rounds": [payload["reply_id"]],
+            "job": Path(args.job).stem if args.job else None, "step": f"{args.step or 'gen'}-pick"}
+    try:
+        gate = client.json("POST", "/api/agent/gates", json={key: value for key, value in body.items() if value is not None})
+    except ApiError as error:
+        payload["gate_error"] = error.detail  # e.g. another gate is still open in this session
+        return
+    payload["gate"] = {"gate_id": gate["gate_id"], "wait": f"aidraw gate wait {gate['gate_id']}"}
+    jobs.append(args.job, "gate_open", step=body["step"], session_id=args.session, gate_id=gate["gate_id"],
+                question=gate["question"], min_picks=gate["min_picks"], max_picks=gate["max_picks"])
+
+
+def run_video(args, config: dict, client: Client) -> tuple[dict, int]:
+    """MiniMax H3 first/last-frame video; --loop uses the first frame as the last one so the clip loops."""
+    prompt = Path(args.prompt_file).read_text(encoding="utf-8").strip() if args.prompt_file else (args.prompt or "")
+    if not prompt and not args.preset:
+        raise CliError("需要 --prompt、--prompt-file 或 --preset")
+    if args.last and args.loop:
+        raise CliError("--loop 已经把首帧当作尾帧，不要再给 --last")
+    workflow = "minimax_h3"
+    meta = workflow_meta(client, workflow)
+    if meta.get("output_type") != "video":
+        raise CliError(f"{workflow} 不是视频工作流")
+    flatten_color = None if args.keep_alpha else args.flatten
+    first = prepare_refs(client, [args.first], workflow, flatten_color, args.quiet)[0] if args.first else None
+    last = first if args.loop else (prepare_refs(client, [args.last], workflow, flatten_color, args.quiet)[0] if args.last else None)
+    options = {"h3_duration": str(args.duration), "h3_aspect_ratio": args.aspect, "h3_audio": args.audio}
+    if args.seed is not None:
+        options["h3_fixed_seed"] = args.seed
+    preset = resolve_preset(client, args.preset, workflow)
+    request = {
+        "workflow": workflow, "prompt": prompt, "count": 1,
+        "reference_images": [first] if first else None, "reference_image_end": last,
+        "workflow_options": options, "prompt_preset": preset,
+    }
+    message = {
+        "content": prompt, "workflow": workflow, "count": 1,
+        "reference_images": [first] if first else None, "reference_image_end": last,
+        "workflow_options": options, "prompt_preset": preset,
+    }
+    log(f"视频生成通常要 5–15 分钟（{args.duration} 秒）", args.quiet)
+    return submit_and_collect(args, config, client, request=request, message=message, total=1)
 
 
 def follow_and_record(client: Client, config: dict, args, *, task_id: str, session_id: str, reply_id: str,

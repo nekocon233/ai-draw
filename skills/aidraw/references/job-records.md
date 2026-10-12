@@ -71,7 +71,8 @@ python3 - <<'PY'
 import json, datetime
 record = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "event": "deliver",
           "step": "deliver", "key": "heroine", "file": "public/assets/characters/heroine.png",
-          "from": "art/work/heroine/final.png", "commands": ["sprite_tools.py key …", "sprite_tools.py fit …"]}
+          "from": "art/work/heroine/final.png", "cutout": "birefnet-toonout",
+          "commands": ["cutout_compare.py …", "sprite_tools.py fit …"]}
 open("art/jobs/heroine.jsonl", "a", encoding="utf-8").write(json.dumps(record, ensure_ascii=False) + "\n")
 PY
 ```

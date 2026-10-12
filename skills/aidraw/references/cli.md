@@ -52,6 +52,17 @@ aidraw gen --session S --prompt "…" [--ref 文件或/uploads地址 ...] [--lor
 
 超时（退出码 2）时输出带 `resume`，例如 `aidraw wait <task_id> --session S --message msg-…-reply`，照着运行就能接着等并下载。
 
+## 视频（MiniMax H3 首尾帧）
+
+```bash
+aidraw video --session S --first base.png [--last end.png | --loop] [--duration 4|5|6|8|10|12|15] [--seed N] \
+  [--preset video_transition] --prompt-file prompt.txt [--out DIR] [--job … --step …] [--timeout 2700]
+```
+
+- `--loop` 把首帧也当作尾帧，生成首尾相接、能循环的视频；透明首尾帧默认铺白底。
+- 输出 24 fps 的 mp4，下载到 `--out`；每段通常 5–15 分钟，超时用输出里的 `resume` 续等。
+- 抽帧和做精灵图见 animation.md。
+
 ## 读取一轮、发回处理结果
 
 ```bash
@@ -89,7 +100,7 @@ aidraw gate submit <gate_id> --decision approve --pick /uploads/… --note "用�
 
 ```bash
 aidraw upload a.png b.gif [--flatten '#ffffff']                    # → /uploads/agent/… 地址
-aidraw rmbg 文件或/uploads地址 [--mode birefnet|inspyrenet|ai|edge] [--model joelseytre/toonout] [--out DIR]
+aidraw rmbg 文件或/uploads地址... [--variant birefnet-toonout | --all] [--out DIR]   # 背景处理算法；--list 列出 13 种
 aidraw upscale 文件或/uploads地址 [--method realesrgan_anime] [--scale 2|4] [--out DIR]
 aidraw slot                                                        # 生成槽是否空闲
 aidraw stop [--task ID]                                            # 停止自己账号的任务（先问用户）
@@ -97,4 +108,10 @@ aidraw workflows | aidraw loras | aidraw presets [--workflow ID]
 aidraw job show art/jobs/heroine.jsonl                             # 读任务日志
 ```
 
-抠图在后端 CPU 上运行，大图要几十秒；放大同一时间只能跑一个，忙时命令会自动重试。
+抠图只用后端的背景处理算法：InSPyReNet、BiRefNet、rembg 共 13 种，参数和网页一致，没有换色或颜色键。
+- `--all`：每种算法各抠一次，结果文件名带算法名；某个算法失败只记 `error`，不影响其他算法。一般用 `cutout_compare.py`，它会顺带拼出对比图。
+- 多个文件配一个 `--variant`：保持原文件名，适合一组帧。
+- 本地文件以 data URL 发送，不在 `/uploads` 留副本。
+- 跑在后端 CPU 上，每张几秒到几十秒；某个模型第一次用时要先下载。
+
+放大同一时间只能跑一个，忙时命令会自动重试。

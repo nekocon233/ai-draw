@@ -15,12 +15,12 @@ from .client import Client
 from .config import (
     cache_dir, clear_credentials, config_dir, load_config, load_credentials, load_token, save_credentials, session_link,
 )
+from .cutout import add_rmbg_arguments, run_rmbg
 from .errors import ApiError, CliError, EXIT_API, EXIT_AUTH, EXIT_OK
 from .gates import run_gate_cancel, run_gate_get, run_gate_list, run_gate_open, run_gate_submit, run_gate_wait
-from .generate import default_out, log, run_gen, run_post, run_round_get, run_wait, upload_file
+from .generate import H3_DURATIONS, default_out, log, run_gen, run_post, run_round_get, run_video, run_wait, upload_file
 from .media import flatten, png_data_url, url_extension
 
-BACKGROUND_MODES = ("birefnet", "inspyrenet", "ai", "edge", "none")
 UPSCALE_METHODS = ("lanczos", "apisr", "real_cugan", "realesrgan_general", "realesrgan_anime", "invsr")
 
 
@@ -171,28 +171,9 @@ def run_upload(args, config, client):
     return {"ok": True, "uploads": results}, EXIT_OK
 
 
-def _source_url(client: Client, source: str) -> str:
-    return source if source.startswith("/uploads/") else upload_file(client, Path(source).expanduser())["url"]
-
-
 def _output_path(args, url: str, label: str) -> Path:
     directory = Path(args.out).expanduser() if args.out else default_out("media")
     return directory / f"{Path(args.source).stem}.{label}.{url_extension(url)}"
-
-
-def run_rmbg(args, config, client):
-    body = {"image_url": _source_url(client, args.source), "background_mode": args.mode}
-    if args.model:
-        body["birefnet_model" if args.mode == "birefnet" else "rembg_model"] = args.model
-    for item in args.option or []:
-        key, _, value = item.partition("=")
-        try:
-            body[key] = json.loads(value)
-        except ValueError:
-            body[key] = value
-    result = client.json("POST", "/api/media/remove-background", json=body, timeout=900)
-    target = client.download(result["image_url"], _output_path(args, result["image_url"], f"rmbg-{args.mode}"))
-    return {"ok": True, "url": result["image_url"], "file": str(target), "mode": result.get("background_mode")}, EXIT_OK
 
 
 def run_upscale(args, config, client):
@@ -298,6 +279,29 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--timeout", type=float, default=540, help="最长等待秒数，超时退出码 2 并给出续等命令")
     gen.add_argument("--slot-wait", type=float, default=1800, help="最多排队等待生成槽的秒数")
     job_options(gen)
+    gen.add_argument("--gate", metavar="QUESTION", help="生成完成后立刻在会话里开关卡，问用户这个问题")
+    gen.add_argument("--gate-max", type=int, default=1, help="关卡最多选几个，0 表示只需确认")
+
+    video = add(commands, "video", run_video, "MiniMax H3 首尾帧视频：等生成槽空闲，记成会话里的一轮，完成后下载 mp4")
+    video.add_argument("--session", required=True)
+    video.add_argument("--prompt")
+    video.add_argument("--prompt-file")
+    video.add_argument("--first", help="首帧：本地文件或 /uploads 地址")
+    video.add_argument("--last", help="尾帧：本地文件或 /uploads 地址")
+    video.add_argument("--loop", action="store_true", help="尾帧也用首帧，生成能首尾相接的循环")
+    video.add_argument("--duration", type=int, choices=H3_DURATIONS, default=4, help="秒")
+    video.add_argument("--aspect", default="auto", choices=("auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"))
+    video.add_argument("--audio", choices=("silent", "native"), default="silent")
+    video.add_argument("--seed", type=int)
+    video.add_argument("--preset", help="例如 video_transition（首尾帧过渡）或 video_motion（自然动作）")
+    video.add_argument("--flatten", default="#ffffff", metavar="COLOR", help="透明首尾帧铺底颜色（默认白）")
+    video.add_argument("--keep-alpha", action="store_true")
+    video.add_argument("--out", help="视频下载目录")
+    video.add_argument("--timeout", type=float, default=540, help="最长等待秒数；视频通常要 5–15 分钟，超时用 aidraw wait 续等")
+    video.add_argument("--slot-wait", type=float, default=1800)
+    job_options(video)
+    video.add_argument("--gate", metavar="QUESTION", help="生成完成后立刻在会话里开关卡，问用户这个问题")
+    video.add_argument("--gate-max", type=int, default=1, help="关卡最多选几个，0 表示只需确认")
 
     wait = add(commands, "wait", run_wait, "继续等待一个已提交的生成任务")
     wait.add_argument("task_id")
@@ -357,12 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
     gate_submit.add_argument("--note")
     gate_submit.add_argument("--job")
 
-    rmbg = add(commands, "rmbg", run_rmbg, "用后端抠图，结果下载到本地")
-    rmbg.add_argument("source", help="本地文件或 /uploads 地址")
-    rmbg.add_argument("--mode", choices=BACKGROUND_MODES, default="birefnet")
-    rmbg.add_argument("--model", help="birefnet / rembg 模型，例如 joelseytre/toonout")
-    rmbg.add_argument("--option", action="append", help="其他抠图参数 key=value，如 edge_threshold=30")
-    rmbg.add_argument("--out")
+    rmbg = add(commands, "rmbg", run_rmbg, "用后端的背景处理算法抠图，结果下载到本地")
+    add_rmbg_arguments(rmbg)
+    job_options(rmbg)
     upscale = add(commands, "upscale", run_upscale, "用后端放大，结果下载到本地")
     upscale.add_argument("source", help="本地文件或 /uploads 地址")
     upscale.add_argument("--method", choices=UPSCALE_METHODS, default="realesrgan_anime")
