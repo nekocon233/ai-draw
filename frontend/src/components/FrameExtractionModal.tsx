@@ -1383,6 +1383,24 @@ export default function FrameExtractionModal({
         filename: currentFilename,
         name_template: output === 'zip' ? nameTemplate : undefined,
         progress_id: progressId,
+        meta: {
+          source_video_url: videoUrl,
+          source_fps: sourceFps,
+          fps,
+          playback_fps: effectivePlaybackFps,
+          start_time: startTime,
+          end_time: endTime,
+          items: worksetFrames.map(frame => ({
+            index: frame.index,
+            time: frame.time,
+            width: frame.width,
+            height: frame.height,
+            source_width: frame.sourceWidth,
+            source_height: frame.sourceHeight,
+            edited: Boolean(frame.editedUrl),
+            background_removed: Boolean(frame.backgroundRemovedUrl),
+          })),
+        },
       });
       if (requestEpoch !== workspaceEpochRef.current) return;
       const url = res.zip_url || res.spritesheet_url || res.gif_url || res.apng_url;

@@ -12,12 +12,14 @@
 因此 extract_frames / build_spritesheet 可在未安装对应依赖时独立使用。
 """
 import io
+import json
 import math
 import os
 import glob
 import shutil
 import subprocess
 import tempfile
+import threading
 import zipfile
 from collections import deque
 from dataclasses import dataclass
@@ -25,7 +27,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Callable, List, Literal, Optional, Tuple
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageFilter, PngImagePlugin
 
 
 # 抽帧上限默认值
@@ -107,7 +109,11 @@ def extract_frame_items(
 
     requested_fps = _safe_fps_value(fps)
     source_fps = probe_video_fps(video_path)
-    effective_fps = requested_fps or source_fps
+    # 先按原帧率逐帧解出范围内的全部帧，再按帧号取样。ffmpeg 的 fps 滤镜按时间戳重采样，
+    # 起点不对齐时会重复一帧、跳过下一帧（24 fps 视频按 24 fps 取帧也会出现）。
+    # 探测不到原帧率时才退回 fps 滤镜。
+    by_frame_number = source_fps is not None and source_fps > 0
+    rate = source_fps if by_frame_number else requested_fps
 
     tmpdir = tempfile.mkdtemp(prefix='vframe_')
     try:
@@ -118,7 +124,9 @@ def extract_frame_items(
         cmd += ['-i', str(video_path)]
         if duration is not None:
             cmd += ['-t', f'{duration:.3f}']
-        if requested_fps is not None:
+        if by_frame_number:
+            cmd += ['-fps_mode', 'passthrough']
+        elif requested_fps is not None:
             cmd += ['-vf', f'fps={requested_fps}']
         cmd.append(pattern)
 
@@ -131,14 +139,19 @@ def extract_frame_items(
         if not files:
             raise RuntimeError('ffmpeg 未抽到任何帧（可能视频损坏）')
 
+        picks = list(range(len(files)))
+        if by_frame_number and requested_fps is not None and requested_fps < source_fps:
+            step = source_fps / requested_fps
+            picks = [round(k * step) for k in range(math.ceil(len(files) / step))]
+            picks = [index for index in picks if index < len(files)]
+
         raw_items: List[ExtractedVideoFrame] = []
-        denominator = effective_fps if effective_fps and effective_fps > 0 else None
-        for i, file_path in enumerate(files):
-            image = Image.open(file_path).convert('RGB')
-            timestamp = start + (i / denominator) if denominator else None
+        for index in picks:
+            image = Image.open(files[index]).convert('RGB')
+            timestamp = start + index / rate if rate else None
             if end is not None and timestamp is not None:
                 timestamp = min(timestamp, end)
-            raw_items.append(ExtractedVideoFrame(image=image, time=timestamp, source_index=i))
+            raw_items.append(ExtractedVideoFrame(image=image, time=timestamp, source_index=index))
 
         if max_frames and len(raw_items) > max_frames:
             idxs = _evenly_sample(len(raw_items), max_frames)
@@ -328,6 +341,7 @@ def remove_backgrounds_by_inspyrenet(
 
 
 _birefnet_models: dict = {}  # (model, size, device, precision) -> (model, torch, transforms, device, dtype)
+_birefnet_load_lock = threading.Lock()
 
 
 def _clean_toonout_state_dict(state_dict: dict) -> dict:
@@ -367,30 +381,33 @@ def _get_birefnet_model(model_name: str, image_size: int, device_name: str, prec
         dtype = torch.float32
 
     key = (model_name, image_size, str(device), str(dtype))
-    if key not in _birefnet_models:
-        architecture_name = 'ZhengPeng7/BiRefNet' if model_name == TOONOUT_MODEL else model_name
-        model = AutoModelForImageSegmentation.from_pretrained(
-            architecture_name,
-            trust_remote_code=True,
-        )
-        if model_name == TOONOUT_MODEL:
-            from huggingface_hub import hf_hub_download
+    # 同一时间只加载一个模型：加载期间 transformers 会临时改 torch 的默认 dtype，两个加载重叠时
+    # 可能把它留在 fp16，之后所有 BiRefNet 请求都报 Half/float 不一致（2026-10-13 出现过）。
+    with _birefnet_load_lock:
+        if key not in _birefnet_models:
+            architecture_name = 'ZhengPeng7/BiRefNet' if model_name == TOONOUT_MODEL else model_name
+            model = AutoModelForImageSegmentation.from_pretrained(
+                architecture_name,
+                trust_remote_code=True,
+            )
+            if model_name == TOONOUT_MODEL:
+                from huggingface_hub import hf_hub_download
 
-            weights_path = hf_hub_download(repo_id=TOONOUT_MODEL, filename=TOONOUT_WEIGHTS)
-            state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
-            model.load_state_dict(_clean_toonout_state_dict(state_dict))
-        model.to(device)
-        # HF 权重可能以 fp16 存储；CPU/FP32 路径也要显式转 dtype，
-        # 否则会出现 input=float32 但 bias=float16 的卷积错误。
-        model.to(dtype=dtype)
-        model.eval()
+                weights_path = hf_hub_download(repo_id=TOONOUT_MODEL, filename=TOONOUT_WEIGHTS)
+                state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
+                model.load_state_dict(_clean_toonout_state_dict(state_dict))
+            model.to(device)
+            # HF 权重可能以 fp16 存储；CPU/FP32 路径也要显式转 dtype，
+            # 否则会出现 input=float32 但 bias=float16 的卷积错误。
+            model.to(dtype=dtype)
+            model.eval()
 
-        transform_image = transforms.Compose([
-            transforms.Resize((image_size, image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
-        _birefnet_models[key] = (model, torch, transforms, transform_image, device, dtype)
+            transform_image = transforms.Compose([
+                transforms.Resize((image_size, image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
+            _birefnet_models[key] = (model, torch, transforms, transform_image, device, dtype)
     return _birefnet_models[key]
 
 
@@ -416,9 +433,8 @@ def remove_backgrounds_by_birefnet(
     total = len(frames)
     for i, frame in enumerate(frames):
         rgb = frame.convert('RGB')
-        input_image = transform_image(rgb).unsqueeze(0).to(device)
-        if dtype != torch.float32:
-            input_image = input_image.to(dtype=dtype)
+        # 输入一律转成模型的 dtype：ToTensor 按 torch 的默认 dtype 出张量，默认值被别处改过也不受影响
+        input_image = transform_image(rgb).unsqueeze(0).to(device=device, dtype=dtype)
 
         with torch.no_grad():
             pred = model(input_image)[-1].sigmoid().detach().cpu()[0].squeeze()
@@ -597,16 +613,36 @@ def apply_background_removal(
 
 
 # ── 打包：网格 PNG / APNG / GIF / ZIP ─────────────────────────────────────
+EXPORT_RECORD_KEY = 'ai-draw'
+EXPORT_RECORD_LIMIT = 256 * 1024
+
+
+def export_record(frames: int, frame_width: int, frame_height: int, meta: Optional[dict] = None, **layout) -> str:
+    """导出记录（JSON）：帧数、帧尺寸、网格，以及前端传来的源视频、帧率、帧范围和逐帧来源。
+
+    精灵图写进 PNG 的 iTXt 块，ZIP 写成 meta.json，agent 据此切格、确定帧率，不必再推算。
+    """
+    record = {'version': 1, 'tool': 'ai-draw 编辑帧', **(meta or {}), 'frames': frames,
+              'frame_width': frame_width, 'frame_height': frame_height, **layout}
+    text = json.dumps(record, ensure_ascii=False, default=str)
+    if len(text) > EXPORT_RECORD_LIMIT:
+        record.pop('items', None)
+        text = json.dumps(record, ensure_ascii=False, default=str)
+    return text
+
+
 def build_spritesheet(
     frames_rgba: List[Image.Image],
     rows: Optional[int] = 1,
+    meta: Optional[dict] = None,
 ) -> Tuple[bytes, int, int]:
     """
-    把透明帧拼成一张网格 PNG（透明底）。
+    把透明帧拼成一张网格 PNG（透明底），PNG 里附带导出记录（见 export_record）。
 
     Args:
         frames_rgba: 透明帧列表（RGBA）
         rows: 行数；默认 1，列数根据帧数自动计算
+        meta: 前端传来的来源信息，合并进导出记录
 
     Returns:
         (png_bytes, cols, rows)
@@ -623,10 +659,13 @@ def build_spritesheet(
 
     sheet = Image.new('RGBA', (cols * frame_w, rows * frame_h), (0, 0, 0, 0))
     for i, frame in enumerate(frames_rgba):
-        sheet.paste(frame, ((i % cols) * frame_w, (i // cols) * frame_h), frame)
+        # 格子互不重叠，直接拷贝；用帧自身当蒙版会把半透明边缘的颜色压暗、透明度变成平方
+        sheet.paste(frame.convert('RGBA'), ((i % cols) * frame_w, (i // cols) * frame_h))
 
+    info = PngImagePlugin.PngInfo()
+    info.add_itxt(EXPORT_RECORD_KEY, export_record(n, frame_w, frame_h, meta, cols=cols, rows=rows))
     buf = io.BytesIO()
-    sheet.save(buf, format='PNG')
+    sheet.save(buf, format='PNG', pnginfo=info)
     return buf.getvalue(), cols, rows
 
 
@@ -690,13 +729,16 @@ def build_gif(frames_rgba: List[Image.Image], fps: Optional[float] = None) -> Tu
     return buf.getvalue(), duration_ms
 
 
-def zip_frames(frames_rgba: List[Image.Image], name_template: str = '{n:03}') -> bytes:
-    """把帧按 PNG 序列打包为 ZIP。"""
+def zip_frames(frames_rgba: List[Image.Image], name_template: str = '{n:03}', meta: Optional[dict] = None) -> bytes:
+    """把帧按 PNG 序列打包为 ZIP；给了来源信息时附带 meta.json 导出记录。"""
     if not frames_rgba:
         raise ValueError('无可用帧，无法生成 ZIP')
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+        if meta is not None:
+            width, height = frames_rgba[0].size
+            zf.writestr('meta.json', export_record(len(frames_rgba), width, height, meta))
         for i, frame in enumerate(frames_rgba, start=1):
             png_buf = io.BytesIO()
             frame.convert('RGBA').save(png_buf, format='PNG')

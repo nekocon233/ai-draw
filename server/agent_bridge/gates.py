@@ -17,6 +17,46 @@ GATE_CANCELLED = "cancelled"
 GATE_STATUSES = (GATE_OPEN, GATE_SUBMITTED, GATE_CANCELLED)
 MAX_PICKS_LIMIT = 32
 
+# Workflows of agent rounds, so the UI can tell who said what. A gate leaves two bubbles in the session: the agent's
+# question (assistant side) and the user's answer (user side); the agent's posted assets carry their text on the
+# assistant side next to the media. workflow_options holds {"agent_gate": "question"|"answer", "gate_id", ...}.
+AGENT_GATE = "agent_gate"
+AGENT_POST = "agent_post"
+AGENT_WORKFLOWS = (AGENT_GATE, AGENT_POST)
+
+
+def answer_text(gate: ReviewGate) -> str:
+    """The user's answer as it reads in the session: what they chose, then their note."""
+    count = len(gate.picks or [])
+    if gate.decision == "redo":
+        head = "都不满意，重来" + (f"（参考了 {count} 个）" if count else "")
+    elif gate.max_picks == 0:
+        head = "通过"
+    elif count:
+        head = f"选用了 {count} 个"
+    else:
+        head = "满意，直接提交"
+    note = (gate.note or "").strip()
+    return f"{head}：{note}" if note else head
+
+
+def gate_bubbles(db: Session, gate: ReviewGate, kind: str) -> list[ChatMessage]:
+    """The question (assistant message) or answer (user message) bubbles of one gate."""
+    message_type = "assistant" if kind == "question" else "user"
+    candidates = db.query(ChatMessage).filter(
+        ChatMessage.session_id == gate.session_id,
+        ChatMessage.user_id == gate.user_id,
+        ChatMessage.type == message_type,
+        ChatMessage.workflow == AGENT_GATE,
+    ).all()
+    return [message for message in candidates if isinstance(message.workflow_options, dict)
+            and message.workflow_options.get("gate_id") == gate.gate_id and message.workflow_options.get("agent_gate") == kind]
+
+
+def update_options(message: ChatMessage, **changes) -> None:
+    # Assign a new dict: in-place edits of a JSON column are not tracked.
+    message.workflow_options = {**(message.workflow_options or {}), **changes}
+
 
 class GateError(Exception):
     def __init__(self, status_code: int, detail: str):

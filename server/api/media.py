@@ -10,7 +10,7 @@ import time
 import uuid
 from io import BytesIO
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -97,6 +97,8 @@ class VideoFrameExportRequest(BaseModel):
     filename: Optional[str] = None
     name_template: Optional[str] = None
     progress_id: Optional[str] = None
+    # 来源信息（源视频、原帧率、取帧帧率、起止时间、逐帧来源），写进导出记录：精灵图的 PNG iTXt / ZIP 的 meta.json
+    meta: Optional[Dict[str, Any]] = None
 
 
 class VideoFrameBackgroundBatchRequest(BackgroundOptionsRequest):
@@ -784,11 +786,14 @@ async def export_video_frames(
     frame_width = processed[0].width
     frame_height = processed[0].height
     safe_stem = _safe_filename_stem(request.filename, 'video_frames')
+    record_meta = request.meta
+    if record_meta is not None and (cell_width or cell_height):
+        record_meta = {**record_meta, 'resized_to': [frame_width, frame_height]}  # 帧已不在原视频的坐标里
 
     if request.output == 'zip':
         try:
             _set_export_progress(request.progress_id, 'packing', 72, '正在生成 ZIP')
-            zip_bytes = await asyncio.to_thread(zip_frames, processed, request.name_template or '{n:03}')
+            zip_bytes = await asyncio.to_thread(zip_frames, processed, request.name_template or '{n:03}', record_meta)
         except Exception as e:
             _set_export_progress(request.progress_id, 'error', 100, 'ZIP 生成失败', error=str(e), done=True)
             raise HTTPException(status_code=500, detail=f'ZIP 生成失败: {e}')
@@ -855,7 +860,7 @@ async def export_video_frames(
 
     try:
         _set_export_progress(request.progress_id, 'packing', 72, '正在生成精灵图')
-        png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.rows)
+        png_bytes, cols, rows = await asyncio.to_thread(build_spritesheet, processed, request.rows, record_meta)
     except Exception as e:
         _set_export_progress(request.progress_id, 'error', 100, '精灵图生成失败', error=str(e), done=True)
         raise HTTPException(status_code=500, detail=f'精灵图生成失败: {e}')

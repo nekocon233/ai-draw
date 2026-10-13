@@ -39,6 +39,14 @@ def run_gate_open(args, config: dict, client: Client) -> tuple[dict, int]:
     return {"ok": True, "gate": gate, "link": link, "wait": f"aidraw gate wait {gate['gate_id']}"}, 0
 
 
+def acknowledge(client: Client, gate_id: str) -> None:
+    """Mark the user's answer bubble 「Agent 已收到」; older servers without the route are fine."""
+    try:
+        client.request("POST", f"/api/agent/gates/{gate_id}/ack", allow=(404, 405, 409))
+    except CliError:
+        pass
+
+
 def wait_gate(client: Client, config: dict, gate_id: str, *, timeout: float, download: Optional[str],
               quiet: bool, job: Optional[str], step: Optional[str]) -> tuple[dict, int]:
     started = time.monotonic()
@@ -60,7 +68,16 @@ def wait_gate(client: Client, config: dict, gate_id: str, *, timeout: float, dow
                            resume=f"aidraw gate wait {gate_id}", link=session_link(config, gate["session_id"]))
         time.sleep(interval)
 
+    if gate["status"] == "submitted":
+        acknowledge(client, gate_id)
     picks = [dict(pick) for pick in gate.get("picks") or []]
+    if job:
+        # Tell the agent's own media (a generation, or a posted asset: "this one is fine") from the user's edits.
+        sources = jobs.agent_sources(job)
+        for pick in picks:
+            pick["by"] = "agent" if pick["url"] in sources else "user"
+            if pick["url"] in sources:
+                pick["source"] = sources[pick["url"]]
     if download and gate["status"] == "submitted":
         for index, pick in enumerate(picks, start=1):
             target = Path(download).expanduser() / f"pick_{index:02d}_{Path(pick['url']).name}"
@@ -111,6 +128,7 @@ def run_gate_submit(args, config: dict, client: Client) -> tuple[dict, int]:
     if args.pick:
         body["picks"] = [{"url": url} for url in args.pick]
     gate = client.json("POST", f"/api/agent/gates/{args.gate_id}/submit", json=body)
+    acknowledge(client, gate["gate_id"])  # the agent recorded it, so it has obviously read it
     jobs.append(args.job, "gate_result", step=gate.get("step"), gate_id=gate["gate_id"], status=gate["status"],
                 decision=gate.get("decision"), note=gate.get("note"), picks=gate.get("picks"), source="chat")
     return {"ok": True, "gate": gate}, 0

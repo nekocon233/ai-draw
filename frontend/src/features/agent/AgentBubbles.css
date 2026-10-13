@@ -1,0 +1,73 @@
+/* The agent's words in a session: gate questions and the text of posted assets (left), answers (right). */
+.agent-bubble {
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  padding: 10px 14px;
+  max-width: 640px;
+}
+
+.agent-bubble-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-bubble-actions {
+  margin-left: auto;
+}
+
+.agent-bubble-text,
+.gate-answer-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.agent-bubble-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-bubble-status.is-open {
+  color: var(--control-accent);
+}
+
+.agent-post-text {
+  margin-bottom: 8px;
+}
+
+.gate-answer-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.gate-answer-picks video {
+  width: 120px;
+  max-height: 120px;
+  border-radius: 6px;
+  background: #000;
+}
+
+.gate-answer-receipt {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.gate-answer-receipt.is-read {
+  color: var(--control-accent);
+}
+
+/* The empty half of an agent round still marks where the round starts, for the round navigator. */
+.chat-message-anchor {
+  height: 0;
+}

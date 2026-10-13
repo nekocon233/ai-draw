@@ -1,5 +1,6 @@
 """Legacy input recovery is read-only and must respect saved blanks and input types."""
 import unittest
+from datetime import datetime, timedelta
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -57,6 +58,18 @@ class SessionInputRestoreTests(unittest.TestCase):
         self.db.expire_all()
         self.assertIsNone(self.session.config_prompt)
         self.assertIsNone(self.session.config_workflow)
+
+    def test_rounds_the_agent_wrote_are_not_restored_as_the_users_input(self):
+        later = datetime.now() + timedelta(minutes=1)
+        self.db.add_all([
+            ChatMessage(session_id='old', user_id=1, message_id='answer', type='user', content='满意，直接提交', workflow='agent_gate',
+                        reference_images=['/uploads/generated/1/x.png'], created_at=later),
+            ChatMessage(session_id='old', user_id=1, message_id='post', type='user', content='去白边后的成品', workflow='agent_post',
+                        created_at=later),
+        ])
+        self.db.commit()
+        result = self.read()
+        self.assertEqual((result['prompt'], result['workflow']), (self.source.content, self.source.workflow))
 
     def test_saved_unsent_draft_and_explicit_blank_both_override_history(self):
         for text in ('unsent changes', ''):

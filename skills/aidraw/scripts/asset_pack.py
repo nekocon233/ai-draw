@@ -120,6 +120,37 @@ def cmd_spec_set(args):
     return {"ok": True, "key": args.key, "asset": asset}
 
 
+def check_animation(path: Path, asset: dict, entry, facts: dict, result: dict) -> list:
+    """A sprite sheet: the spec's size is one frame. Blank cells may only follow the last frame, and the pack must
+    stop Phaser before them (frameConfig.endFrame), or the sprite vanishes for those frames on every loop."""
+    problems = []
+    size = asset.get("size") or {}
+    width, height, frames = size.get("w"), size.get("h"), asset.get("frames")
+    if not (isinstance(width, int) and isinstance(height, int) and isinstance(frames, int)):
+        return ["动画规格要写单帧尺寸 size.w/size.h 和帧数 frames"]
+    if facts["width"] % width or facts["height"] % height:
+        return [f"图集 {facts['width']}×{facts['height']} 不是单帧 {width}×{height} 的整数倍"]
+    columns = facts["width"] // width
+    cells = columns * (facts["height"] // height)
+    with Image.open(path) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+        blank = [index for index in range(cells) if alpha.crop(
+            ((index % columns) * width, (index // columns) * height,
+             (index % columns + 1) * width, (index // columns + 1) * height)).getbbox() is None]
+    result.update(frames=frames, cells=cells, blank_cells=blank)
+    if frames > cells:
+        problems.append(f"规格写了 {frames} 帧，图集只有 {cells} 格")
+    if [index for index in blank if index < frames]:
+        problems.append(f"第 {', '.join(str(index) for index in blank if index < frames)} 格是空的（在最后一帧之前）")
+    config = (entry or {}).get("frameConfig") or {}
+    if entry is not None:
+        if (config.get("frameWidth"), config.get("frameHeight")) != (width, height):
+            problems.append(f"asset pack 的帧尺寸是 {config.get('frameWidth')}×{config.get('frameHeight')}，规格是 {width}×{height}")
+        if config.get("endFrame", cells - 1) != frames - 1:
+            problems.append(f"asset pack 的 endFrame 应为 {frames - 1}（现在 {config.get('endFrame', '未写，按全部 ' + str(cells) + ' 格')}）")
+    return problems
+
+
 def check_asset(key: str, asset: dict, root: Path, registered: dict) -> dict:
     problems = []
     path = Path(asset["path"])
@@ -131,10 +162,13 @@ def check_asset(key: str, asset: dict, root: Path, registered: dict) -> dict:
     facts = image_facts(path)
     result.update(width=facts["width"], height=facts["height"], mode=facts["mode"])
     size = asset.get("size") or {}
-    if isinstance(size.get("w"), int) and size["w"] != facts["width"]:
-        problems.append(f"宽 {facts['width']}，规格要求 {size['w']}")
-    if isinstance(size.get("h"), int) and size["h"] != facts["height"]:
-        problems.append(f"高 {facts['height']}，规格要求 {size['h']}")
+    if asset.get("kind") == "animation":
+        problems.extend(check_animation(path, asset, registered.get(key), facts, result))
+    else:
+        if isinstance(size.get("w"), int) and size["w"] != facts["width"]:
+            problems.append(f"宽 {facts['width']}，规格要求 {size['w']}")
+        if isinstance(size.get("h"), int) and size["h"] != facts["height"]:
+            problems.append(f"高 {facts['height']}，规格要求 {size['h']}")
     if asset.get("alpha") is True and not facts["has_alpha"]:
         problems.append("规格要求透明通道，文件没有")
     if asset.get("tile_x"):

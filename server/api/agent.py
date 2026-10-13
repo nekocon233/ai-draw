@@ -88,6 +88,34 @@ def _publish_gate(service: AIDrawService, gate: ReviewGate) -> dict:
     return payload
 
 
+def _add_agent_round(db: Session, user_id: int, session_id: str, *, workflow: str, user_text: str, reply_text: str,
+                     options: Optional[dict] = None, reference_images: Optional[list] = None) -> tuple[str, str]:
+    """One round (user message + reply) the agent wrote; `workflow` tells the UI how to show it."""
+    message_id = f"msg-{uuid.uuid4()}"
+    reply_id = f"{message_id}-reply"
+    now = datetime.now()
+    db.add(ChatMessage(session_id=session_id, user_id=user_id, message_id=message_id, type="user", content=user_text,
+                       workflow=workflow, workflow_options=options, reference_images=reference_images, created_at=now))
+    db.add(ChatMessage(session_id=session_id, user_id=user_id, message_id=reply_id, type="assistant", content=reply_text,
+                       workflow=workflow, workflow_options=options, created_at=now))
+    db.flush()
+    return message_id, reply_id
+
+
+def _publish_round(service: AIDrawService, user_id: int, session_id: str, message_id: str, reply_id: str) -> None:
+    """Visible sessions reload their newest messages (new bubbles, or a bubble's status changed)."""
+    service.events.user(user_id, "agent_session", {
+        "reason": "round_posted", "session_id": session_id, "message_id": message_id, "reply_id": reply_id,
+    })
+
+
+def _mark_question(db: Session, gate: ReviewGate, **changes) -> Optional[ChatMessage]:
+    bubbles = gate_rules.gate_bubbles(db, gate, "question")
+    for bubble in bubbles:
+        gate_rules.update_options(bubble, **changes)
+    return bubbles[0] if bubbles else None
+
+
 @router.get("/me")
 def agent_me(current_user: User = Depends(get_current_user)) -> dict:
     return {"user_id": current_user.id, "username": current_user.username}
@@ -206,20 +234,14 @@ async def post_agent_round(
         if not user_owns_media_path(db, current_user.id, canonical):
             raise HTTPException(status_code=403, detail="媒体文件不属于当前用户")
         media.append(canonical)
-    message_id = f"msg-{uuid.uuid4()}"
-    reply_id = f"{message_id}-reply"
-    now = datetime.now()
-    db.add(ChatMessage(session_id=session.session_id, user_id=current_user.id, message_id=message_id,
-                       type="user", content=request.text, created_at=now))
-    db.add(ChatMessage(session_id=session.session_id, user_id=current_user.id, message_id=reply_id,
-                       type="assistant", content="", created_at=now))
-    db.flush()
+    # The text describes the media, so the UI shows it on the agent's side with them.
+    message_id, reply_id = _add_agent_round(db, current_user.id, session.session_id, workflow=gate_rules.AGENT_POST,
+                                            user_text=request.text, reply_text=request.text)
     db.add_all([GeneratedImage(message_id=reply_id, image_index=index, file_path=url) for index, url in enumerate(media)])
+    now = datetime.now()
     session.updated_at = now
     db.commit()
-    service.events.user(current_user.id, "agent_session", {
-        "reason": "round_posted", "session_id": session.session_id, "message_id": message_id, "reply_id": reply_id,
-    })
+    _publish_round(service, current_user.id, session.session_id, message_id, reply_id)
     return {"session_id": session.session_id, "message_id": message_id, "reply_id": reply_id, "media": media, "created_at": _ms(now)}
 
 
@@ -247,6 +269,7 @@ async def create_gate(
     for old in replaced:
         old.status = gate_rules.GATE_CANCELLED
         old.cancel_reason = "已被新的审核替换"
+        _mark_question(db, old, status=gate_rules.GATE_CANCELLED, cancel_reason=old.cancel_reason)
     gate = ReviewGate(
         gate_id=gate_rules.new_gate_id(),
         user_id=current_user.id,
@@ -262,12 +285,20 @@ async def create_gate(
         note="",
     )
     db.add(gate)
+    # The question stays in the session as the agent's bubble; the gate bar is only where it is answered.
+    message_id, reply_id = _add_agent_round(
+        db, current_user.id, session.session_id, workflow=gate_rules.AGENT_GATE, user_text="", reply_text=gate.question,
+        options={"agent_gate": "question", "gate_id": gate.gate_id, "min_picks": min_picks, "max_picks": max_picks,
+                 "status": gate_rules.GATE_OPEN})
+    session.updated_at = datetime.now()
     db.commit()
     for old in replaced:
         db.refresh(old)
         _publish_gate(service, old)
     db.refresh(gate)
-    return _publish_gate(service, gate)
+    payload = _publish_gate(service, gate)
+    _publish_round(service, current_user.id, session.session_id, message_id, reply_id)
+    return payload
 
 
 @router.get("/gates")
@@ -344,9 +375,17 @@ async def submit_gate(
     gate.status = gate_rules.GATE_SUBMITTED
     gate.submitted_at = now
     gate.updated_at = now
+    _mark_question(db, gate, status=gate_rules.GATE_SUBMITTED)
+    # The answer stays in the session as the user's bubble: what they chose (with the picks) and their note.
+    message_id, reply_id = _add_agent_round(
+        db, current_user.id, gate.session_id, workflow=gate_rules.AGENT_GATE, user_text=gate_rules.answer_text(gate),
+        reply_text="", options={"agent_gate": "answer", "gate_id": gate.gate_id, "decision": gate.decision, "picks": len(picks)},
+        reference_images=[pick["url"] for pick in picks] or None)
     db.commit()
     db.refresh(gate)
-    return _publish_gate(service, gate)
+    payload = _publish_gate(service, gate)
+    _publish_round(service, current_user.id, gate.session_id, message_id, reply_id)
+    return payload
 
 
 @router.post("/gates/{gate_id}/cancel")
@@ -365,6 +404,34 @@ async def cancel_gate(
     gate.status = gate_rules.GATE_CANCELLED
     gate.cancel_reason = request.reason.strip() or None
     gate.updated_at = datetime.now()
+    question = _mark_question(db, gate, status=gate_rules.GATE_CANCELLED, cancel_reason=gate.cancel_reason or "")
     db.commit()
     db.refresh(gate)
-    return _publish_gate(service, gate)
+    payload = _publish_gate(service, gate)
+    if question is not None:
+        _publish_round(service, gate.user_id, gate.session_id, question.message_id.removesuffix("-reply"), question.message_id)
+    return payload
+
+
+@router.post("/gates/{gate_id}/ack")
+async def acknowledge_gate(
+    gate_id: str,
+    current_user: User = Depends(get_current_user),
+    service: AIDrawService = Depends(get_ai_draw_service),
+    db: Session = Depends(get_db),
+) -> dict:
+    """The agent has read the answer (aidraw gate wait calls this): the answer bubble shows 「Agent 已收到」.
+
+    An answer nobody acknowledges tells the user that no agent is listening, so they know to go and ask it.
+    """
+    gate = _owned_gate(db, current_user.id, gate_id, lock=True)
+    if gate.status == gate_rules.GATE_OPEN:
+        raise HTTPException(status_code=409, detail="这个审核还没有提交")
+    answers = gate_rules.gate_bubbles(db, gate, "answer")
+    fresh = [answer for answer in answers if not (answer.workflow_options or {}).get("acknowledged_at")]
+    for answer in fresh:
+        gate_rules.update_options(answer, acknowledged_at=_ms(datetime.now()))
+    db.commit()
+    if fresh:
+        _publish_round(service, gate.user_id, gate.session_id, fresh[0].message_id, f"{fresh[0].message_id}-reply")
+    return {**gate_rules.serialize_gate(gate), "acknowledged": bool(answers)}

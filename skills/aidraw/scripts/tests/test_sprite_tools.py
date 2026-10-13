@@ -185,6 +185,24 @@ class SpriteToolTests(unittest.TestCase):
         Image.new("RGBA", (5, 5)).save(self.path("odd.png"))
         self.assertEqual(run("pack-sheet", cropped[0], self.path("odd.png"), "-o", self.path("bad.png"))[0], 1)
 
+    def test_extract_picks_frames_by_number_without_repeats(self):
+        import shutil
+        import subprocess
+        from PIL import ImageChops
+        if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+            self.skipTest("ffmpeg is required")
+        video = self.path("counter.mp4")  # every frame differs
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=24", "-t", "2",
+                        "-pix_fmt", "yuv420p", str(video)], check=True)
+        for fps, step, start, end, count in ((24, 1, "0.3", "1.8", 36), (8, 3, None, None, 16)):
+            argv = ["extract", video, "-o", self.path(f"f{fps}"), "--fps", str(fps)] + (["--start", start, "--end", end] if start else [])
+            code, result = run(*argv)
+            self.assertEqual((code, result["source_fps"]), (0, 24.0))
+            self.assertAlmostEqual(result["frames"], count, delta=1)
+            self.assertEqual({b - a for a, b in zip(result["source_frames"], result["source_frames"][1:])}, {step})
+            frames = [Image.open(path).convert("RGB") for path in sorted((self.root / f"f{fps}").glob("frame_*.png"))]
+            self.assertTrue(all(ImageChops.difference(a, b).getbbox() for a, b in zip(frames, frames[1:])), f"no repeats at {fps} fps")
+
     def test_info_reports_background_and_alpha(self):
         code, result = run("info", self.character_on_white())
         facts = result["files"][0]

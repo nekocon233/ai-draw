@@ -28,6 +28,26 @@ import type { AuthResponse, UserConfig } from '../types/models';
 
 export type VideoBackgroundMode = 'none' | 'ai' | 'inspyrenet' | 'birefnet' | 'edge';
 export type VideoFrameExportOutput = 'zip' | 'spritesheet' | 'gif' | 'apng';
+
+/** Where exported frames came from; the backend embeds it (PNG iTXt "ai-draw" / meta.json) so agents need not guess. */
+export interface VideoFrameExportMeta {
+  source_video_url: string | null;
+  source_fps: number | null;
+  fps: number;
+  playback_fps: number;
+  start_time: number;
+  end_time: number | null;
+  items: Array<{
+    index: number;
+    time: number | null;
+    width: number;
+    height: number;
+    source_width: number;
+    source_height: number;
+    edited: boolean;
+    background_removed: boolean;
+  }>;
+}
 export type ImageUpscaleMethodId = 'lanczos' | 'apisr' | 'real_cugan' | 'realesrgan_general' | 'realesrgan_anime' | 'invsr';
 
 export interface ImageUpscaleScaleAvailability {
@@ -483,6 +503,7 @@ export const apiService = {
     filename?: string;
     name_template?: string;
     progress_id?: string;
+    meta?: VideoFrameExportMeta;
   }): Promise<VideoFrameExportResponse> =>
     client.post('/media/export-video-frames', data, {
       timeout: 300000,

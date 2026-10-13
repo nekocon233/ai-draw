@@ -3,6 +3,7 @@ import unittest
 
 from agent_bridge_support import AgentApp, add_round, add_users, memory_database, temporary_storage
 from server.api.session import router as session_router
+from server.api.user import router as user_router
 from server.models import ChatSession, GeneratedImage, ReviewGate
 
 
@@ -17,7 +18,7 @@ class AgentGateTests(unittest.TestCase):
         add_round(self.sessions, 'session', 1, 'manual-round', ['generated/1/c.png'])
         add_round(self.sessions, 'elsewhere', 1, 'other-round', ['/uploads/generated/1/d.png'], create_session=True)
         add_round(self.sessions, 'theirs', 2, 'their-round', ['/uploads/generated/2/e.png'], create_session=True)
-        self.app = AgentApp(self, self.sessions, routers=(session_router,))
+        self.app = AgentApp(self, self.sessions, routers=(session_router, user_router))
         self.client = self.app.client
 
     def open_gate(self, **fields):
@@ -34,6 +35,61 @@ class AgentGateTests(unittest.TestCase):
 
     def submit(self, gate_id, decision='approve', **fields):
         return self.client.post(f'/api/agent/gates/{gate_id}/submit', json={'decision': decision, **fields})
+
+    def history(self):
+        return self.client.get('/api/chat/history', params={'session_id': 'session', 'limit': 100}).json()['messages']
+
+    def bubbles(self, kind, message_type):
+        """The question (assistant) or answer (user) bubbles of all gates, by gate id."""
+        return {message['params']['workflowOptions']['gate_id']: message for message in self.history()
+                if message['type'] == message_type and (message.get('params') or {}).get('workflow') == 'agent_gate'
+                and message['params']['workflowOptions'].get('agent_gate') == kind}
+
+    def test_question_and_answer_stay_in_the_session_as_bubbles(self):
+        gate_id = self.gate_id(max_picks=2)
+        question = self.bubbles('question', 'assistant')[gate_id]
+        self.assertEqual(question['content'], '选一张侧视图')
+        options = question['params']['workflowOptions']
+        self.assertEqual((options['min_picks'], options['max_picks'], options['status']), (1, 2, 'open'))
+        self.assertEqual(self.picks(gate_id, *self.urls[:2]).status_code, 200)
+        self.assertEqual(self.submit(gate_id, note='脸再圆一点').status_code, 200)
+
+        answer = self.bubbles('answer', 'user')[gate_id]
+        self.assertEqual(answer['content'], '选用了 2 个：脸再圆一点')
+        self.assertEqual(answer['params']['referenceImages'], self.urls[:2], 'the picks show in the answer')
+        self.assertEqual(answer['params']['workflowOptions']['decision'], 'approve')
+        self.assertNotIn('acknowledged_at', answer['params']['workflowOptions'])
+        self.assertEqual(self.bubbles('question', 'assistant')[gate_id]['params']['workflowOptions']['status'], 'submitted')
+        outline = self.client.get('/api/chat/sessions/session/outline').json()['rounds']
+        self.assertIn('选一张侧视图', [item['content'] for item in outline], 'the question names its round')
+
+        # The agent reading the answer marks it; the first read counts.
+        response = self.client.post(f'/api/agent/gates/{gate_id}/ack')
+        self.assertEqual((response.status_code, response.json()['acknowledged']), (200, True))
+        stamp = self.bubbles('answer', 'user')[gate_id]['params']['workflowOptions']['acknowledged_at']
+        self.client.post(f'/api/agent/gates/{gate_id}/ack')
+        self.assertEqual(self.bubbles('answer', 'user')[gate_id]['params']['workflowOptions']['acknowledged_at'], stamp)
+        self.assertEqual(self.client.post(f'/api/agent/gates/{self.gate_id()}/ack').status_code, 409, 'nothing to read yet')
+        reasons = [event['reason'] for event in self.app.fields('agent_session')]
+        self.assertGreaterEqual(reasons.count('round_posted'), 4, 'open, submit, ack and the next open refresh the session')
+
+    def test_answers_read_as_chosen_and_cancelled_questions_say_why(self):
+        redo = self.gate_id(min_picks=0, max_picks=1)
+        self.assertEqual(self.submit(redo, decision='redo', note='帧率太低，要高点').status_code, 200)
+        accepted = self.gate_id(min_picks=0, max_picks=1)
+        self.assertEqual(self.submit(accepted).status_code, 200)
+        confirmed = self.gate_id(max_picks=0)
+        self.assertEqual(self.submit(confirmed).status_code, 200)
+        answers = {gate_id: message['content'] for gate_id, message in self.bubbles('answer', 'user').items()}
+        self.assertEqual(answers, {redo: '都不满意，重来：帧率太低，要高点', accepted: '满意，直接提交', confirmed: '通过'})
+
+        replaced = self.gate_id()
+        cancelled = self.gate_id(replace_open=True)
+        self.client.post(f'/api/agent/gates/{cancelled}/cancel', json={'reason': '用户在对话里回答了'})
+        questions = {gate_id: message['params']['workflowOptions'] for gate_id, message in self.bubbles('question', 'assistant').items()}
+        self.assertEqual((questions[replaced]['status'], questions[replaced]['cancel_reason']), ('cancelled', '已被新的审核替换'))
+        self.assertEqual((questions[cancelled]['status'], questions[cancelled]['cancel_reason']), ('cancelled', '用户在对话里回答了'))
+        self.assertNotIn(cancelled, self.bubbles('answer', 'user'), 'a cancelled question has no answer')
 
     def test_one_open_gate_per_session_unless_replaced(self):
         first = self.gate_id(max_picks=2)

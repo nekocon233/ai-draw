@@ -12,6 +12,7 @@ import math
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont
@@ -500,8 +501,26 @@ def frame_paths(directory: Path, stem: str = "frame") -> list:
     return sorted(directory.glob(f"{stem}_*.png"))
 
 
+def probe_fps(video: str):
+    """The clip's frame rate (ffprobe), or None."""
+    if not shutil.which("ffprobe"):
+        return None
+    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+                             "-of", "default=noprint_wrappers=1:nokey=1", video], capture_output=True, text=True)
+    numerator, _, denominator = result.stdout.strip().partition("/")
+    try:
+        value = float(numerator) / float(denominator or 1)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def cmd_extract(args):
-    """Video → numbered PNG frames with ffmpeg (fps, optional start/end in seconds)."""
+    """Video → numbered PNG frames (fps, optional start/end in seconds).
+
+    Every frame of the range is decoded at the clip's own rate and frames are then picked by frame number: ffmpeg's
+    fps filter resamples by timestamp and can repeat one frame and skip the next.
+    """
     if not shutil.which("ffmpeg"):
         return {"ok": False, "error": "需要 ffmpeg"}
     out = Path(args.out)
@@ -514,12 +533,25 @@ def cmd_extract(args):
     command += ["-i", args.video]
     if args.end is not None:
         command += ["-to", str(args.end - (args.start or 0))]
-    command += ["-vf", f"fps={args.fps}", "-start_number", "0", str(out / "frame_%03d.png")]
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
-        return {"ok": False, "error": result.stderr.strip()[-400:]}
-    frames = frame_paths(out)
-    return {"ok": True, "out": str(out), "frames": len(frames), "fps": args.fps}
+    source_fps = probe_fps(args.video)
+    if source_fps is None:
+        command += ["-vf", f"fps={args.fps}", "-start_number", "0", str(out / "frame_%03d.png")]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip()[-400:]}
+        return {"ok": True, "out": str(out), "frames": len(frame_paths(out)), "fps": args.fps}
+    with tempfile.TemporaryDirectory() as directory:
+        decoded_pattern = str(Path(directory) / "frame_%05d.png")
+        result = subprocess.run(command + ["-fps_mode", "passthrough", "-start_number", "0", decoded_pattern],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip()[-400:]}
+        decoded = sorted(Path(directory).glob("frame_*.png"))
+        step = source_fps / args.fps if args.fps and args.fps < source_fps else 1.0
+        picks = [index for index in (round(k * step) for k in range(math.ceil(len(decoded) / step))) if index < len(decoded)]
+        for number, index in enumerate(picks):
+            shutil.move(str(decoded[index]), out / f"frame_{number:03d}.png")
+    return {"ok": True, "out": str(out), "frames": len(picks), "fps": args.fps, "source_fps": source_fps, "source_frames": picks}
 
 
 def union_bbox(images: list, threshold: int = 8):

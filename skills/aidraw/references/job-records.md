@@ -64,7 +64,12 @@ python3 <技能目录>/scripts/asset_pack.py spec-init --pack public/assets/asse
 
 ## 任务日志
 
-`aidraw` 的 `--job` 会自动追加记录：`gen_submitted`、`gen`、`gen_failed`、`post`、`gate_open`、`gate_result`。agent 自己做的本地处理和交付也追加一行，方便复现：
+`aidraw` 的 `--job` 会自动追加记录：`gen_submitted`、`gen`、`gen_failed`、`post`、`gate_open`、`gate_result`、`round_deleted`（删掉自己发的帖子）。
+
+- 任务日志也是区分“agent 的媒体”和“用户的编辑”的依据：`gen` 和 `post` 里的地址是 agent 的，会话里其余的媒体都是用户的（`aidraw round list --job … --user-only`）。
+- `video_to_sheet.py`、`edit_to_sheet.py` 会追加 `deliver` 记录；人工编辑的 step 是 `user-edit`，规格里对应写 `source.edited_by_user`。
+
+agent 自己做的其他本地处理和交付也追加一行，方便复现：
 
 ```bash
 python3 - <<'PY'

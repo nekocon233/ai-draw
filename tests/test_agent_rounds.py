@@ -46,7 +46,9 @@ class AgentRoundTests(unittest.TestCase):
         messages = self.client.get(f"/api/chat/sessions/{session_id}/rounds/{body['reply_id']}").json()['messages']
         self.assertEqual([message['type'] for message in messages], ['user', 'assistant'])
         self.assertEqual(messages[0]['content'], '去白边后的成品')
-        self.assertNotIn('params', messages[0])
+        # Marked as the agent's: the UI shows the text on the agent's side, next to the media.
+        self.assertEqual([message['params']['workflow'] for message in messages], ['agent_post', 'agent_post'])
+        self.assertEqual(messages[1]['content'], '去白边后的成品')
         self.assertEqual(messages[1]['images'], media)
         self.assertEqual(self.app.fields('agent_session')[-1]['reason'], 'round_posted')
 

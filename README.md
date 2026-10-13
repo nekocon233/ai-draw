@@ -15,7 +15,13 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 - 图片背景移除、2x/4x 放大和批量放大。
 - 视频抽帧、帧范围与帧率控制、逐帧编辑、背景处理和颜色替换。
 - 导出原始帧 ZIP、精灵图、GIF 和 APNG。
-- Agent 接口：命令行 `aidraw` 与共用技能 `skills/aidraw` 可用个人访问令牌驱动生成、把处理结果发进会话，并在网页里开审核关卡请用户选用，见 [Agent 接口与审核关卡](docs/agent_bridge.md)。
+- Agent 接口：命令行 `aidraw` 与共用技能 `skills/aidraw` 可用个人访问令牌驱动生成、把处理好的素材发进会话，并在网页里开审核关卡请用户选用。
+  - 结果一出来就开关卡，用户挑完后自动交付进项目。
+  - 会话里只放生成结果、用户的编辑和处理好的素材（说明在同一条帖子里）。
+  - 交付后留一个可选关卡：用户可以直接通过，也可以在「编辑帧」或「编辑」里自己改，选用编辑结果后由 agent 接着交付。
+  - 可以用 MiniMax H3 首尾帧做循环视频，再转成对齐好的精灵图。
+  - 抠图只用背景处理算法：13 种各抠一次，由 agent 对比后挑选。
+  - 详见 [Agent 接口与审核关卡](docs/agent_bridge.md)。
 - JWT 登录、邀请码注册、用户配置和创作记录持久化。
 
 ## 生成工作流
@@ -225,9 +231,14 @@ npm --prefix frontend run dev
 - 视频元数据、帧预览、工作帧集和编辑帧保存。
 - rembg、InSPyReNet、BiRefNet 和边缘模式背景处理。
 - Lanczos、APISR、Real-CUGAN、Real-ESRGAN 和 InvSR 放大。
-- ZIP、spritesheet、GIF、APNG 导出及导出进度查询。
+- ZIP、spritesheet、GIF、APNG 导出及导出进度查询。精灵图的 PNG 里带 `ai-draw` 导出记录（帧数、网格、帧尺寸、源视频、帧率、每帧来源），ZIP 里是 `meta.json`。
+- 抽帧按原帧率逐帧解码再按帧号取样，按任意帧率取帧都不会重复或跳帧。
 
-Docker 镜像已安装 ffmpeg。BiRefNet 等 Hugging Face 权重首次使用时会下载到持久化的 `huggingface-cache` 卷。
+Docker 镜像已安装 ffmpeg。背景处理在后端容器的 CPU 上运行，用过的模型常驻内存。
+
+模型权重在首次使用时下载：
+- BiRefNet 等 Hugging Face 权重：下载到持久化的 `huggingface-cache` 卷。
+- rembg 和 InSPyReNet 的权重：不在卷里，容器重建后要重新下载。
 
 ## 项目结构
 

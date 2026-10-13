@@ -63,15 +63,24 @@ aidraw video --session S --first base.png [--last end.png | --loop] [--duration 
 - 输出 24 fps 的 mp4，下载到 `--out`；每段通常 5–15 分钟，超时用输出里的 `resume` 续等。
 - 抽帧和做精灵图见 animation.md。
 
-## 读取一轮、发回处理结果
+## 读取轮次、发回处理好的素材
 
 ```bash
 aidraw round get --session S --message msg-…-reply [--out DIR]
-aidraw post --session S --text "去白边并缩放到 340 高的成品；右边是游戏光照预览" \
-  --file art/work/heroine/final.png --file art/work/heroine/mock.png [--url /uploads/…] [--job … --step deliver]
+aidraw round list --session S [--job art/jobs/heroine.jsonl] [--user-only]
+aidraw round delete --session S --message msg-… --job art/jobs/heroine.jsonl [--step cleanup]
+aidraw post --session S --text "主角立绘（侧视，朝右）：151×340，抠图 #5 BiRefNet · ToonOut；比上一版收紧了裙摆的白边" \
+  --file art/work/heroine/final.png [--url /uploads/…] [--job … --step deliver]
 ```
 
-`post` 原样上传文件（保留透明和动画，PNG/JPEG/WebP/GIF/MP4/WebM，单个不超过 100 MB），然后作为一轮显示在会话里。顺序是先 `--file`，再 `--url`。
+- `round list`：列出会话里每一轮的消息 ID、工作流和全部媒体地址。
+  - 带 `--job` 时，对照任务日志把每个媒体标成 `agent`（日志 `gen`/`post` 里有）或 `user`（用户的编辑结果、手动生成）。
+  - `--user-only` 只列用户的，用来找“我编辑完了”的那张。
+- `round delete`：只能删任务日志里记为 agent 发帖（`post` 事件）的轮次，生成结果和用户的东西一律拒绝。用来撤回发错的帖子，代替发更正帖。
+- `post`：原样上传文件（保留透明和动画，PNG/JPEG/WebP/GIF/MP4/WebM，单个不超过 100 MB），作为一轮显示在会话里，顺序是先 `--file`，再 `--url`。
+  - 必须带素材，不能只发文字。
+  - 只发处理好的素材本身（成品、精灵图动画、候选抠图），说明写在 `--text` 里、同一轮。
+  - 游戏截图、`mock` 预览、对比图、检查结果不发，在对话里说（SKILL.md 第 5 节）。
 
 ## 审核关卡
 
@@ -94,7 +103,11 @@ aidraw gate submit <gate_id> --decision approve --pick /uploads/… --note "用�
  "picks": [{"url": "/uploads/…", "message_id": "msg-…-reply", "image_index": 2, "seed": 1236, "file": "…"}]}
 ```
 
-`decision` 为 `redo` 时 `picks` 可能为空；状态为 `cancelled` 时退出码是 4。
+`decision` 为 `redo` 时 `picks` 可能为空；状态为 `cancelled` 时退出码是 4。带 `--job` 时，每个选中项还有 `by`（`agent`：任务日志的 `gen`/`post` 里有这个地址；`user`：用户的编辑或手动生成）和 `source`（agent 的媒体是 `gen` 还是 `post`）。
+
+`gate wait` 读到提交结果、`gate submit` 记下用户在对话里的回答时，都会自动调用 `POST /api/agent/gates/<id>/ack`，会话里用户的回答气泡因此显示“Agent 已收到”。开关卡、提交、撤销时，后端自动在会话里留下提问和回答的气泡，不用另外 `post`。
+
+等关卡要用会唤醒 agent 的后台任务（Claude Code 的 `run_in_background`），不要用 `nohup`/`setsid` 脱离会话。
 
 ## 媒体工具
 

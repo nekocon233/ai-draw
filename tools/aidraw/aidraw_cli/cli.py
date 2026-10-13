@@ -20,6 +20,7 @@ from .errors import ApiError, CliError, EXIT_API, EXIT_AUTH, EXIT_OK
 from .gates import run_gate_cancel, run_gate_get, run_gate_list, run_gate_open, run_gate_submit, run_gate_wait
 from .generate import H3_DURATIONS, default_out, log, run_gen, run_post, run_round_get, run_video, run_wait, upload_file
 from .media import flatten, png_data_url, url_extension
+from .rounds import run_round_delete, run_round_list
 
 UPSCALE_METHODS = ("lanczos", "apisr", "real_cugan", "realesrgan_general", "realesrgan_anime", "invsr")
 
@@ -316,8 +317,17 @@ def build_parser() -> argparse.ArgumentParser:
     round_get.add_argument("--session", required=True)
     round_get.add_argument("--message", required=True)
     round_get.add_argument("--out")
+    round_list = add(round_parser, "list", run_round_list, "列出会话里的每一轮和媒体；带 --job 时标出哪些是用户自己做的")
+    round_list.add_argument("--session", required=True)
+    round_list.add_argument("--job", help="任务日志：对照它把每个媒体标成 agent 或 user")
+    round_list.add_argument("--user-only", action="store_true", help="只列用户的媒体（编辑结果、手动生成），需要 --job")
+    round_delete = add(round_parser, "delete", run_round_delete, "删除 agent 自己发的一条帖子（任务日志里要有这条 post）")
+    round_delete.add_argument("--session", required=True)
+    round_delete.add_argument("--message", required=True)
+    round_delete.add_argument("--job", required=True)
+    round_delete.add_argument("--step")
 
-    post = add(commands, "post", run_post, "把处理结果作为一轮发进会话")
+    post = add(commands, "post", run_post, "把处理好的素材连同说明作为一轮发进会话（必须带素材，说明写在同一轮里）")
     post.add_argument("--session", required=True)
     post.add_argument("--text")
     post.add_argument("--text-file")

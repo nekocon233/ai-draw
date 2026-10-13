@@ -12,6 +12,7 @@ from server.database import get_db
 from server.models import ChatSession, ChatMessage, GeneratedImage, User
 from server.auth import get_current_user
 from server.schemas import MOTION_VIDEO_PATTERN, PromptPreset, MotionPromptSnapshot, DeleteMessageMediaRequest, DeleteMessageMediaResponse
+from server.agent_bridge.gates import AGENT_GATE, AGENT_WORKFLOWS
 from server.api.generation import get_generation_coordinator
 from server.generation.coordinator import GenerationCoordinator
 from server.session_inputs import restore_session_input, session_input_group, LEGACY_VIDEO_WORKFLOWS
@@ -186,6 +187,9 @@ def _serialize_message(message: ChatMessage) -> dict:
         payload['images'] = [_media_url(image.file_path) for image in media]
         # Parallel to images: the seed each result used, null for edits and seedless workflows.
         payload['seeds'] = [image.seed for image in media]
+        if message.workflow in AGENT_WORKFLOWS:
+            # Agent bubbles: a gate's question, or the text of posted assets, shown on the agent's side.
+            payload['params'] = {'workflow': message.workflow, 'workflowOptions': message.workflow_options or {}}
     return payload
 
 @router.get("/sessions", response_model=List[SessionResponse])
@@ -586,6 +590,8 @@ def get_session_config(
             ChatMessage.session_id == session_id,
             ChatMessage.user_id == current_user.id,
             ChatMessage.type == 'user',
+            # Rounds the agent wrote (gate questions and answers, posted assets) are not the user's prompts.
+            or_(ChatMessage.workflow.is_(None), ~ChatMessage.workflow.in_(AGENT_WORKFLOWS)),
         )
         # Do not fill an empty image composer from the video side of a mixed session.
         if session.config_workflow:
@@ -667,10 +673,13 @@ def get_session_outline(
         reply = replies.get(f'{message.message_id}-reply')
         media = [url for url in _media_urls(reply) if not url.startswith('data:')] if reply else []
         preset = message.prompt_preset if isinstance(message.prompt_preset, dict) else {}
+        content = message.content or ''
+        if message.workflow == AGENT_GATE and not content and reply is not None:
+            content = reply.content or ''  # a gate's question: the agent's words are in the reply
         rounds.append({
             'id': message.message_id,
             'timestamp': int(message.created_at.timestamp() * 1000),
-            'content': (message.content or '')[:OUTLINE_TEXT_LIMIT],
+            'content': content[:OUTLINE_TEXT_LIMIT],
             'preset_title': preset.get('title'),
             'workflow': message.workflow,
             'media': media[:OUTLINE_MEDIA_LIMIT],

@@ -15,6 +15,22 @@ def append(job: Optional[str], event: str, **fields) -> None:
         file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+AGENT_EVENTS = ("gen", "post")  # events whose URLs the agent produced (picks in gate results may be the user's)
+
+
+def agent_sources(job: str) -> dict[str, str]:
+    """URL → the event that produced it ("gen" or "post"); anything else in the session is the user's."""
+    sources = {}
+    for record in read(job):
+        if record.get("event") not in AGENT_EVENTS:
+            continue
+        for item in (record.get("images") or []) + (record.get("media") or []):
+            url = item.get("url") if isinstance(item, dict) else item
+            if isinstance(url, str):
+                sources[url] = record["event"]
+    return sources
+
+
 def read(job: str) -> list[dict]:
     path = Path(job)
     if not path.exists():

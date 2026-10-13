@@ -26,6 +26,8 @@ import { AUTH_REQUIRED_EVENT } from '../utils/helpers';
 import type { FrameWorkspaceSnapshot } from './FrameExtractionModal';
 import RoundNavigator from './RoundNavigator';
 import GatePickToggle from '../features/agent/GatePickToggle';
+import { AgentPostText, AgentQuestionBubble, GateAnswerBubble } from '../features/agent/AgentBubbles';
+import { agentBubbleKind, agentPostText, sourceMessageId } from '../features/agent/bubbles';
 import './ResultGrid.css';
 
 const loadFrameEditors = () => import('./FrameExtractionModal');
@@ -864,7 +866,24 @@ export default function ResultGrid() {
             </Button>
           </div>
         )}
-        {chatHistory.map((message) => (
+        {chatHistory.map((message) => {
+          // Rounds written through the agent bridge: gate questions and answers, and the text of posted assets.
+          const agentKind = agentBubbleKind(message, chatHistory);
+          if (agentKind === 'hidden') {
+            return <div key={message.id} data-message-id={message.id} className="chat-message-anchor" aria-hidden="true" />;
+          }
+          if (agentKind === 'question' || agentKind === 'answer') {
+            const isQuestion = agentKind === 'question';
+            return (
+              <div key={message.id} data-message-id={message.id}
+                className={`chat-message ${isQuestion ? 'chat-message-assistant' : 'chat-message-user'}`}>
+                <div className={`chat-message-content ${isQuestion ? 'assistant-message' : 'user-message'}`}>
+                  {isQuestion ? <AgentQuestionBubble message={message} /> : <GateAnswerBubble message={message} />}
+                </div>
+              </div>
+            );
+          }
+          return (
           <div
             key={message.id}
             data-message-id={message.id}
@@ -1113,6 +1132,29 @@ export default function ResultGrid() {
             ) : (
               // AI 回复（左侧）- 图片网格
               <div className="chat-message-content assistant-message">
+                {agentKind === 'post-text' && (
+                  <AgentPostText
+                    text={agentPostText(message, chatHistory)}
+                    actions={(
+                      <Popconfirm
+                        title="确认删除这条 Agent 发的内容？"
+                        description="会删除这一轮的说明和全部素材。"
+                        onConfirm={() => {
+                          const roundId = sourceMessageId(message.id);
+                          forgetOutlineRound(roundId);
+                          return deleteChatMessage(roundId);
+                        }}
+                        okText="删除"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        placement="topLeft"
+                      >
+                        <Button type="text" size="small" danger icon={<DeleteOutlined />}
+                          disabled={isGenerating || deletingMedia} aria-label="删除这条 Agent 发的内容" />
+                      </Popconfirm>
+                    )}
+                  />
+                )}
                 {message.images?.length ? (
                   <div
                     className="chat-images-grid"
@@ -1291,7 +1333,8 @@ export default function ResultGrid() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         {/* 滚动锚点 */}
         <div ref={messagesEndRef} />
       </div>

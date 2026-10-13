@@ -65,6 +65,32 @@ class AssetPackTests(unittest.TestCase):
         run("spec-init", "--pack", self.pack, "--root", self.root / "public", "--project", "demo", "-o", self.spec)
         self.assertEqual(json.loads(self.spec.read_text())["assets"]["heroine"]["status"], "final", "re-running keeps annotations")
 
+    def test_check_animation_counts_frames_blank_cells_and_end_frame(self):
+        sheet = Image.new("RGBA", (3 * 20, 2 * 30), (0, 0, 0, 0))
+        for index in range(5):  # 3 × 2 cells, the sixth is blank
+            sheet.paste((200, 0, 0, 255), ((index % 3) * 20 + 5, (index // 3) * 30 + 5, (index % 3) * 20 + 15, (index // 3) * 30 + 25))
+        sheet.save(self.root / "public/assets/characters/heroine_idle.png")
+        run("register", self.pack, "--key", "heroine_idle", "--url", "assets/characters/heroine_idle.png", "--type", "spritesheet",
+            "--frame-width", "20", "--frame-height", "30", "--section", "characters")
+        self.spec.parent.mkdir(parents=True, exist_ok=True)
+        self.spec.write_text(json.dumps({"version": 1, "assets": {"heroine_idle": {
+            "path": str(self.root / "public/assets/characters/heroine_idle.png"), "kind": "animation",
+            "size": {"w": 20, "h": 30}, "frames": 5, "alpha": True, "status": "generated"}}}))
+        code, result = run("check", "--spec", self.spec, "--pack", self.pack, "heroine_idle")
+        self.assertEqual(code, 1, "the blank sixth cell would play as a frame")
+        self.assertEqual(result["results"][0]["blank_cells"], [5])
+        self.assertIn("endFrame 应为 4", result["results"][0]["problems"][0])
+        run("register", self.pack, "--key", "heroine_idle", "--url", "assets/characters/heroine_idle.png", "--type", "spritesheet",
+            "--frame-width", "20", "--frame-height", "30", "--end-frame", "4")
+        code, result = run("check", "--spec", self.spec, "--pack", self.pack, "heroine_idle")
+        self.assertEqual(code, 0, result)
+        spec = json.loads(self.spec.read_text())
+        spec["assets"]["heroine_idle"]["frames"] = 6
+        self.spec.write_text(json.dumps(spec))
+        code, result = run("check", "--spec", self.spec, "--pack", self.pack, "heroine_idle")
+        self.assertEqual(code, 1)
+        self.assertTrue(any("第 5 格是空的" in problem for problem in result["results"][0]["problems"]))
+
 
 if __name__ == "__main__":
     unittest.main()

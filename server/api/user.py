@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
+from server.agent_bridge.gates import AGENT_WORKFLOWS
 from server.database import get_db
 from server.models import User, UserConfig, ChatMessage, ChatSession, GeneratedImage, ReferenceImage
 from server.auth import (
@@ -311,7 +312,10 @@ def get_chat_history(
                 return file_storage.get_file_url(path)  # 相对路径加前缀
             msg_dict["images"] = [_to_url(img.file_path) for img in images]
             msg_dict["seeds"] = [img.seed for img in images]
-        
+            if msg.workflow in AGENT_WORKFLOWS:
+                # Agent bubbles: a gate's question, or the text of posted assets, shown on the agent's side.
+                msg_dict["params"] = {"workflow": msg.workflow, "workflowOptions": msg.workflow_options or {}}
+
         result.append(msg_dict)
     
     return {"messages": result, "has_more": has_more}
