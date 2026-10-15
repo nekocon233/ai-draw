@@ -35,6 +35,7 @@ ai-draw 采用 FastAPI + React 前后端分离架构，可将生成任务分发�
 | `gpt_image` | OpenAI 兼容 API | 文本，可选 1-3 张参考图 | 图片 |
 | `minimax_h3` | ComfyUI / MiniMax H3 | 文本，可选首尾关键帧 | 视频（默认无声，可选音频） |
 | `minimax_h3_ref` | ComfyUI / MiniMax H3 Ref2VA | 角色图 + 1–8 张有序动作参考图或一段动作视频 | 视频（默认无声，可选音频） |
+| `minimax_h3_face` | ComfyUI / MiniMax H3 Ref2VA | 主体图 + 1–8 张有序参考图或一段动作视频，只换脸和发型 | 视频（默认无声，可选音频） |
 
 动作参考视频的使用、模型安装和数据迁移见 [MiniMax H3 动作参考](docs/minimax_h3_reference.md)。
 

@@ -24,7 +24,7 @@ import ImageMentionInput from './ImageMentionInput';
 import PromptPresetTag from './PromptPresetTag';
 import PromptPresetQuickSelect from './PromptPresetQuickSelect';
 import MotionReferenceImages, { type MotionReferenceImagesHandle } from './MotionReferenceImages';
-import { motionPromptSource, motionPromptSourceKey, motionReferenceMode, rebindMotionPrompt, resolveMotionPrompt } from '../utils/motionPrompt';
+import { motionPromptSource, motionPromptSourceKey, rebindMotionPrompt, referenceModeOf, resolveMotionPrompt } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
 import { placeholderAutoSize } from '../utils/placeholderAutoSize';
 import { getFixedSeed } from '../utils/generationSeed';
@@ -190,9 +190,11 @@ export default function ChatInput() {
   const storedMotionPrompt = useAppStore(state => state.motionPrompt);
   const history = useAppStore(state => state.chatHistory);
   const motionSource = useMemo(
-    () => motionPromptSource(referenceImage, motionReferenceImages, prompt, promptPreset, activeMotionVideo),
-    [referenceImage, motionReferenceImages, prompt, promptPreset, activeMotionVideo]);
-  const motionSnapshot = useMemo(() => resolveMotionPrompt(storedMotionPrompt, history, motionSource), [storedMotionPrompt, history, motionSource]);
+    () => motionPromptSource(referenceImage, motionReferenceImages, prompt, promptPreset, activeMotionVideo, workflowMeta?.motion_reference_mode),
+    [referenceImage, motionReferenceImages, prompt, promptPreset, activeMotionVideo, workflowMeta?.motion_reference_mode]);
+  const motionSnapshot = useMemo(
+    () => resolveMotionPrompt(storedMotionPrompt, history, motionSource, availableWorkflows),
+    [storedMotionPrompt, history, motionSource, availableWorkflows]);
   const motionRequestKey = JSON.stringify([currentSessionId, currentWorkflow, motionPromptSourceKey(motionSource)]);
   const mentionsEnabled = supportsImageMentions(workflowMeta);
   const generationProgress = useAppStore(state => state.generationProgress);
@@ -868,7 +870,7 @@ export default function ChatInput() {
 
         {isMotionReference && <MotionReferenceImages ref={motionReferencesRef} key={`motion-images-${currentSessionId ?? 'new'}`}
           images={motionReferenceImages} onChange={setMotionReferenceImages} onCapture={openPoseReference}
-          onUploadingChange={setUploadingMotion} disabled={isSubmitting} mode={motionReferenceMode(promptPreset?.motion_reference_mode)}
+          onUploadingChange={setUploadingMotion} disabled={isSubmitting} mode={referenceModeOf(workflowMeta?.motion_reference_mode, promptPreset)}
           video={supportsMotionVideo ? {
             value: motionReferenceVideo, onChange: setMotionReferenceVideo, workflow: currentWorkflow,
             maxSeconds: workflowMeta?.max_motion_reference_video_seconds ?? 0,

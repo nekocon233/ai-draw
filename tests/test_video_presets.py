@@ -42,7 +42,7 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
     def test_catalog_exposes_video_scope_and_explicit_keyframe_roles(self):
         videos = [preset for preset in PROMPT_PRESETS if preset.output_type == "video"]
         self.assertEqual({preset.id for preset in videos},
-                         {"video_motion", "video_fixed_camera", "video_reference_shot", "video_reference_face", "video_transition"})
+                         {"video_motion", "video_fixed_camera", "video_reference_shot", "video_transition"})
         for preset in videos:
             self.assertTrue(preset.prompt.endswith("。"))
             self.assertNotIn("@图片", preset.prompt)
@@ -143,22 +143,26 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('动作视频则按视频中的动作、节奏和时间完成', sent['prompt_text'])
         self.assertEqual(params.source_updates()['motion_reference_video'], video)
 
-    async def test_face_swap_keeps_the_reference_outfit_and_follows_its_framing(self):
-        self.assertEqual(self.presets['video_reference_face']['motion_reference_mode'], 'face')
-        self.assertEqual(self.presets['video_reference_face']['workflow_ids'], ['minimax_h3_ref'])
-        with self.assertRaisesRegex(ValueError, '不适用于'):
-            self.engine.validate(self.parameters('video_reference_face', 'minimax_h3', reference_image=self.image))
-        with self.assertRaisesRegex(ValueError, '动作参考图'):
-            self.engine.validate(self.parameters('video_reference_face', 'minimax_h3_ref', reference_image=self.image))
-        params = self.parameters('video_reference_face', 'minimax_h3_ref', reference_images=[self.image], motion_reference_images=[self.image])
+    async def test_face_swap_is_a_standalone_workflow_with_a_pinned_mode(self):
+        # 换脸是独立工作流：无预设、无默认预设，模式由工作流元数据固定，但归入「图生视频」分类，
+        # 于是能在生成设置的「生成方式」下拉里与其它 H3 方式并列。
+        face = self.catalog.describe('minimax_h3_face')
+        self.assertEqual((face['motion_reference_mode'], face['default_prompt_preset_id'], face['category'], face['method']),
+                         ('face', None, '图生视频', 'MiniMax H3 · 换脸'))
+        self.assertNotIn('video_reference_face', self.presets)
+        self.assertEqual(self.catalog.describe('minimax_h3_ref')['motion_reference_mode'], None)
+        with self.assertRaisesRegex(ValueError, '姿势参考图'):
+            self.engine.validate(GenerationParameters('抬起右手', workflow='minimax_h3_face', reference_image=self.image))
+        params = GenerationParameters('抬起右手', workflow='minimax_h3_face',
+                                      reference_images=[self.image], motion_reference_images=[self.image])
         self.engine.validate(params)
-        self.assertEqual(params.for_provider().motion_reference_mode, 'face')
-        self.assertNotIn('motion_reference_mode', params.source_updates())
-        await self.engine.generate(params, TaskContext(7, 'task', 'minimax_h3_ref'), Mock(), lambda: None)
+        # 没有预设时 for_provider 仍推导为 pose，由 provider 的工作流固有模式接管。
+        self.assertEqual(params.for_provider().motion_reference_mode, 'pose')
+        await self.engine.generate(params, TaskContext(7, 'task', 'minimax_h3_face'), Mock(), lambda: None)
         sent = self.comfyui.generate_minimax_h3_ref.await_args.kwargs
         self.assertEqual(sent['canvas_image_index'], 1)
         for text in ('only defines the head of <Subject 1>', 'never change their outfit', 'attribute_transfer',
-                     'replace only the face and hair', self.presets['video_reference_face']['prompt'] + '抬起右手'):
+                     'replace only the face and hair', '抬起右手'):
             self.assertIn(text, sent['prompt_text'])
         self.assertNotIn('sole visual baseline', sent['prompt_text'])
         # The whole-person preset still swaps clothing too.

@@ -51,6 +51,8 @@ class WorkflowCatalog:
             text_workflow=metadata.get("text_workflow"),
             image_workflow=metadata.get("image_workflow"),
             default_prompt_preset_id=metadata.get("default_prompt_preset_id"),
+            # 工作流固有的参考模式（如换脸工作流固定 face）；没有预设时前后端都以它为准
+            motion_reference_mode=metadata.get("motion_reference_mode"),
             # History stores the adapter file ID; this lets the UI show the registered name instead.
             lora_labels={item["name"].removesuffix(".safetensors"): item["label"] for item in metadata.get("lora_models", [])},
         )

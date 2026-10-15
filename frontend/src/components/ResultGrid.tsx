@@ -16,7 +16,7 @@ import ImageMentionInput from './ImageMentionInput';
 import PromptPresetTag from './PromptPresetTag';
 import MotionReferenceImages from './MotionReferenceImages';
 import MotionPromptPanel from './MotionPromptPanel';
-import { motionPromptSource, motionReferenceMode } from '../utils/motionPrompt';
+import { motionPromptSource, referenceModeOf } from '../utils/motionPrompt';
 import { getMotionReferenceError } from '../utils/motionReferences';
 import { isVideoUrl } from '../utils/media';
 import { getFixedSeed, getSeedParameter } from '../utils/generationSeed';
@@ -945,14 +945,14 @@ export default function ResultGrid() {
 
                       {/* 提示词文本编辑 */}
                       {editWorkflowMeta?.supports_motion_reference && <MotionReferenceImages key={`motion-images-${currentSessionId}-${message.id}`}
-                        images={editMotionImages} onUploadingChange={setEditMotionUploading} mode={motionReferenceMode(editPreset?.motion_reference_mode)}
+                        images={editMotionImages} onUploadingChange={setEditMotionUploading} mode={referenceModeOf(editWorkflowMeta?.motion_reference_mode, editPreset)}
                         onChange={images => { setEditMotionImages(images); if (images.length) setEditMotionVideo(null); setEditMotionPrompt(null); }}
                         video={editSupportsMotionVideo ? {
                           value: editMotionVideo, workflow: editWorkflowMeta.key, maxSeconds: editWorkflowMeta.max_motion_reference_video_seconds ?? 0,
                           onChange: video => { setEditMotionVideo(video); if (video) setEditMotionImages([]); setEditMotionPrompt(null); },
                         } : undefined} />}
                       {editWorkflowMeta?.supports_motion_reference && <MotionPromptPanel key={`motion-prompt-${currentSessionId}-${message.id}`}
-                        source={motionPromptSource(editRefImages.images[0] ?? null, editMotionImages, editContent, editPreset, editActiveMotionVideo)} snapshot={editMotionPrompt}
+                        source={motionPromptSource(editRefImages.images[0] ?? null, editMotionImages, editContent, editPreset, editActiveMotionVideo, editWorkflowMeta?.motion_reference_mode)} snapshot={editMotionPrompt}
                         onChange={setEditMotionPrompt} onBusyChange={setEditMotionPreviewing} disabled={editMotionUploading} />}
                       <ImageMentionInput
                         className="edit-content-textarea"
@@ -1054,9 +1054,6 @@ export default function ResultGrid() {
                     </div>
                   )}
                   {message.content && <div className="chat-message-text">{message.content}</div>}
-                  {message.params?.motionPrompt && <details className="motion-prompt-history">
-                    <summary>本轮动作提示词 · 保持原画面</summary><div>{message.params.motionPrompt.prompt}</div>
-                  </details>}
                   {/* 保留已停用工作流的历史补充描述与参数。 */}
                   {message.params?.promptEnd && (
                     <div className="chat-message-text chat-message-text-end">{message.params.promptEnd}</div>

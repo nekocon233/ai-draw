@@ -17,6 +17,8 @@ workflow_defaults:
     qwen_image_21_i2i: "qwen_image_21_i2i_workflow_api.json"
     minimax_h3: "minimax_h3_workflow_api.json"
     minimax_h3_ref: "minimax_h3_ref_workflow_api.json"
+    # 换脸与动作参考共用同一份 Ref2VA 图，只靠工作流固有的参考模式区分
+    minimax_h3_face: "minimax_h3_ref_workflow_api.json"
     image_upscale: "image_upscale_workflow_api.json"
     image_upscale_invsr: "image_upscale_invsr_workflow_api.json"
   # 工作流元数据
@@ -137,5 +139,30 @@ workflow_defaults:
           type: "select"
           options: ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
           default: "auto"
+        - *h3_audio
+        - *h3_fixed_seed
+    # 换脸是独立工作流：无提示词预设，模式由本工作流固定；归入「图生视频」分类，在生成设置的
+    # 「生成方式」里与首尾帧、动作参考并列（不写 method_group，三者各自独立、各记各的设置）
+    minimax_h3_face:
+      provider: "comfyui_minimax_h3_face"
+      label: "MiniMax H3 · 换脸"
+      description: "只把参考素材里人物的脸和头发换成主体图，保留其服装、体型、镜头、动作与场景；主体图加 1–8 张有序参考图或一段动作视频"
+      category: "图生视频"
+      method: "MiniMax H3 · 换脸"
+      motion_reference_mode: "face"
+      requires_image: true
+      supports_motion_reference: true
+      max_motion_reference_images: 8
+      supports_motion_reference_video: true
+      max_motion_reference_video_seconds: 5
+      reference_image_label: "主体图"
+      reference_image_description: "只提供脸、五官、脸型、肤色、发型和发色；服装、体型、镜头、动作与场景跟随参考素材"
+      output_type: "video"
+      # 换脸要求由服务端的 FACE_REFERENCE_RULES / FACE_VIDEO_RULES 拼接，扩写只处理用户的补充描述
+      prompt_template: "你是换脸视频的补充描述扩写助手。要换上的脸和发型来自主体图，人物的服装、体型、镜头、动作、表情与场景都以参考素材为准，这些要求由系统自动加入，不要额外补写。把下面的补充描述扩写得清晰、具体，如节奏、停顿、音效，以及随动作产生的头发、衣物细微动态；描述里已有的内容保持原意和顺序，不删减。不得新增、替换或改变参考素材给出的镜头和动作，不得改变服装，不擅自加入运镜、变焦、切镜、场景变化、新人物或特效。只输出扩写后的补充描述：\n{desc}"
+      parameters:
+        - {name: "prompt", label: "额外补充（可留空）", type: "text", default: ""}
+        - {name: "h3_duration", label: "时长（秒）", type: "select", options: ["4", "5", "6", "8", "10", "12", "15"], default: "5"}
+        - {name: "h3_aspect_ratio", label: "画幅", type: "select", options: ["auto"], option_labels: {auto: "自动（按参考视频或首张参考图）"}, default: "auto"}
         - *h3_audio
         - *h3_fixed_seed

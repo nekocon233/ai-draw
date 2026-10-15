@@ -13,7 +13,9 @@ from PIL import Image
 from comfyui.requests.local_comfyui_request import LocalComfyUIRequest
 from comfyui.structures.minimax_h3 import get_minimax_h3_video_frame_count
 from server.generation.contracts import GenerationParameters, ProviderInput
-from server.generation.minimax_h3_ref import MiniMaxH3ReferenceProvider, validate_motion_references
+from server.generation.minimax_h3_ref import ANALYSIS_FALLBACK_PROGRESS, MiniMaxH3ReferenceProvider, validate_motion_references
+from utils.llm import LLMServiceUnavailable
+from utils.motion_prompt import motion_prompt_input_hash
 
 VIDEO = '/uploads/reference/1/' + 'a' * 32 + '.mp4'
 
@@ -96,6 +98,50 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
                      '<Picture 1> (face and hair): attribute_transfer', 'source video for the target video edit'):
             self.assertIn(text, options['prompt_text'])
         self.assertNotIn('Replace the performer of <Video 1> with <Subject 1>', options['prompt_text'])
+
+    async def test_unavailable_vision_service_skips_the_analysis_and_still_generates(self):
+        async def generate(**options):
+            options['finish_callback']('video')
+        service = SimpleNamespace(generate_minimax_h3_ref=AsyncMock(side_effect=generate))
+        params = GenerationParameters('雨夜', workflow='minimax_h3_ref', reference_image='character', motion_reference_video=VIDEO,
+                                      prompt_preset={'prompt': '换脸。', 'motion_reference_mode': 'face'})
+        progress = Mock()
+        provider = MiniMaxH3ReferenceProvider(service)
+        request = ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4')
+        with patch('server.generation.minimax_h3_ref.analyze_motion_video',
+                   side_effect=LLMServiceUnavailable('503 Service Unavailable')) as analyze:
+            prepared = await provider.enrich(request, progress)
+        analyze.assert_called_once()
+        self.assertEqual([entry.args[0] for entry in progress.call_args_list],
+                         ['正在分析参考视频的镜头、服装与动作...', ANALYSIS_FALLBACK_PROGRESS])
+        self.assertIsNone(prepared.motion_prompt)
+        await provider.generate(ProviderInput(prepared.for_provider(), request.images, motion_video='/data/clip.mp4'))
+        options = service.generate_minimax_h3_ref.call_args.kwargs
+        for text in ('[video editing]', 'only the face and hair come from <Picture 1>', 'never change the outfit', '换脸。'):
+            self.assertIn(text, options['prompt_text'])
+        # 规则段照常发送，只有动作描述那一段为空。
+        self.assertIn('approved motion description:\n\n', options['prompt_text'])
+
+    async def test_the_face_workflow_analyses_in_face_mode_without_any_preset(self):
+        provider = MiniMaxH3ReferenceProvider(SimpleNamespace(), default_mode="face")
+        params = GenerationParameters('雨夜', workflow='minimax_h3_face', reference_image='character',
+                                      motion_reference_video=VIDEO)
+        progress = Mock()
+        with patch('server.generation.minimax_h3_ref.analyze_motion_video',
+                   return_value={'version': 1, 'input_hash': 'a' * 64, 'prompt': '换脸'}) as analyze:
+            prepared = await provider.enrich(ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4'), progress)
+        self.assertEqual(analyze.call_args.args[3], motion_prompt_input_hash('character', [], '雨夜', 'face', video=VIDEO))
+        self.assertEqual(analyze.call_args.args[4], 'face')
+        progress.assert_called_once_with('正在分析参考视频的镜头、服装与动作...')
+        self.assertEqual(prepared.motion_prompt['prompt'], '换脸')
+
+    async def test_other_analysis_failures_still_stop_before_sampling(self):
+        params = GenerationParameters('雨夜', workflow='minimax_h3_ref', reference_image='character', motion_reference_video=VIDEO)
+        provider = MiniMaxH3ReferenceProvider(SimpleNamespace())
+        with patch('server.generation.minimax_h3_ref.analyze_motion_video',
+                   side_effect=ValueError('动作分析未返回有效长度的提示词，请重试')):
+            with self.assertRaisesRegex(RuntimeError, '未开始视频生成'):
+                await provider.enrich(ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4'), Mock())
 
     async def test_provider_keeps_character_first_and_pose_order(self):
         async def generate(**options):

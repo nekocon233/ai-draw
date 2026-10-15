@@ -4,12 +4,14 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
+import openai
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from utils.image_mentions import validate_image_mentions
-from utils.llm import LanguageModel, InvalidImageError, image_data_url
+from utils.llm import LanguageModel, InvalidImageError, LLMServiceUnavailable, image_data_url
 
 
 def png(color="red"):
@@ -67,6 +69,31 @@ class LanguageModelTests(unittest.TestCase):
             factory.return_value.chat.completions.create.return_value.choices = []
             with self.assertRaisesRegex(ValueError, "未返回"):
                 LanguageModel().complete("x")
+
+    def test_only_transport_failures_become_service_unavailable(self):
+        request = httpx.Request("POST", "http://proxy.invalid/v1/chat/completions")
+        def status_error(kind, code):
+            return kind("failed", response=httpx.Response(code, request=request), body=None)
+        transport = (
+            openai.APIConnectionError(request=request),
+            openai.APITimeoutError(request=request),
+            status_error(openai.RateLimitError, 429),
+            status_error(openai.InternalServerError, 503),
+            status_error(openai.InternalServerError, 502),
+        )
+        for error in transport:
+            with self.subTest(error=f"{type(error).__name__}-{getattr(error, 'status_code', None)}"), \
+                    patch("utils.llm.get_config", return_value=config()), patch("utils.llm.OpenAI") as factory:
+                factory.return_value.chat.completions.create.side_effect = error
+                with self.assertRaises(LLMServiceUnavailable):
+                    LanguageModel().complete("x")
+        # Client and content errors stay as they are: callers must still treat them as failures.
+        for error in (status_error(openai.BadRequestError, 400), status_error(openai.AuthenticationError, 401)):
+            with self.subTest(error=type(error).__name__), \
+                    patch("utils.llm.get_config", return_value=config()), patch("utils.llm.OpenAI") as factory:
+                factory.return_value.chat.completions.create.side_effect = error
+                with self.assertRaises(type(error)):
+                    LanguageModel().complete("x")
 
 class PromptAnalysisRouteTests(unittest.TestCase):
     def setUp(self):

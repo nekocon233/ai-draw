@@ -3,7 +3,7 @@ import base64
 from io import BytesIO
 from typing import Sequence
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 from PIL import Image
 
 from utils.config_loader import get_config
@@ -11,6 +11,10 @@ from utils.config_loader import get_config
 
 class InvalidImageError(ValueError):
     pass
+
+
+class LLMServiceUnavailable(RuntimeError):
+    """Codex 代理不可达或返回服务端错误；模型没有对请求内容做出任何判断。"""
 
 
 def image_data_url(value: str) -> str:
@@ -58,7 +62,11 @@ class LanguageModel:
                 {"type": "image_url", "image_url": {"url": image_data_url(image)}} for image in images
             ]
         messages.append({"role": "user", "content": content})
-        response = self.client.chat.completions.create(model=self.model, messages=messages, **options)
+        try:
+            response = self.client.chat.completions.create(model=self.model, messages=messages, **options)
+        except (APITimeoutError, APIConnectionError, RateLimitError, InternalServerError) as error:
+            # 4xx、空内容和图片错误不在此列：它们不是「服务不可用」，调用方仍需按失败处理。
+            raise LLMServiceUnavailable(str(error)) from error
         text = response.choices[0].message.content if response.choices else None
         if not isinstance(text, str) or not text.strip():
             raise ValueError("LLM 服务未返回有效文字")

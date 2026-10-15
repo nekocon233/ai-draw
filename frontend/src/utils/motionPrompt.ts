@@ -1,4 +1,4 @@
-import type { MotionPromptSnapshot, MotionReferenceMode, PromptPreset } from '../types/api';
+import type { MotionPromptSnapshot, MotionReferenceMode, PromptPreset, WorkflowMetadata } from '../types/api';
 import type { ChatMessage } from '../types/models';
 
 // Mirrors utils/motion_prompt.py; the pose policy is unchanged so fixed-scene snapshots stay valid.
@@ -27,15 +27,28 @@ export interface MotionPromptSource {
   motion_reference_mode: MotionReferenceMode;
 }
 
+/** Mirror of the backend rule: a workflow may pin its own mode (换脸工作流固定 face); otherwise the preset decides. */
+export const referenceModeOf = (workflowMode: unknown, preset?: PromptPreset | null): MotionReferenceMode =>
+  motionReferenceMode(workflowMode ?? preset?.motion_reference_mode);
+
+/** The inherent mode of a stored workflow key, resolved from the workflow catalog. */
+export const workflowMotionMode = (
+  workflows: readonly WorkflowMetadata[] | undefined, workflow?: string,
+): MotionReferenceMode | undefined => {
+  const mode = workflows?.find(item => item.key === workflow)?.motion_reference_mode;
+  return mode === 'shot' || mode === 'face' ? mode : undefined;
+};
+
 export function motionPromptSource(
-  character: string | null | undefined, poses: readonly string[], description: string, preset?: PromptPreset | null, video?: string | null,
+  character: string | null | undefined, poses: readonly string[], description: string, preset?: PromptPreset | null,
+  video?: string | null, workflowMode?: MotionReferenceMode,
 ): MotionPromptSource {
   return {
     reference_image: character ?? '',
     motion_reference_images: video ? [] : [...poses],
     motion_reference_video: video || null,
     description: (preset?.prompt.trim() ?? '') + description.trim(),
-    motion_reference_mode: motionReferenceMode(preset?.motion_reference_mode),
+    motion_reference_mode: referenceModeOf(workflowMode, preset),
   };
 }
 
@@ -54,14 +67,21 @@ export async function rebindMotionPrompt(snapshot: MotionPromptSnapshot, source:
   return { ...snapshot, input_hash: Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('') };
 }
 
-export function resolveMotionPrompt(stored: MotionPromptSnapshot | null | undefined, history: readonly ChatMessage[], source: MotionPromptSource): MotionPromptSnapshot | null {
+/** A stored snapshot is reusable when its source key matches; the key carries the mode policy, so modes cannot mix. */
+export function resolveMotionPrompt(
+  stored: MotionPromptSnapshot | null | undefined, history: readonly ChatMessage[], source: MotionPromptSource,
+  workflows?: readonly WorkflowMetadata[],
+): MotionPromptSnapshot | null {
   if (stored?.version === 1) return stored;
   const key = motionPromptSourceKey(source);
   for (let index = history.length - 1; index >= 0; index--) {
     const message = history[index], params = message.params;
-    if (message.type !== 'user' || params?.workflow !== 'minimax_h3_ref' || params.motionPrompt?.version !== 1) continue;
+    if (message.type !== 'user' || params?.motionPrompt?.version !== 1) continue;
     const character = params.referenceImages?.[0] ?? params.referenceImage;
-    const historical = motionPromptSource(character, params.motionReferenceImages ?? [], message.content, params.promptPreset, params.motionReferenceVideo);
+    const historical = motionPromptSource(
+      character, params.motionReferenceImages ?? [], message.content, params.promptPreset,
+      params.motionReferenceVideo, workflowMotionMode(workflows, params.workflow),
+    );
     if (motionPromptSourceKey(historical) === key) {
       return params.motionPrompt;
     }

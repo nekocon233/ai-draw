@@ -3,9 +3,11 @@ from comfyui.structures.minimax_h3 import validate_minimax_h3_options
 from .contracts import GenerationParameters, MediaOutput, ProviderInput
 import asyncio
 from dataclasses import replace
+from utils.llm import LLMServiceUnavailable
 from utils.motion_prompt import (
-    FACE_REFERENCE_RULES, FACE_VIDEO_RULES, FIXED_SCENE_RULES, FIXED_SCENE_VIDEO_RULES, SHOT_REFERENCE_RULES,
-    SHOT_VIDEO_RULES, analyze_motion_images, analyze_motion_video, current_motion_prompt, motion_prompt_input_hash,
+    FACE_REFERENCE_RULES, FACE_VIDEO_RULES, FIXED_SCENE_RULES, FIXED_SCENE_VIDEO_RULES, MOTION_REFERENCE_MODES,
+    SHOT_REFERENCE_RULES, SHOT_VIDEO_RULES, analyze_motion_images, analyze_motion_video, current_motion_prompt,
+    motion_prompt_input_hash,
 )
 from utils.reference_video import motion_video_owner
 
@@ -212,15 +214,26 @@ ANALYSIS_PROGRESS = {
     ("shot", True): "正在分析参考视频的镜头与动作...", ("face", True): "正在分析参考视频的镜头、服装与动作...",
 }
 
+# 视觉服务不可用时按规则段直接生成，不写 motion_prompt 快照：规则本身已声明参考素材是权威输入，
+# 也不缓存这次的空结果，下次相同输入会重新尝试分析。
+ANALYSIS_FALLBACK_PROGRESS = "视觉服务不可用，已跳过动作分析，直接按参考素材生成"
+
 
 class MiniMaxH3ReferenceProvider:
-    def __init__(self, comfyui):
+    """Ref2VA in pose, shot or face mode; a workflow may pin its own mode instead of relying on a preset."""
+
+    def __init__(self, comfyui, default_mode: str | None = None):
         self.comfyui = comfyui
+        self.default_mode = default_mode if default_mode in MOTION_REFERENCE_MODES else None
+
+    def resolve_mode(self, preset_mode: str) -> str:
+        """The workflow's own mode wins; otherwise the preset snapshot decides (default pose)."""
+        return self.default_mode or preset_mode
 
     async def enrich(self, request: ProviderInput, progress) -> GenerationParameters:
         params = request.parameters
         provider_params = params.for_provider()
-        description, mode = provider_params.prompt, provider_params.motion_reference_mode
+        description, mode = provider_params.prompt, self.resolve_mode(provider_params.motion_reference_mode)
         slots = params.reference_slots()
         video = params.motion_reference_video
         signature = motion_prompt_input_hash(
@@ -239,13 +252,16 @@ class MiniMaxH3ReferenceProvider:
             )), "动作参考图"
         try:
             snapshot = await asyncio.to_thread(analyze)
+        except LLMServiceUnavailable:
+            progress(ANALYSIS_FALLBACK_PROGRESS)
+            return params
         except Exception as error:
             raise RuntimeError(f"{label}分析失败，未开始视频生成：{error}") from error
         return replace(params, motion_prompt=snapshot)
 
     async def generate(self, request: ProviderInput) -> MediaOutput:
         duration, _, audio = validate_minimax_h3_options(request.parameters.workflow_options)
-        mode = request.parameters.motion_reference_mode
+        mode = self.resolve_mode(request.parameters.motion_reference_mode)
         analyzed = (request.parameters.motion_prompt or {}).get('prompt', '')
         result = None
 

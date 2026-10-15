@@ -135,26 +135,7 @@ PROMPT_PRESETS = (
         hint="可补充场景、节奏、停顿、音效等细节；镜头与动作按参考图或参考视频生成，可留空",
         images=[PromptPresetImage(label="主体图", role="只提供人物或元素的外观；不沿用背景、镜头、构图和姿势", slot=1)],
     ),
-    # Face swap keeps the reference person's outfit and body; only the face and hair come from the subject image.
-    PromptPreset(
-        id="video_reference_face",
-        title="参考镜头换脸",
-        description="只把参考图或参考视频里人物的脸和发型换成主体，服装、体型、动作、镜头与场景都保留",
-        output_type="video",
-        requires_motion_reference=True,
-        motion_reference_mode="face",
-        workflow_ids=["minimax_h3_ref"],
-        prompt=(
-            "主体图只用于确定人物的脸、五官、脸型、肤色、发型和发色，不沿用主体图的服装、配饰、体型、背景、镜头、构图和姿势。"
-            "参考图或参考视频中的人物保留原有的服装、配饰、体型和配色，只把脸和头发换成主体的脸和发型，并与原画面的画风融为一体。"
-            "镜头位置、角度、距离、景别与构图，人物在画面中的位置和大小，以及动作、姿态、表情和先后顺序都以参考为准；"
-            "多张参考图按提供顺序依次完成，并以连续镜头平滑衔接，参考视频则按视频的镜头、动作和节奏完成。"
-            "场景和背景同样以参考为准；参考没有实际场景时，按补充描述或保持简洁背景。"
-            "用户手动补充的文字只描述场景、节奏、停顿、音效等额外内容，不得改变参考给出的镜头、服装和动作。"
-        ),
-        hint="可补充场景、节奏、停顿、音效等细节；只换脸和发型，服装、镜头与动作按参考生成，可留空",
-        images=[PromptPresetImage(label="主体图", role="只提供脸和发型；不沿用服装、体型、背景、镜头和姿势", slot=1)],
-    ),
+    # 换脸不再作为预设：它是独立生成方式 minimax_h3_face，模式由该工作流的 metadata 固定。
     PromptPreset(
         id="video_transition",
         title="首尾帧过渡",

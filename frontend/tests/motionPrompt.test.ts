@@ -54,6 +54,18 @@ test('motion videos use their own policies and keys that mirror the backend hash
   assert.equal(resolveMotionPrompt(null, videoHistory, motionPromptSource('character', [], '轻快')), null);
 });
 
+test('the standalone face workflow pins face mode without a preset', () => {
+  const clip = `/uploads/reference/7/${'a'.repeat(32)}.mp4`;
+  const workflow = {key:'minimax_h3_face',label:'MiniMax H3 · 换脸',description:'',requires_image:true,
+    supports_motion_reference:true,motion_reference_mode:'face' as const,parameters:[]};
+  const source = motionPromptSource('character', [], '雨夜', null, clip, workflow.motion_reference_mode);
+  assert.equal(source.motion_reference_mode, 'face');
+  assert.equal(motionPromptSourceKey(source), JSON.stringify([1, VIDEO_FACE_MOTION_PROMPT_POLICY, 'character', clip, '雨夜']));
+  // 换脸模式由工作流固定，所以动作参考那边的 pose/shot 分析不会串到这条工作流上。
+  assert.equal(motionPromptSourceKey(motionPromptSource('character', [], '雨夜', null, clip)),
+    JSON.stringify([1, VIDEO_MOTION_PROMPT_POLICY, 'character', clip, '雨夜']));
+});
+
 test('face-swap presets bind analysis to their own image and video policies', () => {
   const clip = `/uploads/reference/7/${'a'.repeat(32)}.mp4`;
   const face = {id:'video_reference_face',title:'参考镜头换脸',description:'',prompt:'换脸。',hint:'',images:[],motion_reference_mode:'face' as const};

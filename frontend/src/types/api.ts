@@ -172,6 +172,7 @@ export interface WorkflowMetadata {
   requires_end_image?: boolean;
   supports_optional_keyframes?: boolean;
   supports_motion_reference?: boolean;
+  motion_reference_mode?: MotionReferenceMode;  // 工作流固有的参考模式（换脸工作流固定 face）；无预设时前后端都以它为准
   max_motion_reference_images?: number;
   supports_motion_reference_video?: boolean;  // 动作参考可改用一段视频，时长跟随视频
   max_motion_reference_video_seconds?: number;

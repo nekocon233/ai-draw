@@ -1690,7 +1690,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     const activeMeta = state.availableWorkflows.find(workflow => workflow.key === state.currentWorkflow);
     const motionPrompt = (() => {
       const snapshot = resolveMotionPrompt(state.motionPrompt, state.chatHistory, motionPromptSource(
-        state.referenceImages[0] ?? null, state.motionReferenceImages, state.prompt, state.promptPreset, state.motionReferenceVideo));
+        state.referenceImages[0] ?? null, state.motionReferenceImages, state.prompt, state.promptPreset,
+        state.motionReferenceVideo, activeMeta?.motion_reference_mode), state.availableWorkflows);
       return snapshot?.prompt.trim() ? snapshot : null;
     })();
 
