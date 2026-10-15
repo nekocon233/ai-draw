@@ -48,6 +48,7 @@ class UserConfigResponse(BaseModel):
     count: int
     images_per_row: int
     current_session_id: Optional[str] = None
+    ungrouped_collapsed: bool = False
 
 class UpdateConfigRequest(BaseModel):
     current_workflow: Optional[str] = None
@@ -57,6 +58,7 @@ class UpdateConfigRequest(BaseModel):
     count: Optional[int] = None
     images_per_row: Optional[int] = None
     current_session_id: Optional[str] = None
+    ungrouped_collapsed: bool = False
 
 # ============ 用户认证 API ============
 
@@ -169,7 +171,8 @@ def get_user_config(
         strength=config.strength,
         count=config.count,
         images_per_row=config.images_per_row,
-        current_session_id=config.current_session_id
+        current_session_id=config.current_session_id,
+        ungrouped_collapsed=config.ungrouped_collapsed,
     )
 
 @router.post("/config/user")

@@ -1,7 +1,7 @@
 """
 数据库 ORM 模型
 """
-from sqlalchemy import BigInteger, Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, JSON, UniqueConstraint, false
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from server.database import Base
@@ -21,6 +21,7 @@ class User(Base):
     # 关系
     config = relationship("UserConfig", back_populates="user", uselist=False, cascade="all, delete-orphan")
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
+    session_groups = relationship("ChatSessionGroup", cascade="all, delete-orphan", passive_deletes=True)
     messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     reference_images = relationship("ReferenceImage", back_populates="user", cascade="all, delete-orphan")
 
@@ -39,6 +40,7 @@ class UserConfig(Base):
     count = Column(Integer, nullable=True, default=1)
     images_per_row = Column(Integer, default=4)
     current_session_id = Column(String(100), nullable=True)  # 当前选中的会话ID
+    ungrouped_collapsed = Column(Boolean, nullable=False, default=False, server_default=false())
     
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
@@ -59,6 +61,18 @@ class ReferenceImage(Base):
     # 关系
     user = relationship("User", back_populates="reference_images")
 
+class ChatSessionGroup(Base):
+    """用户自己的单层项目分组；删除分组只解除会话归属。"""
+    __tablename__ = "chat_session_groups"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    is_pinned = Column(Boolean, nullable=False, default=False, server_default=false())
+    is_collapsed = Column(Boolean, nullable=False, default=False, server_default=false())
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
 class ChatSession(Base):
     """聊天会话表"""
     __tablename__ = "chat_sessions"
@@ -68,6 +82,7 @@ class ChatSession(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), default="新对话")
     is_pinned = Column(Boolean, nullable=False, default=False, index=True)
+    group_id = Column(Integer, ForeignKey("chat_session_groups.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
     

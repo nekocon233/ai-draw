@@ -5,11 +5,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, load_only, selectinload
 from sqlalchemy import func, or_
-from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated, List, Literal, Optional
 
 from server.database import get_db
-from server.models import ChatSession, ChatMessage, GeneratedImage, User
+from server.models import ChatSession, ChatSessionGroup, ChatMessage, GeneratedImage, User, UserConfig
 from server.auth import get_current_user
 from server.schemas import MOTION_VIDEO_PATTERN, PromptPreset, MotionPromptSnapshot, DeleteMessageMediaRequest, DeleteMessageMediaResponse
 from server.agent_bridge.gates import AGENT_GATE, AGENT_WORKFLOWS
@@ -28,6 +28,32 @@ router = APIRouter(prefix="/chat")
 class CreateSessionRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=50)
     title: Optional[str] = "新对话"
+    group_id: Optional[int] = Field(default=None, gt=0)
+
+
+GroupName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class CreateSessionGroupRequest(BaseModel):
+    name: GroupName
+
+
+class UpdateSessionGroupRequest(BaseModel):
+    name: Optional[GroupName] = None
+    is_pinned: Optional[bool] = None
+    is_collapsed: Optional[bool] = None
+
+
+class SessionGroupResponse(BaseModel):
+    id: int
+    name: str
+    is_pinned: bool
+    is_collapsed: bool
+    created_at: int
+
+
+class MoveSessionRequest(BaseModel):
+    group_id: Optional[int] = Field(gt=0)
 
 class UpdateSessionTitleRequest(BaseModel):
     title: str
@@ -52,6 +78,7 @@ class SessionResponse(BaseModel):
     id: str
     title: str
     is_pinned: bool
+    group_id: Optional[int] = None
     created_at: int  # Unix 时间戳（毫秒）
     updated_at: int  # Unix 时间戳（毫秒）
     message_count: int
@@ -192,6 +219,97 @@ def _serialize_message(message: ChatMessage) -> dict:
             payload['params'] = {'workflow': message.workflow, 'workflowOptions': message.workflow_options or {}}
     return payload
 
+def _owned_group(db: Session, group_id: int, user_id: int, *, lock: bool = False) -> ChatSessionGroup:
+    query = db.query(ChatSessionGroup).filter(
+        ChatSessionGroup.id == group_id, ChatSessionGroup.user_id == user_id
+    )
+    if lock:
+        query = query.with_for_update()
+    group = query.first()
+    if group is None:
+        raise HTTPException(status_code=404, detail="分组不存在")
+    return group
+
+
+def _serialize_group(group: ChatSessionGroup) -> SessionGroupResponse:
+    return SessionGroupResponse(
+        id=group.id, name=group.name, is_pinned=group.is_pinned,
+        is_collapsed=group.is_collapsed, created_at=int(group.created_at.timestamp() * 1000),
+    )
+
+
+@router.get("/session-groups", response_model=List[SessionGroupResponse])
+def get_session_groups(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    groups = db.query(ChatSessionGroup).filter(ChatSessionGroup.user_id == current_user.id).order_by(
+        ChatSessionGroup.is_pinned.desc(), ChatSessionGroup.created_at, ChatSessionGroup.id
+    ).all()
+    return [_serialize_group(group) for group in groups]
+
+
+@router.post("/session-groups", response_model=SessionGroupResponse)
+def create_session_group(
+    request: CreateSessionGroupRequest,
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    group = ChatSessionGroup(user_id=current_user.id, name=request.name)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return _serialize_group(group)
+
+
+@router.patch("/session-groups/{group_id}", response_model=SessionGroupResponse)
+def update_session_group(
+    group_id: int, request: UpdateSessionGroupRequest,
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    group = _owned_group(db, group_id, current_user.id, lock=True)
+    for key, value in request.model_dump(exclude_unset=True, exclude_none=True).items():
+        setattr(group, key, value)
+    db.commit()
+    db.refresh(group)
+    return _serialize_group(group)
+
+
+@router.delete("/session-groups/{group_id}")
+def delete_session_group(
+    group_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    group = _owned_group(db, group_id, current_user.id, lock=True)
+    # 保留活动时间、置顶、输入配置及所有消息/素材；不经过会话的级联删除路径。
+    db.query(ChatSession).filter(ChatSession.group_id == group.id).update(
+        {ChatSession.group_id: None, ChatSession.updated_at: ChatSession.updated_at}, synchronize_session="fetch"
+    )
+    db.delete(group)
+    db.commit()
+    return {"deleted": True}
+
+
+@router.patch("/sessions/{session_id}/group")
+def move_session(
+    session_id: str, request: MoveSessionRequest,
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    # 与删除分组使用同样的锁顺序，避免创建/移动与删除交错产生悬空归属。
+    if request.group_id is not None:
+        group = _owned_group(db, request.group_id, current_user.id, lock=True)
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id, ChatSession.user_id == current_user.id
+    ).with_for_update().first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    db.query(ChatSession).filter(ChatSession.id == session.id).update(
+        {ChatSession.group_id: request.group_id, ChatSession.updated_at: ChatSession.updated_at},
+        synchronize_session="fetch",
+    )
+    if request.group_id is not None:
+        group.is_collapsed = False
+    else:
+        db.query(UserConfig).filter(UserConfig.user_id == current_user.id).update({"ungrouped_collapsed": False})
+    db.commit()
+    return {"group_id": request.group_id}
+
+
 @router.get("/sessions", response_model=List[SessionResponse])
 def get_sessions(
     current_user: User = Depends(get_current_user),
@@ -213,6 +331,7 @@ def get_sessions(
             id=session.session_id,
             title=session.title,
             is_pinned=session.is_pinned,
+            group_id=session.group_id,
             created_at=int(session.created_at.timestamp() * 1000),
             updated_at=int(session.updated_at.timestamp() * 1000),
             message_count=message_count
@@ -236,6 +355,12 @@ def create_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="会话ID已存在"
         )
+
+    if request.group_id is not None:
+        group = _owned_group(db, request.group_id, current_user.id, lock=True)
+        group.is_collapsed = False
+    else:
+        db.query(UserConfig).filter(UserConfig.user_id == current_user.id).update({"ungrouped_collapsed": False})
     
     # 创建会话（从 workflow_metadata 读取默认配置）
     from utils.config_loader import get_config
@@ -246,6 +371,7 @@ def create_session(
         session_id=request.session_id,
         user_id=current_user.id,
         title=request.title or "新对话",
+        group_id=request.group_id,
         config_workflow=workflow,
         config_prompt=None,
         config_lora_prompt=cfg.workflow_defaults.get_workflow_parameter_default(workflow, 'lora_prompt'),
@@ -262,6 +388,7 @@ def create_session(
         "session_id": session.session_id,
         "title": session.title,
         "is_pinned": session.is_pinned,
+        "group_id": session.group_id,
         "created_at": int(session.created_at.timestamp() * 1000),
         "updated_at": int(session.updated_at.timestamp() * 1000)
     }
@@ -350,7 +477,10 @@ def update_session_pin(
             detail="会话不存在"
         )
 
-    session.is_pinned = request.is_pinned
+    db.query(ChatSession).filter(ChatSession.id == session.id).update(
+        {ChatSession.is_pinned: request.is_pinned, ChatSession.updated_at: ChatSession.updated_at},
+        synchronize_session="fetch",
+    )
     db.commit()
     return {"is_pinned": session.is_pinned}
 

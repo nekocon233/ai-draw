@@ -28,6 +28,22 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # ORM 基类
 Base = declarative_base()
 
+
+def migrate_session_groups(conn):
+    """create_all 创建分组表后，为已有部署补上归属和未分组折叠状态。"""
+    conn.execute(text(
+        "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS group_id INTEGER "
+        "REFERENCES chat_session_groups(id) ON DELETE SET NULL"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_chat_sessions_group_id ON chat_sessions (group_id)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ungrouped_collapsed "
+        "BOOLEAN NOT NULL DEFAULT FALSE"
+    ))
+
+
 def init_db():
     """初始化数据库（创建所有表），支持重试"""
     max_retries = 5
@@ -43,6 +59,7 @@ def init_db():
             Base.metadata.create_all(bind=engine)
             # 现有部署尚未引入 Alembic，先用幂等 DDL 补齐持久化字段。
             with engine.begin() as conn:
+                migrate_session_groups(conn)
                 conn.execute(text(
                     "ALTER TABLE chat_sessions "
                     "ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE"

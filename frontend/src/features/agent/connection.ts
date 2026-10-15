@@ -90,8 +90,7 @@ export async function adoptRound(sessionId: string, replyId: string): Promise<vo
 async function refreshSessionList(): Promise<void> {
   if (!isLoggedIn()) return;
   try {
-    const sessions = await apiService.getSessions();
-    useAppStore.setState({ sessions });
+    await useAppStore.getState().refreshSessionNavigation();
   } catch (error) {
     console.error('刷新会话列表失败:', error);
   }

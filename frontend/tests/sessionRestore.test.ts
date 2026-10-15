@@ -52,6 +52,7 @@ function fixture() {
   api.updateUserConfig = async () => ({ message: 'saved' });
   api.getSessionConfig = async id => config(`saved-${id}`);
   api.getChatHistory = async () => ({ messages: [], has_more: false });
+  api.getSessionGroups = async () => [];
   store.setState({ currentSessionId: 'A', composerSessionId: 'A', sessionConfigStatus: 'ready',
     currentWorkflow: workflow.key, availableWorkflows: [workflow], prompt: 'draft-A',
     promptPresetChoices: { [workflow.key]: null }, chatHistory: [], referenceImages: [], inputDrafts: {},

@@ -24,6 +24,7 @@ export interface UserConfig {
   count: number;
   images_per_row: number;
   current_session_id?: string;  // 当前选中的会话ID
+  ungrouped_collapsed?: boolean;
   updated_at: string;
 }
 
@@ -56,11 +57,22 @@ export interface ChatSession {
   id: string;
   title: string;
   is_pinned: boolean;
+  group_id?: number | null;
   created_at: number;
   updated_at: number;
   message_count: number;
   config?: SessionConfig; // 会话配置（游客模式使用）
 }
+
+export interface ChatSessionGroup {
+  id: number;
+  name: string;
+  is_pinned: boolean;
+  is_collapsed: boolean;
+  created_at: number;
+}
+
+export type SessionGroupUpdate = Partial<Pick<ChatSessionGroup, 'name' | 'is_pinned' | 'is_collapsed'>>;
 
 /**
  * 聊天会话（数据库格式）
@@ -71,6 +83,7 @@ export interface DBChatSession {
   user_id: number;
   title: string;
   is_pinned: boolean;
+  group_id?: number | null;
   created_at: string;
   updated_at: string;
 }

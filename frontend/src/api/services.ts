@@ -22,7 +22,7 @@ import type {
   LoraModelsResponse,
   SessionOutlineRound,
 } from '../types/api';
-import type { ChatSession } from '../types/models';
+import type { ChatSession, ChatSessionGroup, SessionGroupUpdate } from '../types/models';
 
 import type { AuthResponse, UserConfig } from '../types/models';
 
@@ -217,8 +217,20 @@ export const apiService = {
   getSessions: (): Promise<ChatSession[]> =>
     client.get('/chat/sessions'),
   
-  createSession: (title?: string): Promise<{ session_id: string; title: string; is_pinned: boolean; created_at: number; updated_at: number }> =>
-    client.post('/chat/sessions', { session_id: `session-${crypto.randomUUID()}`, title: title || '新对话' }),
+  createSession: (title?: string, groupId: number | null = null): Promise<{ session_id: string; title: string; is_pinned: boolean; group_id?: number | null; created_at: number; updated_at: number }> =>
+    client.post('/chat/sessions', { session_id: `session-${crypto.randomUUID()}`, title: title || '新对话', group_id: groupId }),
+
+  getSessionGroups: (): Promise<ChatSessionGroup[]> => client.get('/chat/session-groups'),
+
+  createSessionGroup: (name: string): Promise<ChatSessionGroup> => client.post('/chat/session-groups', { name }),
+
+  updateSessionGroup: (groupId: number, update: SessionGroupUpdate): Promise<ChatSessionGroup> =>
+    client.patch(`/chat/session-groups/${groupId}`, update),
+
+  deleteSessionGroup: (groupId: number): Promise<{ deleted: boolean }> => client.delete(`/chat/session-groups/${groupId}`),
+
+  moveSessionToGroup: (sessionId: string, groupId: number | null): Promise<{ group_id: number | null }> =>
+    client.patch(`/chat/sessions/${sessionId}/group`, { group_id: groupId }),
   
   deleteSession: (sessionId: string): Promise<{ message: string }> =>
     client.delete(`/chat/sessions/${sessionId}`),

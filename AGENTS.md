@@ -65,6 +65,7 @@
 - `User`: account data.
 - `UserConfig`: per-user workflow and UI defaults.
 - `ChatSession`: conversation metadata, pin state, and saved generation configuration.
+- `ChatSessionGroup`: user-owned single-level project groups with pin/collapse state. `chat_sessions.group_id` is nullable and uses `ON DELETE SET NULL`; deleting a group preserves conversations and media. Startup DDL adds the group FK/index and `user_configs.ungrouped_collapsed` idempotently. Group organisation does not update conversation activity timestamps.
 - `ChatMessage`: user/assistant messages and generation parameters.
 - `GeneratedImage`: generated image or video records despite the historical model name. Its nullable `seed` (BIGINT, idempotent startup DDL) records the seed each result actually used; edits, older results and seedless workflows store NULL.
 - `ReferenceImage`: uploaded user reference media.
@@ -129,6 +130,7 @@
 - `frontend/src/App.tsx`: authenticated application shell and theme/layout.
 - `frontend/src/features/generation/`: generation store slice, event handling and connection hook. Use the slice actions for task transitions and result refreshes; preserve revision guards against stale responses.
 - `frontend/src/stores/appStore.ts`: primary Zustand state and most current store types.
+- `frontend/src/features/sessionGroups/`: account-scoped group navigation and serialised metadata writes. Refresh sessions, groups and ungrouped collapse state through `refreshSessionNavigation` without switching the composer; pending creates/deletes and revision guards prevent stale reads, and logout invalidates pending work. The sidebar supports group menus and desktop drag-to-group; sessions pin within their group, and top-level new conversations inherit the current conversation's group.
 - `frontend/src/api/client.ts`: Axios setup, JWT injection, and mixed error-envelope handling.
 - `frontend/src/api/services.ts`: REST methods for auth, sessions, generation, media utilities, and persistence.
 - `frontend/src/api/websocket.ts`: authenticated WebSocket connection, browser connection ID, and reconnect handling.

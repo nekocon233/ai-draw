@@ -23,6 +23,7 @@ import { SessionSaveQueue } from '../utils/sessionSaveQueue';
 import { DEFAULT_CONFIG } from '../utils/constants';
 import type { ChatSession, ChatMessage, ApiChatMessage } from '../types/models';
 import { createGenerationSlice, type GenerationSlice } from '../features/generation/slice';
+import { createSessionGroupsSlice, type SessionGroupsSlice } from '../features/sessionGroups/slice';
 import type { MotionPromptSnapshot, PromptPreset, PromptPresetChoices, WorkflowMetadata, WorkflowParameterValue } from '../types/api';
 import { rememberWorkflowPromptPreset, resolveWorkflowPromptPreset, restorePromptPresetChoices } from '../utils/promptPresets';
 import { motionPromptSource, resolveMotionPrompt } from '../utils/motionPrompt';
@@ -48,7 +49,7 @@ export interface GenerationSettingsDraft {
   selectOptions: Record<string, WorkflowParameterValue>;
 }
 
-export interface AppState extends GenerationSlice {
+export interface AppState extends GenerationSlice, SessionGroupsSlice {
   // 聊天会话
   sessions: ChatSession[];
   currentSessionId: string | null;
@@ -177,11 +178,10 @@ export interface AppState extends GenerationSlice {
   
   // 会话管理 Actions
   loadSessions: () => Promise<void>;
-  createSession: (title?: string) => Promise<string>;
+  createSession: (title?: string, groupId?: number | null) => Promise<string>;
   deleteSession: (sessionId: string) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
-  setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   
   // 会话配置管理
   saveSessionConfig: (immediate?: boolean) => Promise<boolean>;
@@ -321,8 +321,15 @@ const sessionConfigSaves = new SessionSaveQueue<Parameters<typeof apiService.upd
 // 同一会话的并发调用（按钮、会话位置恢复、导航条跳转）共用一次请求
 let earlierMessagesRequest: { sessionId: string; promise: Promise<EarlierMessagesResult> } | null = null;
 
+const withSessionNavigationChange = async <T>(state: AppState, action: () => Promise<T>): Promise<T> => {
+  const finish = state.beginSessionNavigationChange();
+  try { return await action(); }
+  finally { finish(); }
+};
+
 export const useAppStore = create<AppState>((set, get, store) => ({
   ...createGenerationSlice(set, get, store),
+  ...createSessionGroupsSlice(set, get, store),
   // 初始状态
   sessions: [],
   currentSessionId: null,
@@ -579,6 +586,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       const sequence = sessionSwitchSequence;
       // 登录用户：调用API创建真实会话
       if (isLoggedIn()) {
+        const finishNavigationChange = get().beginSessionNavigationChange();
         try {
           const response = await apiService.createSession('新对话');
           if (sequence !== sessionSwitchSequence || get().currentSessionId !== null) return null;
@@ -587,6 +595,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
             id: sessionId,
             title: response.title,
             is_pinned: response.is_pinned,
+            group_id: response.group_id ?? null,
             created_at: response.created_at,
             updated_at: response.updated_at,
             message_count: 0,
@@ -600,6 +609,8 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           console.error('创建会话失败:', err);
           set({ error: '创建会话失败，请重试' });
           return null;
+        } finally {
+          finishNavigationChange();
         }
       } else {
         // 游客模式：创建本地会话
@@ -608,6 +619,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
           id: newSessionId,
           title: '新对话',
           is_pinned: false,
+          group_id: null,
           created_at: Date.now(),
           updated_at: Date.now(),
           message_count: 0,
@@ -1092,6 +1104,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     sessionSwitchSequence += 1;
     sessionConfigLoadSequence += 1;
     sessionConfigSaves.clear();
+    get().resetSessionNavigation();
     get().finishGeneration();
     set({
       currentSessionId: null, composerSessionId: null, sessionConfigStatus: 'idle',
@@ -1297,19 +1310,13 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     }
     
     try {
-      const sessions = await apiService.getSessions();
-      if (sequence !== sessionSwitchSequence) return;
-      set({ sessions });
+      const navigation = await get().refreshSessionNavigation();
+      if (!navigation || sequence !== sessionSwitchSequence) return;
+      const { sessions } = navigation;
       
       const state = get();
       // 尝试恢复上次的 currentSessionId
-      let restoredSessionId: string | null = null;
-      try {
-        const userConfig = await apiService.getUserConfig();
-        restoredSessionId = userConfig.current_session_id || null;
-      } catch (error) {
-        console.error('获取用户配置失败:', error);
-      }
+      let restoredSessionId: string | null = navigation.currentSessionId || null;
       if (sequence !== sessionSwitchSequence) return;
       // 链接里的 ?session=（例如 Agent 给的审核链接）优先于上次打开的会话
       const linkedSessionId = consumeSessionLink();
@@ -1344,8 +1351,10 @@ export const useAppStore = create<AppState>((set, get, store) => ({
   },
   
   // 创建新会话
-  createSession: async (title?: string) => {
+  createSession: (title?: string, groupId?: number | null) => withSessionNavigationChange(get(), async () => {
     const state = get();
+    const targetGroupId = groupId === undefined
+      ? state.sessions.find(session => session.id === state.currentSessionId)?.group_id ?? null : groupId;
     const sequence = ++sessionSwitchSequence;
     const accountEpoch = sessionAccountEpoch;
     sessionConfigLoadSequence += 1;
@@ -1389,6 +1398,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       id: sessionId,
       title: newTitle,
       is_pinned: false,
+      group_id: targetGroupId,
       created_at: Date.now(),
       updated_at: Date.now(),
       message_count: 0,
@@ -1398,6 +1408,9 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     set((state) => ({
       sessions: [newSession, ...state.sessions],
       currentSessionId: sessionId,
+      ...(targetGroupId === null ? { ungroupedCollapsed: false } : {
+        sessionGroups: state.sessionGroups.map(group => group.id === targetGroupId ? { ...group, is_collapsed: false } : group),
+      }),
       chatHistory: [], // 清空当前聊天历史
       hasEarlierMessages: false,
     }));
@@ -1421,7 +1434,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
       // 登录用户：保存到后端
       try {
         // 后端会生成自己的 session_id，这里只传 title
-        const response = await apiService.createSession(newTitle);
+        const response = await apiService.createSession(newTitle, targetGroupId);
         const realSessionId = response.session_id;
         if (accountEpoch !== sessionAccountEpoch) return realSessionId;
         
@@ -1429,7 +1442,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
         set((state) => ({
           sessions: state.sessions.map(s => 
             s.id === sessionId 
-              ? { ...s, id: realSessionId, created_at: response.created_at, updated_at: response.updated_at }
+              ? { ...s, id: realSessionId, group_id: response.group_id ?? targetGroupId, created_at: response.created_at, updated_at: response.updated_at }
               : s
           ),
           ...(sequence === sessionSwitchSequence ? { currentSessionId: realSessionId } : {}),
@@ -1521,10 +1534,10 @@ export const useAppStore = create<AppState>((set, get, store) => ({
 
       return sessionId;
     }
-  },
+  }),
   
   // 删除会话
-  deleteSession: async (sessionId: string) => {
+  deleteSession: (sessionId: string) => withSessionNavigationChange(get(), async () => {
     const state = get();
     
     // 如果删除的是当前会话，切换到其他会话
@@ -1562,7 +1575,7 @@ export const useAppStore = create<AppState>((set, get, store) => ({
 
     // 清理该会话的滚动位置记录
     clearScrollPosition(sessionId);
-  },
+  }),
   
   // 切换会话
   switchSession: async (sessionId: string) => {
@@ -1656,31 +1669,6 @@ export const useAppStore = create<AppState>((set, get, store) => ({
     }
   },
 
-  setSessionPinned: async (sessionId: string, pinned: boolean) => {
-    const previous = get().sessions.find(session => session.id === sessionId)?.is_pinned ?? false;
-    set(state => ({
-      sessions: state.sessions.map(session =>
-        session.id === sessionId ? { ...session, is_pinned: pinned } : session
-      ),
-    }));
-
-    if (!isLoggedIn()) {
-      saveGuestSessions(get().sessions);
-      return;
-    }
-
-    try {
-      await apiService.updateSessionPin(sessionId, pinned);
-    } catch (error) {
-      set(state => ({
-        sessions: state.sessions.map(session =>
-          session.id === sessionId ? { ...session, is_pinned: previous } : session
-        ),
-      }));
-      console.error('更新会话置顶状态失败:', error);
-    }
-  },
-  
   // 保存当前会话配置
   saveSessionConfig: (immediate = false) => {
     const state = get();
