@@ -1,5 +1,6 @@
 """`aidraw gen` and friends: wait for the shared slot, record the round the way the web UI does,
 generate, follow the task and download the results with their seeds."""
+import hashlib
 import json
 import random
 import sys
@@ -10,7 +11,7 @@ from typing import Optional
 
 from . import jobs
 from .client import Client
-from .config import cache_dir, load_state, save_state, session_link
+from .config import cache_dir, load_cache, load_state, save_cache, save_state, session_link
 from .errors import (
     ApiError, CliError, EXIT_API, EXIT_CANCELLED, EXIT_LOST, EXIT_SLOT, EXIT_TIMEOUT, EXIT_USAGE,
 )
@@ -23,6 +24,9 @@ COMFY_WORKFLOWS = QWEN_WORKFLOWS | {"minimax_h3", "minimax_h3_ref"}
 H3_DURATIONS = (4, 5, 6, 8, 10, 12, 15)
 MIN_EDGE, MAX_EDGE, MAX_PIXELS = 256, 3072, 3072 * 1536
 SUBMIT_ATTEMPTS = 3
+# Each result keeps the seed it used, so asking again with only another fixed seed adds to the same round.
+SEED_OPTIONS = {"qwen_fixed_seed", "h3_fixed_seed"}
+UPLOAD_CACHE, UPLOAD_CACHE_SIZE = "uploads.json", 500
 
 
 def log(message: str, quiet: bool = False) -> None:
@@ -128,8 +132,31 @@ def prepare_refs(client: Client, refs: list[str], workflow: str, flatten_color: 
         if facts["has_alpha"] and workflow in COMFY_WORKFLOWS and flatten_color:
             log(f"参考图 {path.name} 带透明通道，先铺到 {flatten_color} 底上再上传", quiet)
             path = flatten(path, flatten_color, workdir)
-        urls.append(upload_file(client, path)["url"])
+        urls.append(upload_reference(client, path))
     return urls
+
+
+def upload_reference(client: Client, path: Path) -> str:
+    """The same bytes keep the address of their earlier upload while it is still served, so a repeated request stays
+    identical to the round it repeats (find_repeat_round)."""
+    account = hashlib.sha256((client.token or "").encode()).hexdigest()[:16]
+    key = f"{client.config['api_url']}|{account}|{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    cache = load_cache(UPLOAD_CACHE)
+    url = cache.get(key)
+    if isinstance(url, str) and upload_exists(client, url):
+        return url
+    url = upload_file(client, path)["url"]
+    cache.pop(key, None)
+    cache[key] = url
+    save_cache(UPLOAD_CACHE, dict(list(cache.items())[-UPLOAD_CACHE_SIZE:]))
+    return url
+
+
+def upload_exists(client: Client, url: str) -> bool:
+    try:
+        return client.request("HEAD", url, auth=False, allow=(404,), attempts=1).status_code == 200
+    except CliError:
+        return False
 
 
 def wait_for_slot(client: Client, config: dict, max_wait: float, quiet: bool) -> None:
@@ -183,10 +210,74 @@ def fetch_round(client: Client, session_id: str, reply_id: str) -> Optional[dict
     return next((message for message in messages if message.get("id") == reply_id), {"images": [], "seeds": []})
 
 
-def download_results(client: Client, images: list[str], seeds: list, out_dir: Path, message_id: str) -> list[dict]:
+def _canonical(value):
+    if isinstance(value, dict):
+        return {key: _canonical(item) for key, item in sorted(value.items()) if item is not None}
+    if isinstance(value, list):
+        return [_canonical(item) for item in value]
+    return value
+
+
+def round_signature(fields: dict) -> str:
+    """The web UI's test for a repeated submission (frontend/src/utils/repeatedGeneration.ts), minus fixed seeds."""
+    options = {key: value for key, value in (fields.get("workflow_options") or {}).items() if key not in SEED_OPTIONS}
+    return json.dumps(_canonical({
+        "prompt": (fields.get("content") or "").strip(), "workflow": fields.get("workflow"),
+        "strength": fields.get("strength"), "count": fields.get("count") or 1, "lora_prompt": fields.get("lora_prompt") or "",
+        "width": fields.get("width"), "height": fields.get("height"),
+        "use_original_size": True if fields.get("use_original_size") is None else fields.get("use_original_size"),
+        "reference_images": [url for url in fields.get("reference_images") or [] if url],
+        "reference_image_end": fields.get("reference_image_end") or None,
+        "workflow_options": options, "prompt_preset": fields.get("prompt_preset") or None,
+        "motion_reference_images": fields.get("motion_reference_images") or [],
+        "motion_reference_video": fields.get("motion_reference_video") or None,
+    }), ensure_ascii=False, sort_keys=True)
+
+
+def stored_fields(message: dict) -> dict:
+    """A user message from /api/chat/history in the field names of the round the CLI records."""
+    params = message.get("params") or {}
+    references = params.get("referenceImages")
+    if references is None:
+        references = [params.get(key) for key in ("referenceImage", "referenceImage2", "referenceImage3")]
+    return {
+        "content": message.get("content"), "workflow": params.get("workflow"), "strength": params.get("strength"),
+        "count": params.get("count"), "lora_prompt": params.get("loraPrompt"), "width": params.get("width"),
+        "height": params.get("height"), "use_original_size": params.get("useOriginalSize"),
+        "reference_images": references, "reference_image_end": params.get("referenceImageEnd"),
+        "workflow_options": params.get("workflowOptions"), "prompt_preset": params.get("promptPreset"),
+        "motion_reference_images": params.get("motionReferenceImages"),
+        "motion_reference_video": params.get("motionReferenceVideo"),
+    }
+
+
+def find_repeat_round(client: Client, session_id: str, message: dict) -> Optional[dict]:
+    """The session's newest round when this is the same request again, as the web UI merges a repeated submit.
+    Only the immediately preceding round counts: a gate, a post or any other round after it starts a new one."""
+    try:
+        history = client.json("GET", "/api/chat/history", params={"session_id": session_id, "limit": 2})
+    except CliError:
+        return None
+    messages = history.get("messages") or []
+    if len(messages) < 2:
+        return None
+    user, reply = messages[-2], messages[-1]
+    if user.get("type") != "user" or reply.get("type") != "assistant" or reply.get("id") != f"{user.get('id')}-reply":
+        return None
+    if round_signature(stored_fields(user)) != round_signature(message):
+        return None
+    return {"message_id": user["id"], "reply_id": reply["id"],
+            "images": [url for url in reply.get("images") or [] if isinstance(url, str)]}
+
+
+def download_results(client: Client, images: list[str], seeds: list, out_dir: Path, message_id: str,
+                     indexes: Optional[list[int]] = None) -> list[dict]:
+    """Download the round's results (only `indexes` when given); file names carry the index within the round."""
     prefix = message_id.removeprefix("msg-")[:8]
     results = []
     for index, url in enumerate(images):
+        if indexes is not None and index not in indexes:
+            continue
         seed = seeds[index] if index < len(seeds) else None
         entry = {"index": index, "url": url, "seed": seed}
         if isinstance(url, str) and url.startswith("/uploads/"):
@@ -202,8 +293,9 @@ def download_results(client: Client, images: list[str], seeds: list, out_dir: Pa
 
 
 def follow_task(client: Client, config: dict, *, task_id: str, session_id: str, reply_id: str,
-                timeout: float, quiet: bool, total: Optional[int] = None) -> str:
-    """Poll until the task ends; returns completed / error / cancelled / lost, or raises a timeout."""
+                timeout: float, quiet: bool, total: Optional[int] = None) -> tuple[str, Optional[dict]]:
+    """Poll until the task ends; returns completed / error / cancelled / lost with the task's last snapshot (None when
+    the backend no longer knows it), or raises a timeout."""
     started = time.monotonic()
     poll = max(0.05, float(config.get("poll_seconds", 4)))
     last_count = -1
@@ -212,18 +304,18 @@ def follow_task(client: Client, config: dict, *, task_id: str, session_id: str, 
         if response.status_code == 404:
             # The backend restarted (task history is in memory); the round may still hold results.
             reply = fetch_round(client, session_id, reply_id)
-            return "completed" if reply and reply.get("images") else "lost"
+            return ("completed" if reply and reply.get("images") else "lost"), None
         snapshot = response.json()
         count = int(snapshot.get("artifact_count") or 0)
         if count != last_count:
             last_count = count
             log(f"进度 {count}/{total if total else '?'}（{snapshot.get('phase')}）", quiet)
         if snapshot.get("phase") == "cancelled":
-            return "cancelled"
+            return "cancelled", snapshot
         if snapshot.get("status") in ("completed", "error"):
             if snapshot.get("status") == "error":
                 raise CliError(f"生成失败：{snapshot.get('error') or '未知错误'}", EXIT_API, task=snapshot)
-            return "completed"
+            return "completed", snapshot
         if time.monotonic() - started >= timeout:
             raise CliError(
                 f"等待超过 {int(timeout)} 秒，任务仍在进行", EXIT_TIMEOUT,
@@ -233,13 +325,32 @@ def follow_task(client: Client, config: dict, *, task_id: str, session_id: str, 
         time.sleep(poll)
 
 
+def task_result_indexes(images: list[str], snapshot: Optional[dict], before: Optional[list[str]]) -> Optional[list[int]]:
+    """Which of the round's results this task made: its own URLs when the backend still knows the task, otherwise
+    (appended rounds only) whatever was not there before the submit. None means the whole round."""
+    own = {url for url in (snapshot or {}).get("images") or [] if isinstance(url, str)}
+    if own:
+        return [index for index, url in enumerate(images) if url in own]
+    if before is not None:
+        earlier = set(before)
+        return [index for index, url in enumerate(images) if url not in earlier]
+    return None
+
+
 def finish_round(client: Client, config: dict, *, status: str, session_id: str, message_id: str, reply_id: str,
-                 task_id: str, out_dir: Path, request: dict, started: float) -> dict:
+                 task_id: str, out_dir: Path, request: dict, started: float, snapshot: Optional[dict] = None,
+                 before: Optional[list[str]] = None) -> dict:
+    """Download and describe this task's results. `before` (the round's results at submit) marks an appended task."""
     reply = fetch_round(client, session_id, reply_id) or {"images": [], "seeds": []}
     images = [url for url in reply.get("images", []) if isinstance(url, str)]
-    results = download_results(client, images, reply.get("seeds") or [], out_dir, message_id)
+    indexes = task_result_indexes(images, snapshot, before)
+    results = download_results(client, images, reply.get("seeds") or [], out_dir, message_id, indexes)
+    # `aidraw wait` does not know `before`; an appended task's results just do not start the round.
+    appended = before is not None or bool(indexes and indexes[0] > 0)
     out_dir.mkdir(parents=True, exist_ok=True)
-    sidecar = out_dir / f"{message_id.removeprefix('msg-')[:8]}.json"
+    prefix = message_id.removeprefix("msg-")[:8]
+    # An appended task shares the round's prefix; its own sidecar keeps the first one.
+    sidecar = out_dir / (f"{prefix}_{task_id[:8]}.json" if appended else f"{prefix}.json")
     payload = {
         "ok": status == "completed",
         "status": status,
@@ -252,6 +363,8 @@ def finish_round(client: Client, config: dict, *, status: str, session_id: str, 
         "link": session_link(config, session_id),
         "elapsed_s": round(time.time() - started, 1),
     }
+    if appended:
+        payload["appended"] = True
     sidecar.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
 
@@ -326,23 +439,34 @@ def run_gen(args, config: dict, client: Client) -> tuple[dict, int]:
 
 
 def submit_and_collect(args, config: dict, client: Client, *, request: dict, message: dict, total: int) -> tuple[dict, int]:
-    """Record the round like the web UI (user message first), generate, follow, then download the results."""
+    """Record the round like the web UI (user message first), generate, follow, then download the results.
+    The same request as the session's newest round (fixed seeds aside) adds its results to that round instead,
+    as a repeated submit in the web UI does."""
     out_dir = Path(args.out).expanduser() if args.out else default_out(args.session)
     started = time.time()
     message_id = f"msg-{uuid.uuid4()}"
     reply_id = f"{message_id}-reply"
     task_id = uuid.uuid4().hex
     saved = False
+    repeat = None
     for attempt in range(1, SUBMIT_ATTEMPTS + 1):
         honor_yield(config, args.quiet)
         wait_for_slot(client, config, args.slot_wait, args.quiet)
         if not saved:
-            fields = {key: value for key, value in message.items() if value is not None}
-            fields.update(session_id=args.session, message_id=message_id, type="user")
-            client.json("POST", "/api/chat/save", json=fields)
+            # Decided once the slot is ours, so the previous round is finished and nothing new came after it.
+            repeat = find_repeat_round(client, args.session, message)
+            if repeat:
+                message_id, reply_id = repeat["message_id"], repeat["reply_id"]
+                log("和上一轮的请求相同（种子除外），结果追加到这一轮", args.quiet)
+            else:
+                fields = {key: value for key, value in message.items() if value is not None}
+                fields.update(session_id=args.session, message_id=message_id, type="user")
+                client.json("POST", "/api/chat/save", json=fields)
             saved = True
         body = {key: value for key, value in request.items() if value is not None}
         body.update(session_id=args.session, message_id=reply_id, task_id=task_id)
+        if repeat:
+            body["append_results"] = True
         try:
             client.json("POST", "/api/media/generate", json=body)
             break
@@ -353,18 +477,20 @@ def submit_and_collect(args, config: dict, client: Client, *, request: dict, mes
                     break  # our own submission went through before the error surfaced
                 log("提交时生成槽刚被占用，重新排队…", args.quiet)
                 continue
-            delete_round(client, args.session, message_id)
+            if not repeat:  # an appended round existed before this command and keeps its results
+                delete_round(client, args.session, message_id)
             raise
     log(f"已提交：{session_link(config, args.session)}", args.quiet)
     jobs.append(args.job, "gen_submitted", step=args.step, session_id=args.session, message_id=message_id,
-                reply_id=reply_id, task_id=task_id, request=request)
+                reply_id=reply_id, task_id=task_id, request=request, **({"appended": True} if repeat else {}))
 
-    status = follow_and_record(client, config, args, task_id=task_id, session_id=args.session,
-                               reply_id=reply_id, total=total)
+    status, snapshot = follow_and_record(client, config, args, task_id=task_id, session_id=args.session,
+                                         reply_id=reply_id, total=total)
     payload = finish_round(client, config, status=status, session_id=args.session, message_id=message_id,
-                           reply_id=reply_id, task_id=task_id, out_dir=out_dir, request=request, started=started)
+                           reply_id=reply_id, task_id=task_id, out_dir=out_dir, request=request, started=started,
+                           snapshot=snapshot, before=repeat["images"] if repeat else None)
     jobs.append(args.job, "gen", step=args.step, **{key: payload[key] for key in (
-        "status", "session_id", "message_id", "reply_id", "task_id", "request", "images")})
+        "status", "session_id", "message_id", "reply_id", "task_id", "request", "images", "appended") if key in payload})
     if getattr(args, "gate", None) and status == "completed":
         open_gate_now(args, client, payload)
     return payload, exit_code_for(status)
@@ -418,11 +544,11 @@ def run_video(args, config: dict, client: Client) -> tuple[dict, int]:
 
 
 def follow_and_record(client: Client, config: dict, args, *, task_id: str, session_id: str, reply_id: str,
-                      total: Optional[int] = None) -> str:
+                      total: Optional[int] = None) -> tuple[str, Optional[dict]]:
     """Follow the task; any end except a timeout frees the slot, which starts the yield gap."""
     try:
-        status = follow_task(client, config, task_id=task_id, session_id=session_id, reply_id=reply_id,
-                             timeout=args.timeout, quiet=args.quiet, total=total)
+        status, snapshot = follow_task(client, config, task_id=task_id, session_id=session_id, reply_id=reply_id,
+                                       timeout=args.timeout, quiet=args.quiet, total=total)
     except CliError as error:
         if error.code != EXIT_TIMEOUT:
             remember_finish()
@@ -430,7 +556,7 @@ def follow_and_record(client: Client, config: dict, args, *, task_id: str, sessi
                         task_id=task_id, error=str(error))
         raise
     remember_finish()
-    return status
+    return status, snapshot
 
 
 def exit_code_for(status: str) -> int:
@@ -441,12 +567,14 @@ def run_wait(args, config: dict, client: Client) -> tuple[dict, int]:
     reply_id = args.message if args.message.endswith("-reply") else f"{args.message}-reply"
     message_id = reply_id.removesuffix("-reply")
     started = time.time()
-    status = follow_and_record(client, config, args, task_id=args.task_id, session_id=args.session, reply_id=reply_id)
+    status, snapshot = follow_and_record(client, config, args, task_id=args.task_id, session_id=args.session,
+                                         reply_id=reply_id)
     out_dir = Path(args.out).expanduser() if args.out else default_out(args.session)
     payload = finish_round(client, config, status=status, session_id=args.session, message_id=message_id,
-                           reply_id=reply_id, task_id=args.task_id, out_dir=out_dir, request={}, started=started)
+                           reply_id=reply_id, task_id=args.task_id, out_dir=out_dir, request={}, started=started,
+                           snapshot=snapshot)
     jobs.append(args.job, "gen", step=args.step, **{key: payload[key] for key in (
-        "status", "session_id", "message_id", "reply_id", "task_id", "images")})
+        "status", "session_id", "message_id", "reply_id", "task_id", "images", "appended") if key in payload})
     return payload, exit_code_for(status)
 
 

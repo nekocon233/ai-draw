@@ -22,14 +22,22 @@ export function mergeSessionTail(local: readonly ChatMessage[], fetched: readonl
   return { messages: [...older, ...fetched], keptOlder: older.length > 0 };
 }
 
-/** Give a round started elsewhere a reply to show progress in, right after its user message. */
+/**
+ * Give a round started elsewhere a reply to show progress in, right after its user message. A task that adds to a
+ * round with results (an agent repeating the same request) gets a pending tile after them.
+ */
 export function withReplyPlaceholder(
   history: readonly ChatMessage[],
   sessionId: string,
   replyId: string,
   now: number,
 ): ChatMessage[] {
-  if (history.some(message => message.id === replyId)) return [...history];
+  const existing = history.find(message => message.id === replyId);
+  if (existing) {
+    const images = existing.images ?? [];
+    if (!images.length || images.some(image => typeof image !== 'string')) return [...history];
+    return history.map(message => message === existing ? { ...message, images: [...images, { loading: true }] } : message);
+  }
   const sourceId = replyId.endsWith('-reply') ? replyId.slice(0, -'-reply'.length) : null;
   const sourceIndex = sourceId ? history.findIndex(message => message.id === sourceId) : -1;
   const source = sourceIndex >= 0 ? history[sourceIndex] : undefined;

@@ -2,15 +2,17 @@
 
 **做法**：
 
-1. 用 MiniMax H3 的首尾帧模式生成视频，首帧和尾帧都用同一张立绘（`aidraw video --loop`）。模型补出中间的动作，所以视频天然首尾相接。
+1. 用 MiniMax H3 **只放首帧参考图**生成持续动作的视频：`--first base_frame.png --preset video_motion`。循环素材不放尾帧，也不加 `--loop`。
 2. 抽帧，逐帧抠图（用 ai-draw 的背景处理算法）。
-3. 用同一个框裁切、缩放所有帧，打包成 Phaser 精灵图。
+3. 从视频中找出完整、首尾接得上的动作循环，用同一个框裁切、缩放所有帧，打包成 Phaser 精灵图。
+
+尾帧约束会促使模型提前回到指定姿势；短视频容易在后半段固定不动，4 秒视频可能只有前半段有动作。生成时让动作持续，循环接缝在抽帧后处理。只有用户明确要从指定首帧过渡到指定尾帧时，才用 `--last` / `--loop` 和 `video_transition`。
 
 用户想自己改时，在网页的「编辑帧」里改完导出，agent 用同一套取景接着交付（第 4 节）。
 
 下面的 `$S` 指 `<技能目录>/scripts`。
 
-## 1. 首尾帧画布
+## 1. 首帧画布
 
 - 用最高清的立绘源图（例如原型图或定稿前的大图），按原尺寸放到白底画布上，不要缩放。
 - 画布用 H3 支持的比例：竖向角色用 9:16，即 768×1344；“自动画幅”会按首帧比例取，短边 768。
@@ -20,7 +22,7 @@
 ## 2. 生成视频（每段 5–15 分钟）
 
 ```bash
-aidraw video --session S --first base_frame.png --loop --preset video_transition --duration 4 --seed 20261012 \
+aidraw video --session S --first base_frame.png --preset video_motion --duration 4 --seed 20261012 \
   --prompt-file prompt.txt --out art/work/<job>/videos --job art/jobs/<job>.jsonl --step video-20261012 --timeout 2700
 ```
 
@@ -28,11 +30,13 @@ aidraw video --session S --first base_frame.png --loop --preset video_transition
   - 固定镜头，背景始终纯白；
   - 动作幅度适中，双脚始终不动，不转身、不走动；
   - 保持画风、线条、配色不变；
-  - 结尾回到开头的姿势；
+  - 动作持续到视频结束，自然重复，不提前做完后停住；
   - 写清具体动作，例如呼吸起伏、眨一次眼、头发和裙摆摆动。
 
   动作太小在游戏里看不出来，可以出两段不同风格的让用户挑（例如平静一段、紧张一段）。
 - **出 2 段不同种子的视频**：两条命令写进同一条后台命令，第二条加 `--gate "选一段待机视频…"`，最后一段生成完就立刻开关卡，用户在网页里直接播放视频来挑。
+  - 两条命令只有种子不同，第二段会追加到第一段那一轮，两段在同一个气泡里，关卡也落在这一轮。
+  - 种子用连续的 S、S+1：这一轮显示的“固定种子 S”就和网页的约定一致（第 n 个结果用 S+n−1）。
 - **视频生成期间选好抠图算法**：H3 的第一帧就是基础帧，所以在基础帧上跑 `cutout_compare.py`（见 alpha-and-cleanup.md），自己看对比图选定算法，不用等用户挑视频。对比图留在本地，选择在对话里说。
 - **串成一条后台命令**，用户提交后不用等 agent 回复：
   1. 等挑视频的关卡；
@@ -51,6 +55,8 @@ aidraw video --session S --first base_frame.png --loop --preset video_transition
 
 用户选定视频后，抽帧、抠图、对齐、打包、登记全部由 `video_to_sheet.py` 完成：
 
+先确定循环范围：可以先 `sprite_tools.py extract` 抽帧，再用 `loop-scan` 排序首尾相近的区间。结合预览选择包含一个完整动作的区间，不能只挑静止段。按选定范围给下面的命令加 `--start <秒> --end <秒>`；保留的实际时间范围记入规格和素材说明。步行要截一轮完整的两步，并检查脚底、人物漂移及首尾接缝。
+
 ```bash
 python3 $S/video_to_sheet.py video.mp4 -o public/assets/characters/heroine_idle.png \
   --work art/work/<job>/<视频> --match public/assets/characters/heroine.png \
@@ -65,8 +71,7 @@ python3 $S/video_to_sheet.py video.mp4 -o public/assets/characters/heroine_idle.
   - 有帧高过立绘顶部时（例如深呼吸抬起的头发），帧会往上长高，最高处再留 `--headroom` 像素（默认 4），不会被截掉。
   - 脚底和比例不变，游戏里在待机和静态图之间切换不会跳。
 - `--trim-still auto`（默认）：开头、结尾只是停住不动的帧会自动去掉，输出里的 `trimmed_still` 记着去掉了几帧。
-  - 原因：H3 常常提前做完动作，然后停着等结尾。
-  - 去掉后，留下的最后一帧正好回到起始姿势附近，循环更顺。
+  - 它只去静止帧，不会自动找到完整循环，也不保证末帧回到起始姿势；仍需先选循环范围、检查接缝。
   - 确实需要停顿时用 `--trim-still none`。
 - `--cutout`：在基础帧上对比后选定的算法，所有帧都用它抠图。
   - 抠图在后端 CPU 上跑，每帧几秒到几十秒。
@@ -76,7 +81,7 @@ python3 $S/video_to_sheet.py video.mp4 -o public/assets/characters/heroine_idle.
 **输出**：
 
 - **排版**：能排满就选不留空格子的列数。登记 asset pack 时总写 `endFrame = 帧数 − 1`，空格子不会被当成帧（否则人物每轮循环会消失一下）。
-- **循环**：首尾帧几乎一样时自动去掉尾帧（`loop_trimmed`）。
+- **循环**：首尾帧几乎一样时自动去掉重复的末帧（`loop_trimmed`）；这只是去重复，不会把任意视频变成无缝循环。预览至少连续播放三轮，检查接缝和异常停顿。
 - **脚底**：`feet_bottom` 应该只差 0–1 px。差得多说明模型挪动了人物，换一段视频。
 - **只出图**：不加 `--pack/--spec/--job` 时只出精灵图和预览，适合先预处理、再给用户挑。
 

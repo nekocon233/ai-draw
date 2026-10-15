@@ -78,6 +78,14 @@ def clear_credentials() -> None:
     (config_dir() / "credentials.json").unlink(missing_ok=True)
 
 
+def load_cache(name: str) -> dict:
+    return _read_json(cache_dir() / name)
+
+
+def save_cache(name: str, data: dict) -> None:
+    _write_private(cache_dir() / name, data)
+
+
 def load_state() -> dict:
     return _read_json(config_dir() / "state.json")
 

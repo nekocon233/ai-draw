@@ -39,3 +39,14 @@ test('a placeholder reply follows its user message and copies its parameters', (
   assert.deepEqual(withReplyPlaceholder(result, 's', 'm1-reply', 99).map(item => item.id), ['m1', 'm1-reply', 'm2']);
   assert.deepEqual(withReplyPlaceholder(history, 's', 'unknown-reply', 99).at(-1)?.timestamp, 99);
 });
+
+test('a task appending to a round with results gets one pending tile after them', () => {
+  const history = [message('m1', 1), message('m1-reply', 1, { images: ['a.mp4'] }), message('m2', 2)];
+  const result = withReplyPlaceholder(history, 's', 'm1-reply', 99);
+  assert.deepEqual(result.map(item => item.id), ['m1', 'm1-reply', 'm2']);
+  assert.deepEqual(result[1].images, ['a.mp4', { loading: true }]);
+  assert.deepEqual(history[1].images, ['a.mp4'], 'the input history is not changed');
+  assert.deepEqual(withReplyPlaceholder(result, 's', 'm1-reply', 99)[1].images, ['a.mp4', { loading: true }]);
+  const empty = [message('m1', 1), message('m1-reply', 1, { images: [] })];
+  assert.deepEqual(withReplyPlaceholder(empty, 's', 'm1-reply', 99)[1].images, [], 'an empty round keeps its own state');
+});

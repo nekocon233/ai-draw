@@ -1,6 +1,6 @@
 ---
 name: aidraw
-description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他项目生成、处理图片和动画素材，并在 ai-draw 网页里让用户预览、选用、写意见后再继续。覆盖文生图、参考图生图（可叠 LoRA）、GPT Image 编辑、首尾帧视频转序列帧、抠图、放大、把处理好的素材发回会话、按项目规格交付，以及接手用户在网页里的编辑（编辑帧、编辑）。用户说“用 ai-draw 出图”“AI 生图”“做立绘/道具/图标/可平铺背景”“做待机/动作动画”“序列帧”“换正式美术”“用 LoRA 画”“在 ai-draw 里挑图”时使用。"
+description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他项目生成、处理图片和动画素材，并在 ai-draw 网页里让用户预览、选用、写意见后再继续。覆盖文生图、参考图生图（可叠 LoRA）、GPT Image 编辑、首帧驱动的视频转序列帧、抠图、放大、把处理好的素材发回会话、按项目规格交付，以及接手用户在网页里的编辑（编辑帧、编辑）。用户说“用 ai-draw 出图”“AI 生图”“做立绘/道具/图标/可平铺背景”“做待机/动作动画”“序列帧”“换正式美术”“用 LoRA 画”“在 ai-draw 里挑图”时使用。"
 ---
 
 # ai-draw 生图工作流
@@ -9,7 +9,8 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 
 ## 1. 适用范围
 
-- 能做：Qwen-Image-2.1 文生图和参考图生图（可叠 LoRA）、GPT Image 编辑、MiniMax H3 首尾帧视频（`aidraw video`）及抽帧做序列帧、后端抠图（背景处理算法）和放大、本地后处理（`scripts/`）、把处理好的素材发回会话、开审核关卡等用户决定、接手用户在网页里的编辑。
+- 能做：Qwen-Image-2.1 文生图和参考图生图（可叠 LoRA）、GPT Image 编辑、MiniMax H3 视频（`aidraw video`）及抽帧做序列帧、后端抠图（背景处理算法）和放大、本地后处理（`scripts/`）、把处理好的素材发回会话、开审核关卡等用户决定、接手用户在网页里的编辑。
+- **循环动作默认只传首帧**：使用 `--first` 和 `--preset video_motion`，不传 `--last` 或 `--loop`，后处理时截取完整、首尾接得上的动作循环。尾帧约束容易让 H3 提前完成动作，短片后半段停在尾帧。只有用户明确需要指定两端的过渡时，才使用尾帧和 `video_transition`。具体见 [animation.md](references/animation.md)。
 - 暂不提供命令：H3 动作参考视频（`minimax_h3_ref`）。需要时可以先在网页里手动做，再用 `aidraw round get` 下载结果。
 - 不在本技能里做：修改或部署 ai-draw。部署会重启后端、中断正在跑的生成，必须先问用户。
 
@@ -37,7 +38,7 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 
 1. 读规格，建会话：`aidraw session new --title "Agent · classroom 主角立绘"`，把返回的 `link` 发给用户。
 2. **风格定调**（项目还没有 `art/style.md` 时才做）：同一描述分别用不挂 LoRA 和两三个候选 LoRA 各出 2 张，开关卡请用户选，把结论（LoRA、强度、风格描述、禁用词）写进 `art/style.md`。
-3. **出候选**：`aidraw gen`，每批不超过 4 张。参考图、LoRA、种子见 [workflows-loras.md](references/workflows-loras.md)，具体素材看对应配方。
+3. **出候选**：`aidraw gen`，每批不超过 4 张。参考图、LoRA、种子见 [workflows-loras.md](references/workflows-loras.md)，具体素材看对应配方。同一请求只换种子再出时，结果追加到上一轮、在同一个气泡里。
 4. **自查**：结果下载到本地后，先用 `scripts/sprite_tools.py contact` 拼成编号图自己看一遍。剔掉朝向错、缺手脚、多余文字、背景不干净的；全部不合格就调整后重出，不要把废片交给用户挑。
 5. **开关卡**：结果一出来就要开。在 `aidraw gen` / `aidraw video` 上加 `--gate "问题"`，或者在同一条后台命令里紧接着运行 `aidraw gate open`，不要等自己被唤醒后再开，也不要先做完后处理再让用户挑。告诉用户链接、要选几个、看什么。等待方式见 [review-gates.md](references/review-gates.md)。
 6. **按结果走**：`approve` 就用选中的图继续；`redo` 读 `note` 调整后重来；关卡被撤销或用户在对话里改了主意，以对话为准。

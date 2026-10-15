@@ -36,8 +36,9 @@ aidraw gen --session S --prompt "…" [--ref 文件或/uploads地址 ...] [--lor
 - `--ref` 的顺序就是提示词里 `<image1>`、`<image2>`（或 `@图片1`）的顺序。本地文件会先上传；带透明通道的默认铺白底（`--flatten '#ffffff'`），因为 ComfyUI 会丢掉 alpha；`--keep-alpha` 关闭铺底。
 - `--size` 给了就按这个尺寸出图；Qwen 编辑不给尺寸时，输出跟参考图 1 一样大。
 - `--seed N`：第 n 张用 N+n−1。同一种子加同一参数可以复现结果。
+- **同一请求再出会并进上一轮**：和会话里紧挨着的上一轮请求完全相同（只有固定种子不同）时，结果追加到那一轮，网页里在同一个气泡，和用户在网页里连点两次一样。中间隔着关卡、发帖或别的轮次就新开一轮。同一个本地参考图文件只上传一次，地址失效才重新上传，所以重复的请求能对得上。
 - `--prompt-file` 适合长提示词；`--preset` 的 ID 从 `aidraw presets` 查。
-- 流程：本地校验 → 上传参考图 → 等生成槽空闲（并在上一个任务结束后让出 20 秒）→ 记录用户消息 → 提交 → 轮询 → 下载结果。
+- 流程：本地校验 → 上传参考图 → 等生成槽空闲（并在上一个任务结束后让出 20 秒）→ 记录用户消息（或认出是上一轮的重复、追加进去）→ 提交 → 轮询 → 下载结果。
 
 成功输出：
 
@@ -50,16 +51,20 @@ aidraw gen --session S --prompt "…" [--ref 文件或/uploads地址 ...] [--lor
 
 同目录还会写一个 `<消息前8位>.json` 旁注文件，记录请求参数和结果。
 
+追加进上一轮时，输出多一个 `"appended": true`，`message_id` / `reply_id` 是那一轮的；`images` 只列这次的结果，`index` 是在这一轮里的序号（文件名同样带这个序号，不会覆盖之前的结果）；旁注文件叫 `<消息前8位>_<任务前8位>.json`。
+
 超时（退出码 2）时输出带 `resume`，例如 `aidraw wait <task_id> --session S --message msg-…-reply`，照着运行就能接着等并下载。
 
-## 视频（MiniMax H3 首尾帧）
+## 视频（MiniMax H3）
 
 ```bash
-aidraw video --session S --first base.png [--last end.png | --loop] [--duration 4|5|6|8|10|12|15] [--seed N] \
-  [--preset video_transition] --prompt-file prompt.txt [--out DIR] [--job … --step …] [--timeout 2700]
+aidraw video --session S --first base.png --preset video_motion [--duration 4|5|6|8|10|12|15] [--seed N] \
+  --prompt-file prompt.txt [--out DIR] [--job … --step …] [--timeout 2700]
 ```
 
-- `--loop` 把首帧也当作尾帧，生成首尾相接、能循环的视频；透明首尾帧默认铺白底。
+- **待机、步行等循环素材默认只放首帧**：不传 `--last` 或 `--loop`，让模型持续做动作，再从成片中截取完整循环。尾帧约束容易导致提前完成动作、后半段固定不动。
+- 用户明确需要指定首尾的过渡时，才用 `--last end.png --preset video_transition`。`--loop` 等价于把首帧也作为尾帧参考，不代表生成视频天然无缝；它不是循环素材的默认选项。透明参考图默认铺白底。
+- H3 每轮只出一段。同一请求连着再出（只换 `--seed`）会追加到上一轮，几段视频在同一个气泡里。
 - 输出 24 fps 的 mp4，下载到 `--out`；每段通常 5–15 分钟，超时用输出里的 `resume` 续等。
 - 抽帧和做精灵图见 animation.md。
 

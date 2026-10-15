@@ -44,6 +44,8 @@ aidraw auth revoke                # 吊销
 
 生成本身仍然走 `/api/chat/save`（先存用户消息）和 `/api/media/generate`，与网页完全相同；命令行会先等生成槽空闲，上一个任务结束后再让出 20 秒，方便用户手动插队。
 
+同一请求连着再提交时，命令行和网页一样追加到上一轮（`append_results`）：只比较紧挨着的上一轮（`GET /api/chat/history?limit=2`），比较的字段同 `frontend/src/utils/repeatedGeneration.ts`，但不比较固定种子（`qwen_fixed_seed`、`h3_fixed_seed`），因为每个结果自己记着种子。本地参考图按内容只上传一次（缓存在 `~/.cache/aidraw/uploads.json`，地址失效才重传），重复的请求才对得上。追加时网页会在这一轮已有的结果后面加一个占位格（`withReplyPlaceholder`）。
+
 ## 事件与网页行为
 
 - `agent_session`（`session_created` / `round_posted`）：刷新会话列表；发到当前会话时，重新拉取最新 50 条消息，已加载的更早记录保留。
