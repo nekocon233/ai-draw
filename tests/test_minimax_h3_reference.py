@@ -122,18 +122,18 @@ class MiniMaxReferenceTests(unittest.IsolatedAsyncioTestCase):
         # 规则段照常发送，只有动作描述那一段为空。
         self.assertIn('approved motion description:\n\n', options['prompt_text'])
 
-    async def test_the_face_workflow_analyses_in_face_mode_without_any_preset(self):
-        provider = MiniMaxH3ReferenceProvider(SimpleNamespace(), default_mode="face")
+    async def test_the_person_replacement_workflow_analyses_in_shot_mode_without_any_preset(self):
+        provider = MiniMaxH3ReferenceProvider(SimpleNamespace(), default_mode="shot")
         params = GenerationParameters('雨夜', workflow='minimax_h3_face', reference_image='character',
                                       motion_reference_video=VIDEO)
         progress = Mock()
         with patch('server.generation.minimax_h3_ref.analyze_motion_video',
-                   return_value={'version': 1, 'input_hash': 'a' * 64, 'prompt': '换脸'}) as analyze:
+                   return_value={'version': 1, 'input_hash': 'a' * 64, 'prompt': '换人'}) as analyze:
             prepared = await provider.enrich(ProviderInput(params, ('character', None, None), motion_video='/data/clip.mp4'), progress)
-        self.assertEqual(analyze.call_args.args[3], motion_prompt_input_hash('character', [], '雨夜', 'face', video=VIDEO))
-        self.assertEqual(analyze.call_args.args[4], 'face')
-        progress.assert_called_once_with('正在分析参考视频的镜头、服装与动作...')
-        self.assertEqual(prepared.motion_prompt['prompt'], '换脸')
+        self.assertEqual(analyze.call_args.args[3], motion_prompt_input_hash('character', [], '雨夜', 'shot', video=VIDEO))
+        self.assertEqual(analyze.call_args.args[4], 'shot')
+        progress.assert_called_once_with('正在分析参考视频的镜头与动作...')
+        self.assertEqual(prepared.motion_prompt['prompt'], '换人')
 
     async def test_other_analysis_failures_still_stop_before_sampling(self):
         params = GenerationParameters('雨夜', workflow='minimax_h3_ref', reference_image='character', motion_reference_video=VIDEO)

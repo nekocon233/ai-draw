@@ -54,14 +54,17 @@ test('motion videos use their own policies and keys that mirror the backend hash
   assert.equal(resolveMotionPrompt(null, videoHistory, motionPromptSource('character', [], '轻快')), null);
 });
 
-test('the standalone face workflow pins face mode without a preset', () => {
+test('the standalone person-replacement workflow pins shot mode without a preset', () => {
   const clip = `/uploads/reference/7/${'a'.repeat(32)}.mp4`;
-  const workflow = {key:'minimax_h3_face',label:'MiniMax H3 · 换脸',description:'',requires_image:true,
-    supports_motion_reference:true,motion_reference_mode:'face' as const,parameters:[]};
+  const workflow = {key:'minimax_h3_face',label:'MiniMax H3 · 换人',description:'',requires_image:true,
+    supports_motion_reference:true,motion_reference_mode:'shot' as const,parameters:[]};
   const source = motionPromptSource('character', [], '雨夜', null, clip, workflow.motion_reference_mode);
-  assert.equal(source.motion_reference_mode, 'face');
-  assert.equal(motionPromptSourceKey(source), JSON.stringify([1, VIDEO_FACE_MOTION_PROMPT_POLICY, 'character', clip, '雨夜']));
-  // 换脸模式由工作流固定，所以动作参考那边的 pose/shot 分析不会串到这条工作流上。
+  assert.equal(source.motion_reference_mode, 'shot');
+  assert.equal(motionPromptSourceKey(source), JSON.stringify([1, VIDEO_SHOT_MOTION_PROMPT_POLICY, 'character', clip, '雨夜']));
+  // 换人沿用 shot 策略，与「参考镜头动作」预设共享同一套分析指纹（输入相同即复用）。
+  const preset = {id:'video_reference_shot',title:'参考镜头动作',description:'',prompt:'',hint:'',images:[],motion_reference_mode:'shot' as const};
+  assert.equal(motionPromptSourceKey(motionPromptSource('character', [], '雨夜', preset, clip)), motionPromptSourceKey(source));
+  // 固定模式的 pose 分析不会串到这条工作流上。
   assert.equal(motionPromptSourceKey(motionPromptSource('character', [], '雨夜', null, clip)),
     JSON.stringify([1, VIDEO_MOTION_PROMPT_POLICY, 'character', clip, '雨夜']));
 });

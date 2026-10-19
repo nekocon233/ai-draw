@@ -126,8 +126,8 @@ def build_provider_registry(comfyui) -> ProviderRegistry:
         interrupt=comfyui.interrupt, prepare=prepare, validate=validate_motion_references,
         enrich=motion_provider.enrich, seed_option=H3_SEED_OPTION,
     )
-    # 换脸是独立工作流：参考模式固定为 face，不依赖任何预设快照。
-    face_provider = MiniMaxH3ReferenceProvider(comfyui, default_mode="face")
+    # 换人是独立工作流：参考模式固定为 shot（整个人替换），不依赖任何预设快照。
+    face_provider = MiniMaxH3ReferenceProvider(comfyui, default_mode="shot")
     registry.register(
         "comfyui_minimax_h3_face", face_provider,
         interrupt=comfyui.interrupt, prepare=prepare, validate=validate_motion_references,

@@ -474,7 +474,12 @@ class LocalComfyUIRequest(ComfyUIRequestInterface):
             if reference_images:
                 missing_titles.extend(f"h3_reference_{index}" for index in range(len(reference_images) + 1, 10))
             if not reference_video:
-                missing_titles.extend(("h3_reference_video_1", "h3_reference_video_frames_1"))
+                missing_titles.extend((
+                    "h3_reference_video_1", "h3_reference_video_frames_1",
+                    # 换人工作流的 SAM3 预处理只服务于参考视频；不在图里时按标题删除是无操作
+                    "h3_sam3_model", "h3_sam3_text", "h3_sam3_detect",
+                    "h3_sam3_invert", "h3_sam3_composite", "h3_sam3_motion",
+                ))
             if not start_image_base64:
                 missing_titles.append("main_image_start")
             if not end_image_base64:

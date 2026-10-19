@@ -1,5 +1,6 @@
 """Video preset routing, keyframe requirements and native provider payloads."""
 import base64
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -11,6 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import yaml
 from PIL import Image
 
+from comfyui.structures.minimax_h3 import remove_nodes_by_title
 from server.api.prompt import PROMPT_PRESETS
 from server.generation.contracts import GenerationParameters, TaskContext
 from server.generation.engine import GenerationEngine
@@ -143,12 +145,12 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('动作视频则按视频中的动作、节奏和时间完成', sent['prompt_text'])
         self.assertEqual(params.source_updates()['motion_reference_video'], video)
 
-    async def test_face_swap_is_a_standalone_workflow_with_a_pinned_mode(self):
-        # 换脸是独立工作流：无预设、无默认预设，模式由工作流元数据固定，但归入「图生视频」分类，
-        # 于是能在生成设置的「生成方式」下拉里与其它 H3 方式并列。
+    async def test_person_replacement_is_a_standalone_workflow_with_a_pinned_mode(self):
+        # 换人是独立工作流：无预设、无默认预设，模式由工作流元数据固定为 shot（整个人替换），
+        # 归入「图生视频」分类，于是能在生成设置的「生成方式」下拉里与其它 H3 方式并列。
         face = self.catalog.describe('minimax_h3_face')
         self.assertEqual((face['motion_reference_mode'], face['default_prompt_preset_id'], face['category'], face['method']),
-                         ('face', None, '图生视频', 'MiniMax H3 · 换脸'))
+                         ('shot', None, '图生视频', 'MiniMax H3 · 换人'))
         self.assertNotIn('video_reference_face', self.presets)
         self.assertEqual(self.catalog.describe('minimax_h3_ref')['motion_reference_mode'], None)
         with self.assertRaisesRegex(ValueError, '姿势参考图'):
@@ -161,12 +163,45 @@ class VideoPresetTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.generate(params, TaskContext(7, 'task', 'minimax_h3_face'), Mock(), lambda: None)
         sent = self.comfyui.generate_minimax_h3_ref.await_args.kwargs
         self.assertEqual(sent['canvas_image_index'], 1)
-        for text in ('only defines the head of <Subject 1>', 'never change their outfit', 'attribute_transfer',
-                     'replace only the face and hair', '抬起右手'):
+        # SHOT 规则：主体只提供外观，服装与场景跟随参考，整个人替换而不是只换脸。
+        for text in ('only defines the appearance', 'Replace the person or main element', '抬起右手'):
             self.assertIn(text, sent['prompt_text'])
+        self.assertNotIn('only defines the head of <Subject 1>', sent['prompt_text'])
         self.assertNotIn('sole visual baseline', sent['prompt_text'])
-        # The whole-person preset still swaps clothing too.
-        self.assertIn('脸、发型和服装都换', self.presets['video_reference_shot']['description'])
+
+    def test_the_person_replacement_graph_adds_the_sam3_branch_and_the_reference_graph_does_not(self):
+        root = Path(__file__).resolve().parents[1]
+        files = yaml.safe_load((root / 'configs/app_config.yaml').read_text())['workflow_defaults']['workflow_files']
+        graphs = {}
+        for key in ('minimax_h3_face', 'minimax_h3_ref'):
+            graph = json.loads((root / 'configs' / 'workflows' / files[key]).read_text(encoding='utf-8'))
+            graphs[key] = {
+                node['_meta']['title']: node for node in graph.values() if node['_meta']['title'].startswith('h3_sam3')
+            }
+            if key == 'minimax_h3_face':
+                # The Ref2VA motion reference is the SAM3-highlighted, downscaled clip, not the raw frames.
+                self.assertEqual(graph['7']['inputs']['ref_videos.ref_video_0'], ['205', 0])
+                self.assertEqual(graph['202']['class_type'], 'SAM3_Detect')
+                self.assertEqual(graph['202']['inputs']['image'], ['111', 0])
+                self.assertEqual(graph['204']['inputs']['mask'], ['202', 0])
+                self.assertEqual(graph['205']['inputs']['image'], ['204', 0])
+                self.assertEqual(graph['200']['inputs']['ckpt_name'], 'sam3.1_multiplex_fp16.safetensors')
+            else:
+                self.assertEqual(graph['7']['inputs']['ref_videos.ref_video_0'], ['111', 0])
+        self.assertEqual(len(graphs['minimax_h3_face']), 6)
+        self.assertEqual(graphs['minimax_h3_ref'], {})
+
+    async def test_dropping_the_motion_video_removes_the_sam3_branch_with_it(self):
+        root = Path(__file__).resolve().parents[1]
+        files = yaml.safe_load((root / 'configs/app_config.yaml').read_text())['workflow_defaults']['workflow_files']
+        graph = json.loads((root / 'configs' / 'workflows' / files['minimax_h3_face']).read_text(encoding='utf-8'))
+        remove_nodes_by_title(graph, [
+            'h3_reference_video_1', 'h3_reference_video_frames_1',
+            'h3_sam3_model', 'h3_sam3_text', 'h3_sam3_detect',
+            'h3_sam3_invert', 'h3_sam3_composite', 'h3_sam3_motion',
+        ])
+        self.assertFalse([title for node in graph.values() if (title := node['_meta']['title']).startswith('h3_sam3')])
+        self.assertNotIn('ref_videos.ref_video_0', graph['7']['inputs'])
 
     def test_old_fixed_camera_snapshot_without_motion_requirement_remains_valid(self):
         legacy = {'id':'video_fixed_camera','title':'固定镜头动作','output_type':'video',
