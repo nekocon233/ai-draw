@@ -1,0 +1,52 @@
+{
+  "name": "@nekocon/aidraw-openchamber",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "在 OpenChamber 里挑 ai-draw 的审核关卡，看生成进度和本项目的素材任务。",
+  "scripts": {
+    "build": "openchamber-guest-bundle panel/main.ts panel/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test tests/"
+  },
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.3.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "aidraw",
+        "name": "ai-draw",
+        "icon": "palette",
+        "entry": "panel/index.html"
+      },
+      "statusSection": {
+        "entry": "panel/index.html",
+        "title": "ai-draw 待选",
+        "height": 64,
+        "requiresProject": true
+      },
+      "capabilities": ["files"],
+      "origins": ["https://aidraw.nekocon.cn"],
+      "integration": {
+        "name": "ai-draw",
+        "description": "用 ai-draw 的个人访问令牌（aidp_ 开头）读取审核关卡、提交选择。令牌只保存在 OpenChamber 服务器上，扩展页面拿不到。",
+        "token": {
+          "apiOrigin": "https://aidraw.nekocon.cn",
+          "account": {
+            "path": "/api/agent/me",
+            "name": "username"
+          },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@openchamber/sdk": "file:/opt/openchamber/packages/sdk",
+    "@types/bun": "^1.3.0",
+    "happy-dom": "^18.0.1",
+    "typescript": "^5.9.3"
+  }
+}

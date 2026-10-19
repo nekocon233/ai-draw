@@ -13,6 +13,7 @@
 | 网页 | `frontend/src/features/agent/` | 审核条、「选用」按钮、会话同步、`?session=` 深链接 |
 | 命令行 | `tools/aidraw/`，安装为 `/usr/local/bin/aidraw` | 给 agent 用，stdout 输出 JSON |
 | 技能 | `skills/aidraw/` | 工作流、配方和本地后处理脚本，软链到 `~/.agents/skills` 和 `~/.claude/skills` |
+| OpenChamber 扩展 | `integrations/openchamber/` | 在 OpenChamber 里挑关卡、看生成进度和项目的素材任务；不进镜像，不用部署 |
 
 ## 认证
 
@@ -53,12 +54,28 @@ aidraw auth revoke                # 吊销
 - 同账号在别处发起的生成（agent 或另一个标签页）：页面空闲时实时接管，显示进度和结果，也可以停止；结束后同步当前会话。
 - `https://aidraw.nekocon.cn/?session=<id>`：登录后直接打开该会话。
 
+## OpenChamber 扩展
+
+在 OpenChamber 里完成挑选，不用切到网页。安装、令牌和开发方法见 `integrations/openchamber/README.md`。
+
+- **两处入口**：
+  - 对话 Work Status 里的「ai-draw 待选」区块：紧凑版，显示本项目最新的一个关卡。
+  - 侧栏的 ai-draw 面板：完整版，显示所有待选关卡、生成进度、本项目的素材任务。
+- **调用方式**：通过 OpenChamber 的令牌集成代调本文的接口。
+  - 用一个单独的令牌（`tokens create --name openchamber`），令牌只存在 OpenChamber 服务器上。
+  - 用到的接口：`GET /api/agent/gates?status=open`、`GET /api/chat/history`、`GET /api/chat/sessions/{id}/rounds/{reply_id}`、`PUT /gates/{id}/picks`、`POST /gates/{id}/submit`、`GET /api/agent/slot`、`GET /api/chat/sessions`。
+  - 图片和视频直接从公开的 `/uploads/...` 加载。
+- **和网页一样提交**：提交的就是网页「选用」用的那份数据。agent 的 `aidraw gate wait` 照常收到，问答气泡和“Agent 已收到”照常出现。
+- **哪些归属本项目**：读项目里 `art/jobs/*.jsonl` 的 `session_id`。
+- **接口改动要同步扩展**：改了上面这些接口的返回字段，要同步改 `integrations/openchamber/panel/api.ts`，并跑 `bun test tests/` 和 `bun tests/live.e2e.ts`。
+
 ## 命令行与技能的工作流
 
 具体步骤以 `skills/aidraw/SKILL.md` 为准，这里只记关键约定。这些约定都是用户定的。
 
 - **一个任务一个会话**：会话标题用 `Agent · <项目> <任务>`。过程记在项目的 `art/jobs/<job>.jsonl` 里，换了 agent 会话也能接着做（`aidraw job show`）。
 - **结果一出来就开关卡**：`aidraw gen` 和 `aidraw video` 加 `--gate "问题"`，生成一完成就开关卡。不要等 agent 被唤醒再开，也不要先做完后处理再让用户挑。
+- **选图由用户决定**：自查说明技术问题和审美顾虑，不因 agent 对比例、画风等的主观判断撤卡或隐藏已展示候选。用户点名旧图也要照常记录采用；具体图片是后续画风与比例的基准。撤卡与恢复旧选择的规则见 `skills/aidraw/references/review-gates.md`。
 - **挑完自动交付**：把下面几步串成一条后台命令。用户提交后，agent 不需要再介入。
   1. 等关卡；
   2. 后处理；
@@ -75,7 +92,6 @@ aidraw auth revoke                # 吊销
     - 游戏截图、`mock` 光照预览；
     - 抠图对比图、检查结果。
   - `aidraw post` 必须带素材。发错了就用 `aidraw round delete` 删掉自己那条，它只能删任务日志里记为 agent 发帖的轮次。
-- **选图由用户决定**：自查说明技术问题和审美顾虑，不因 agent 对比例、画风等的主观判断撤卡或隐藏已展示候选。用户点名旧图也要照常记录采用；具体图片是后续画风与比例的基准。撤卡与恢复旧选择的规则见 `skills/aidraw/references/review-gates.md`。
 - **会话里的问答气泡**：关卡的问答作为对话留在会话里，由后端在开关卡、提交、撤销时自动生成。
   - **提问**：开关卡时，左侧出现 Agent 的提问，注明要选几个；结束后标成“已回答”或“已撤销：原因”。
   - **回答**：用户提交时，右侧出现他的回答：选了哪些（带缩略图）、“满意，直接提交”，或“都不满意，重来：意见”。
