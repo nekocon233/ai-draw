@@ -19,7 +19,7 @@
    ```
 
    如果 Qwen 改不动视角，可以先用 `--workflow gpt` 把原型转成侧面，再把 GPT 的结果作为参考图 1，回到 Qwen 加 LoRA 统一画风。
-2. **自查**：`sprite_tools.py contact art/work/heroine/candidates/*.png -o art/work/heroine/contact.png`，自己看过之后剔除下列废片：朝向错、缺手缺脚、比例怪、服装和原型不一致、有文字、背景不干净。
+2. **自查**：`sprite_tools.py contact art/work/heroine/candidates/*.png -o art/work/heroine/contact.png`。指出朝向、裁切、肢体、服装、文字与背景上的具体问题，区分可验证错误与审美偏好。比例、画风和神态的取舍留给用户；不以“比例怪”等主观结论撤销选图或隐藏已展示候选，见 [review-gates.md](review-gates.md)。
 3. **关卡（选 1）**：问题写清楚“朝右、全身、和原型一致”，告诉用户可以在同一会话里自己改提示词重画。
 4. **细化**（可选）：在选中的图上，用同种子小改提示词；或者把它作为参考图 1 做编辑（修手、修脸、统一线宽）。
 5. **后处理**（见 alpha-and-cleanup.md）：`cutout_compare.py`（全部算法各抠一次，自己看对比图挑最好的；结果已经做过 clean-alpha 和 defringe）→ `fit --height <规格高度> --side-pad 2`。

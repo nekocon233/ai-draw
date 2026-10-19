@@ -39,9 +39,9 @@ description: "用本机 ai-draw（https://aidraw.nekocon.cn）为游戏或其他
 1. 读规格，建会话：`aidraw session new --title "Agent · classroom 主角立绘"`，把返回的 `link` 发给用户。
 2. **风格定调**（项目还没有 `art/style.md` 时才做）：同一描述分别用不挂 LoRA 和两三个候选 LoRA 各出 2 张，开关卡请用户选，把结论（LoRA、强度、风格描述、禁用词）写进 `art/style.md`。
 3. **出候选**：`aidraw gen`，每批不超过 4 张。参考图、LoRA、种子见 [workflows-loras.md](references/workflows-loras.md)，具体素材看对应配方。同一请求只换种子再出时，结果追加到上一轮、在同一个气泡里。
-4. **自查**：结果下载到本地后，先用 `scripts/sprite_tools.py contact` 拼成编号图自己看一遍。剔掉朝向错、缺手脚、多余文字、背景不干净的；全部不合格就调整后重出，不要把废片交给用户挑。
+4. **自查并说明问题**：结果下载到本地后，用 `scripts/sprite_tools.py contact` 拼成编号图自己看一遍。区分文件损坏、主体被裁切等可验证问题，与比例、画风、线条、表情等审美判断。需要用户选图时，后者只给建议，不能替用户判废；已展示的候选保留可选，不因自查撤卡或隐藏结果。具体边界见 [review-gates.md](references/review-gates.md)。
 5. **开关卡**：结果一出来就要开。在 `aidraw gen` / `aidraw video` 上加 `--gate "问题"`，或者在同一条后台命令里紧接着运行 `aidraw gate open`，不要等自己被唤醒后再开，也不要先做完后处理再让用户挑。告诉用户链接、要选几个、看什么。等待方式见 [review-gates.md](references/review-gates.md)。
-6. **按结果走**：`approve` 就用选中的图继续；`redo` 读 `note` 调整后重来；关卡被撤销或用户在对话里改了主意，以对话为准。
+6. **按结果走**：`approve` 就用选中的图继续；`redo` 读 `note` 调整后重来；关卡被撤销或用户在对话里改了主意，以对话为准。用户明确指定的图片是后续画风与比例的视觉基准；不要为迎合先前的抽象描述擅自重绘替换它，实际交付限制另行说明。
 7. **后处理**：
    1. 抠图只用后端的背景处理算法：先用 `scripts/cutout_compare.py` 让全部算法各抠一次，自己看对比图，挑出最好的一种。挑选标准见 [alpha-and-cleanup.md](references/alpha-and-cleanup.md)。对比图留在本地，选了几号、为什么在对话里说。
    2. 需要时做 `rectify`，再缩放到规格尺寸。棋盘格、深色底和 `mock` 游戏光照预览只用来自查。
@@ -127,6 +127,7 @@ ai-draw 会话是用户挑图和编辑的地方，只放四类内容：
 - 用户在对话里直接回答（例如“选 3，脸再圆一点”）也算数：用 `aidraw gate submit` 原样记录他说的选择，或者用 `aidraw gate cancel --reason` 撤销关卡后按对话继续。不要替用户做没说过的决定。
 - 关卡上的“通过”只代表这一步的选择，不等于项目验收。项目自己的验收和提交规则照旧。
 
+- 用户可以选回旧候选，包括已撤销关卡中的图；按当前选择恢复处理并更新规格，不能用 agent 先前的淘汰结论否定它。除非用户已授权代理选图，审美取舍由用户决定。
 ## 8. 共享生成槽
 
 - 整台 ai-draw 同一时间只能跑一个生成任务，用户手动生成也用这一个槽。`aidraw gen` 会先排队，每两个任务之间让出 20 秒，方便用户插队。
